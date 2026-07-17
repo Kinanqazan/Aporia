@@ -17,6 +17,28 @@
   --sidebar-width: 240px;
   --transition-speed: 0.2s;
   --header-height: 45px;
+
+  /* Notion Text Colors (Light Mode) */
+  --color-gray: #787774;
+  --color-brown: #976d57;
+  --color-orange: #cc5d2c;
+  --color-yellow: #a97e13;
+  --color-green: #37835b;
+  --color-blue: #1c73a6;
+  --color-purple: #8f48ca;
+  --color-pink: #c7247a;
+  --color-red: #cc3e39;
+
+  /* Notion Highlights (Light Mode) */
+  --bg-gray: #f1f1ef;
+  --bg-brown: #f4eeee;
+  --bg-orange: #fbefe8;
+  --bg-yellow: #fbf3db;
+  --bg-green: #edf3ec;
+  --bg-blue: #e8f4fc;
+  --bg-purple: #f5f0fa;
+  --bg-pink: #f9f0f4;
+  --bg-red: #fdebec;
 }
 
 :root.dark {
@@ -31,6 +53,28 @@
   --active-sidebar: #373737;
   --accent-color: #2f81f7;
   --selection-bg: rgba(47, 129, 247, 0.25);
+
+  /* Notion Text Colors (Dark Mode) */
+  --color-gray: #9b9a97;
+  --color-brown: #ba8c74;
+  --color-orange: #e07f54;
+  --color-yellow: #cda846;
+  --color-green: #529e72;
+  --color-blue: #5fa9d9;
+  --color-purple: #a873d9;
+  --color-pink: #d15694;
+  --color-red: #df6b66;
+
+  /* Notion Highlights (Dark Mode) */
+  --bg-gray: #2d2d2d;
+  --bg-brown: #3f322b;
+  --bg-orange: #5a3525;
+  --bg-yellow: #56461a;
+  --bg-green: #243d30;
+  --bg-blue: #143d52;
+  --bg-purple: #3f224f;
+  --bg-pink: #4f2237;
+  --bg-red: #522525;
 }
 
 * {
@@ -500,6 +544,98 @@ input, textarea {
 	color: var(--text-main);
 }
 
+/* Collapsible toggle headings (Tiptap Details). */
+.ProseMirror [data-type='details'] {
+	position: relative;
+	margin: 0.6em 0;
+}
+
+.ProseMirror [data-type='details'] > button {
+	position: absolute;
+	top: 5px;
+	left: -24px;
+	width: 18px;
+	height: 18px;
+	border: 0;
+	border-radius: 3px;
+	background: transparent;
+	cursor: pointer;
+	transition: transform var(--transition-speed), background var(--transition-speed);
+}
+
+.ProseMirror [data-type='details'] > button::before {
+	content: '';
+	display: block;
+	width: 0;
+	height: 0;
+	margin: 0 auto;
+	border-top: 5px solid transparent;
+	border-bottom: 5px solid transparent;
+	border-left: 6px solid var(--text-muted);
+}
+
+.ProseMirror [data-type='details'].is-open > button {
+	transform: rotate(90deg);
+}
+
+.ProseMirror [data-type='details'] > button:hover {
+	background: var(--hover-sidebar);
+}
+
+.ProseMirror [data-type='details'] summary {
+	display: block;
+	list-style: none;
+	cursor: text;
+	color: var(--text-main);
+	margin: 0;
+}
+
+.ProseMirror [data-type='details'] summary::-webkit-details-marker {
+	display: none;
+}
+
+.ProseMirror [data-type='details'][data-heading-level='1'] summary {
+	font-size: 1.8em;
+	font-weight: 600;
+	line-height: 1.35;
+}
+
+.ProseMirror [data-type='details'][data-heading-level='1'] > button {
+	top: calc((2.43em - 18px) / 2);
+}
+
+.ProseMirror [data-type='details'][data-heading-level='2'] summary {
+	font-size: 1.4em;
+	font-weight: 600;
+	line-height: 1.4;
+}
+
+.ProseMirror [data-type='details'][data-heading-level='2'] > button {
+	top: calc((1.96em - 18px) / 2);
+}
+
+.ProseMirror [data-type='details'][data-heading-level='3'] summary {
+	font-size: 1.2em;
+	font-weight: 600;
+	line-height: 1.5;
+}
+
+.ProseMirror [data-type='details'][data-heading-level='3'] > button {
+	top: calc((1.8em - 18px) / 2);
+}
+
+.ProseMirror [data-type='detailsContent'] {
+	margin-left: 8px;
+	padding-top: 0.35em;
+}
+
+/* Keep a quote's rule close to the heading, while its text aligns with the
+   other indented toggle content. */
+.ProseMirror [data-type='detailsContent'] > blockquote {
+	margin-left: 0;
+	padding-left: 14px;
+}
+
 /* Lists */
 .ProseMirror ul, .ProseMirror ol {
 	padding-left: 24px;
@@ -587,4 +723,123 @@ input, textarea {
 	.column-layout > .column {
 		width: 100% !important;
 	}
+}
+
+/* ==========================================================================
+   TASK LIST (CHECKLIST) STYLING
+   ========================================================================== */
+.ProseMirror ul[data-type="taskList"] {
+	list-style: none;
+	padding: 0;
+	margin: 8px 0;
+}
+
+.ProseMirror ul[data-type="taskList"] li {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	margin-bottom: 6px;
+}
+
+.ProseMirror ul[data-type="taskList"] label {
+	user-select: none;
+	margin-top: 3px;
+	display: flex;
+	align-items: center;
+}
+
+.ProseMirror ul[data-type="taskList"] input[type="checkbox"] {
+	cursor: pointer;
+	appearance: none;
+	background-color: transparent;
+	margin: 0;
+	font: inherit;
+	color: var(--accent-color);
+	width: 16px;
+	height: 16px;
+	border: 1.5px solid var(--text-muted);
+	border-radius: 3px;
+	display: grid;
+	place-content: center;
+	transition: background-color var(--transition-speed), border-color var(--transition-speed);
+}
+
+.ProseMirror ul[data-type="taskList"] input[type="checkbox"]::before {
+	content: "";
+	width: 10px;
+	height: 10px;
+	transform: scale(0);
+	transition: 100ms transform ease-in-out;
+	background-color: white;
+	clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+
+.ProseMirror ul[data-type="taskList"] input[type="checkbox"]:checked {
+	background-color: var(--accent-color);
+	border-color: var(--accent-color);
+}
+
+.ProseMirror ul[data-type="taskList"] input[type="checkbox"]:checked::before {
+	transform: scale(1);
+}
+
+.ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
+	text-decoration: line-through;
+	color: var(--text-muted);
+}
+
+/* ==========================================================================
+   TABLE SYSTEM STYLING
+   ========================================================================== */
+.ProseMirror table {
+	border-collapse: collapse;
+	table-layout: fixed;
+	width: 100%;
+	margin: 16px 0;
+	overflow: hidden;
+}
+
+.ProseMirror td, .ProseMirror th {
+	min-width: 1em;
+	border: 1px solid var(--border-color);
+	padding: 8px 12px;
+	vertical-align: top;
+	box-sizing: border-box;
+	position: relative;
+}
+
+.ProseMirror th {
+	font-weight: bold;
+	text-align: left;
+	background-color: var(--hover-sidebar);
+}
+
+.ProseMirror .selectedCell:after {
+	z-index: 2;
+	position: absolute;
+	content: "";
+	left: 0; right: 0; top: 0; bottom: 0;
+	background: rgba(35, 131, 226, 0.08);
+	pointer-events: none;
+}
+
+.ProseMirror .column-resize-handle {
+	position: absolute;
+	right: -2px;
+	top: 0;
+	bottom: -2px;
+	width: 4px;
+	background-color: var(--accent-color);
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity var(--transition-speed);
+}
+
+.ProseMirror th:hover .column-resize-handle,
+.ProseMirror td:hover .column-resize-handle {
+	opacity: 0.5;
+}
+
+.tableWrapper {
+	overflow-x: auto;
 }

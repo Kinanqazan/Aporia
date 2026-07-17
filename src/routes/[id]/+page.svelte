@@ -5,7 +5,25 @@
 	import StarterKit from '@tiptap/starter-kit';
 	import { ColumnLayout } from '$lib/editor/extensions/ColumnLayout';
 	import { Column } from '$lib/editor/extensions/Column';
-	import { Cloud, CloudLightning, Plus, GripVertical, Trash2, Copy, Heading1, Heading2, Heading3, Type, Quote, Code } from 'lucide-svelte';
+	import { Commands } from '$lib/editor/extensions/Commands';
+	import { TextStyle } from '@tiptap/extension-text-style';
+	import { Color } from '@tiptap/extension-color';
+	import { Highlight } from '@tiptap/extension-highlight';
+	import Details, { DetailsContent, DetailsSummary } from '@tiptap/extension-details';
+	import { BubbleMenu } from '@tiptap/extension-bubble-menu';
+	import { Link as TiptapLink } from '@tiptap/extension-link';
+	import { TaskList } from '@tiptap/extension-task-list';
+	import { TaskItem } from '@tiptap/extension-task-item';
+	import { Table as TiptapTable } from '@tiptap/extension-table';
+	import { TableRow } from '@tiptap/extension-table-row';
+	import { TableHeader } from '@tiptap/extension-table-header';
+	import { TableCell } from '@tiptap/extension-table-cell';
+	import { 
+		Cloud, CloudLightning, Plus, GripVertical, Trash2, Copy, 
+		Heading1, Heading2, Heading3, Type, Quote, Code, 
+		List, ListOrdered, Bold, Italic, Link as LinkIcon, Palette,
+		CheckSquare, Minus, Table as TableIcon, ChevronRight
+	} from 'lucide-svelte';
 
 	let { data } = $props();
 	
@@ -19,12 +37,308 @@
 	let autosaveStatus = $state<'saved' | 'saving' | 'error'>('saved');
 	let autosaveTimeout: any;
 
+	// Bubble Menu elements and states
+	let bubbleMenuElement = $state<HTMLDivElement>();
+	let isColorMenuOpen = $state(false);
+
+	// Table interaction states
+	let isTableHovered = $state(false);
+	let activeTableNode = $state<HTMLTableElement | null>(null);
+	let tableHoverPosition = $state({ top: 0, left: 0, width: 0, height: 0 });
+
+	function updateTablePositions() {
+		if (activeTableNode && editorElement) {
+			const tableRect = activeTableNode.getBoundingClientRect();
+			const editorRect = editorElement.getBoundingClientRect();
+			tableHoverPosition = {
+				top: tableRect.top - editorRect.top,
+				left: tableRect.left - editorRect.left,
+				width: tableRect.width,
+				height: tableRect.height
+			};
+		}
+	}
+
+	// Column/Row Handles states
+	let activeCellNode = $state<HTMLElement | null>(null);
+	let columnHandlePosition = $state({ top: 0, left: 0 });
+	let rowHandlePosition = $state({ top: 0, left: 0 });
+	let isColMenuOpen = $state(false);
+	let isRowMenuOpen = $state(false);
+	let colMenuPosition = $state({ top: 0, left: 0 });
+	let rowMenuPosition = $state({ top: 0, left: 0 });
+
+	function handleColumnHandleClick(e: MouseEvent) {
+		e.stopPropagation();
+		if (!editor || !activeCellNode) return;
+		
+		// Focus editor and select the cell
+		editor.commands.focus();
+		const pos = editor.view.posAtDOM(activeCellNode, 0);
+		editor.commands.setTextSelection(pos);
+		
+		colMenuPosition = {
+			top: columnHandlePosition.top + 16,
+			left: columnHandlePosition.left
+		};
+		isColMenuOpen = true;
+		isRowMenuOpen = false;
+	}
+
+	function handleRowHandleClick(e: MouseEvent) {
+		e.stopPropagation();
+		if (!editor || !activeCellNode) return;
+		
+		// Focus editor and select the cell
+		editor.commands.focus();
+		const pos = editor.view.posAtDOM(activeCellNode, 0);
+		editor.commands.setTextSelection(pos);
+		
+		rowMenuPosition = {
+			top: rowHandlePosition.top,
+			left: rowHandlePosition.left + 16
+		};
+		isRowMenuOpen = true;
+		isColMenuOpen = false;
+	}
+
+	// Slash Command states
+	let isSlashMenuOpen = $state(false);
+	let slashMenuPosition = $state({ top: 0, left: 0 });
+	let slashQuery = $state('');
+	let slashSelectedIndex = $state(0);
+	let slashCommandCallback = $state<((props: any) => void) | null>(null);
+
+	const colors = [
+		{ name: 'Default', value: 'var(--text-main)' },
+		{ name: 'Gray', value: 'var(--color-gray)' },
+		{ name: 'Brown', value: 'var(--color-brown)' },
+		{ name: 'Orange', value: 'var(--color-orange)' },
+		{ name: 'Yellow', value: 'var(--color-yellow)' },
+		{ name: 'Green', value: 'var(--color-green)' },
+		{ name: 'Blue', value: 'var(--color-blue)' },
+		{ name: 'Purple', value: 'var(--color-purple)' },
+		{ name: 'Pink', value: 'var(--color-pink)' },
+		{ name: 'Red', value: 'var(--color-red)' }
+	];
+
+	const highlights = [
+		{ name: 'Default', value: 'transparent' },
+		{ name: 'Gray background', value: 'var(--bg-gray)' },
+		{ name: 'Brown background', value: 'var(--bg-brown)' },
+		{ name: 'Orange background', value: 'var(--bg-orange)' },
+		{ name: 'Yellow background', value: 'var(--bg-yellow)' },
+		{ name: 'Green background', value: 'var(--bg-green)' },
+		{ name: 'Blue background', value: 'var(--bg-blue)' },
+		{ name: 'Purple background', value: 'var(--bg-purple)' },
+		{ name: 'Pink background', value: 'var(--bg-pink)' },
+		{ name: 'Red background', value: 'var(--bg-red)' }
+	];
+
+	// Details is Tiptap's MIT-licensed toggle node. The summary remains a native
+	// <summary> for accessibility while this attribute gives us Notion-style H1-H3
+	// visual variants.
+	const ToggleHeading = Details.extend({
+		addAttributes() {
+			return {
+				...(this.parent?.() ?? {}),
+				level: {
+					default: 1,
+					parseHTML: (element) => Number(element.getAttribute('data-heading-level')) || 1,
+					renderHTML: (attributes) => ({ 'data-heading-level': attributes.level })
+				}
+			};
+		}
+	});
+
+	function setToggleHeading(editor: Editor, range: { from: number; to: number }, level: 1 | 2 | 3) {
+		editor
+			.chain()
+			.focus()
+			.deleteRange(range)
+			.setDetails()
+			.updateAttributes('details', { level, open: true })
+			.run();
+	}
+
+	const slashItems = [
+		{
+			title: 'Text',
+			description: 'Start writing with plain text.',
+			searchTerms: ['text', 'p', 'paragraph', 'normal'],
+			icon: Type,
+			action: (editor: Editor, range: any) => {
+				editor.chain().focus().deleteRange(range).setParagraph().run();
+			}
+		},
+		{
+			title: 'Heading 1',
+			description: 'Big section heading.',
+			searchTerms: ['h1', 'heading', 'large'],
+			icon: Heading1,
+			action: (editor: Editor, range: any) => {
+				editor.chain().focus().deleteRange(range).toggleHeading({ level: 1 }).run();
+			}
+		},
+		{
+			title: 'Heading 2',
+			description: 'Medium section heading.',
+			searchTerms: ['h2', 'heading', 'medium'],
+			icon: Heading2,
+			action: (editor: Editor, range: any) => {
+				editor.chain().focus().deleteRange(range).toggleHeading({ level: 2 }).run();
+			}
+		},
+		{
+			title: 'Heading 3',
+			description: 'Small section heading.',
+			searchTerms: ['h3', 'heading', 'small'],
+			icon: Heading3,
+			action: (editor: Editor, range: any) => {
+				editor.chain().focus().deleteRange(range).toggleHeading({ level: 3 }).run();
+			}
+		},
+		{
+			title: 'Toggle Heading 1',
+			description: 'Large collapsible section.',
+			searchTerms: ['toggle', 'collapsible', 'details', 'h1'],
+			icon: ChevronRight,
+			action: (editor: Editor, range: any) => setToggleHeading(editor, range, 1)
+		},
+		{
+			title: 'Toggle Heading 2',
+			description: 'Medium collapsible section.',
+			searchTerms: ['toggle', 'collapsible', 'details', 'h2'],
+			icon: ChevronRight,
+			action: (editor: Editor, range: any) => setToggleHeading(editor, range, 2)
+		},
+		{
+			title: 'Toggle Heading 3',
+			description: 'Small collapsible section.',
+			searchTerms: ['toggle', 'collapsible', 'details', 'h3'],
+			icon: ChevronRight,
+			action: (editor: Editor, range: any) => setToggleHeading(editor, range, 3)
+		},
+		{
+			title: 'Bullet List',
+			description: 'Create a simple bulleted list.',
+			searchTerms: ['bullet', 'list', 'ul'],
+			icon: List,
+			action: (editor: Editor, range: any) => {
+				editor.chain().focus().deleteRange(range).toggleBulletList().run();
+			}
+		},
+		{
+			title: 'Numbered List',
+			description: 'Create a list with numbering.',
+			searchTerms: ['number', 'list', 'ol', 'ordered'],
+			icon: ListOrdered,
+			action: (editor: Editor, range: any) => {
+				editor.chain().focus().deleteRange(range).toggleOrderedList().run();
+			}
+		},
+		{
+			title: 'Blockquote',
+			description: 'Capture a quote.',
+			searchTerms: ['quote', 'blockquote'],
+			icon: Quote,
+			action: (editor: Editor, range: any) => {
+				editor.chain().focus().deleteRange(range).toggleBlockquote().run();
+			}
+		},
+		{
+			title: 'Code Block',
+			description: 'Write code snippets.',
+			searchTerms: ['code', 'block', 'pre'],
+			icon: Code,
+			action: (editor: Editor, range: any) => {
+				editor.chain().focus().deleteRange(range).toggleCodeBlock().run();
+			}
+		},
+		{
+			title: 'To-do List',
+			description: 'Track tasks with checkboxes.',
+			searchTerms: ['todo', 'task', 'checklist', 'checkbox'],
+			icon: CheckSquare,
+			action: (editor: Editor, range: any) => {
+				editor.chain().focus().deleteRange(range).toggleTaskList().run();
+			}
+		},
+		{
+			title: 'Divider',
+			description: 'Visually divide sections with a line.',
+			searchTerms: ['divider', 'hr', 'horizontal', 'line'],
+			icon: Minus,
+			action: (editor: Editor, range: any) => {
+				editor.chain().focus().deleteRange(range).setHorizontalRule().run();
+			}
+		},
+		{
+			title: 'Table',
+			description: 'Insert a simple 3x3 table.',
+			searchTerms: ['table', 'grid', 'cells'],
+			icon: TableIcon,
+			action: (editor: Editor, range: any) => {
+				editor.chain().focus().deleteRange(range).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+			}
+		}
+	];
+
+	let filteredItems = $derived(
+		slashItems.filter(item => {
+			const query = slashQuery.toLowerCase();
+			return item.title.toLowerCase().includes(query) ||
+				item.searchTerms.some(term => term.includes(query));
+		})
+	);
+
+	function triggerSelectedCommand() {
+		if (filteredItems.length > 0 && slashCommandCallback) {
+			const item = filteredItems[slashSelectedIndex];
+			slashCommandCallback({
+				command: ({ editor, range }: any) => {
+					item.action(editor, range);
+				}
+			});
+		}
+		isSlashMenuOpen = false;
+	}
+
+	function handleSlashItemClick(item: typeof slashItems[0]) {
+		if (slashCommandCallback) {
+			slashCommandCallback({
+				command: ({ editor, range }: any) => {
+					item.action(editor, range);
+				}
+			});
+		}
+		isSlashMenuOpen = false;
+	}
+
+	function setLink() {
+		if (!editor) return;
+		const previousUrl = editor.getAttributes('link').href;
+		const url = window.prompt('Enter link URL:', previousUrl || 'https://');
+		
+		// If cancelled
+		if (url === null) return;
+		
+		// If empty, remove link
+		if (url === '') {
+			editor.chain().focus().extendMarkRange('link').unsetLink().run();
+			return;
+		}
+
+		editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+	}
+
 	// Floating block gutter states
 	let activeBlockNode = $state<HTMLElement | null>(null);
 	let isGutterVisible = $state(false);
 	let gutterTop = $state(0);
 	let gutterLeft = $state(0);
 	let isActionMenuOpen = $state(false);
+	let openUpward = $state(false);
 	const GUTTER_HIT_SLOP = 36;
 	
 	// Drag state
@@ -72,6 +386,12 @@
 	});
 
 	onMount(() => {
+		// BubbleMenu v3 uses Floating UI. Its default absolute positioning is relative
+		// to the editor container and can lag behind a nested scrolling canvas, which
+		// makes the first selection appear away from the selected text.
+		const bubbleMenuScrollTarget =
+			editorElement?.closest<HTMLElement>('.canvas-wrapper') ?? window;
+
 		let initialContent = { type: 'doc', content: [] };
 		try {
 			initialContent = data.pageRecord.contentJson 
@@ -89,8 +409,110 @@
 						levels: [1, 2, 3]
 					}
 				}),
+				ToggleHeading.configure({
+					persist: true
+				}),
+				DetailsSummary,
+				DetailsContent,
 				ColumnLayout,
-				Column
+				Column,
+				TextStyle,
+				Color,
+				Highlight.configure({ multicolor: true }),
+				TiptapLink.configure({
+					openOnClick: false,
+					HTMLAttributes: {
+						class: 'editor-link'
+					}
+				}),
+				TaskList,
+				TaskItem.configure({
+					nested: true
+				}),
+				TiptapTable.configure({
+					resizable: true
+				}),
+				TableRow,
+				TableHeader,
+				TableCell,
+				BubbleMenu.configure({
+					element: bubbleMenuElement,
+					// Do not debounce the first selection: its rect is the anchor for this menu.
+					updateDelay: 0,
+					resizeDelay: 0,
+					options: {
+						placement: 'top',
+						strategy: 'fixed',
+						offset: 8,
+						inline: true,
+						scrollTarget: bubbleMenuScrollTarget
+					}
+				}),
+				Commands.configure({
+					suggestion: {
+						char: '/',
+						render: () => {
+							return {
+								onStart: (props) => {
+									isSlashMenuOpen = true;
+									slashQuery = props.query;
+									slashSelectedIndex = 0;
+									slashCommandCallback = props.command;
+
+									if (props.clientRect && editorElement) {
+										const rect = props.clientRect();
+										if (rect) {
+											const editorRect = editorElement.getBoundingClientRect();
+											slashMenuPosition = {
+												top: rect.bottom - editorRect.top + 6,
+												left: rect.left - editorRect.left
+											};
+										}
+									}
+								},
+								onUpdate: (props) => {
+									slashQuery = props.query;
+									slashSelectedIndex = 0;
+									slashCommandCallback = props.command;
+
+									if (props.clientRect && editorElement) {
+										const rect = props.clientRect();
+										if (rect) {
+											const editorRect = editorElement.getBoundingClientRect();
+											slashMenuPosition = {
+												top: rect.bottom - editorRect.top + 6,
+												left: rect.left - editorRect.left
+											};
+										}
+									}
+								},
+								onKeyDown: (props) => {
+									if (props.event.key === 'ArrowUp') {
+										slashSelectedIndex = (slashSelectedIndex - 1 + filteredItems.length) % filteredItems.length;
+										return true;
+									}
+									if (props.event.key === 'ArrowDown') {
+										slashSelectedIndex = (slashSelectedIndex + 1) % filteredItems.length;
+										return true;
+									}
+									if (props.event.key === 'Enter') {
+										triggerSelectedCommand();
+										return true;
+									}
+									if (props.event.key === 'Escape') {
+										isSlashMenuOpen = false;
+										return true;
+									}
+									return false;
+								},
+								onExit: () => {
+									isSlashMenuOpen = false;
+									slashCommandCallback = null;
+								}
+							};
+						}
+					}
+				})
 			],
 			content: initialContent,
 			editorProps: {
@@ -133,9 +555,97 @@
 		if (!editorElement || !editor || isActionMenuOpen) return;
 
 		const editorRect = editorElement.getBoundingClientRect();
+		const target = e.target as HTMLElement;
+
+		// If we are already hovering a table, check if mouse is still near it
+		if (activeTableNode && isTableHovered) {
+			const rect = activeTableNode.getBoundingClientRect();
+			// Allow a slop of 40px to the right and bottom for the adder tracks/buttons,
+			// and 30px to the top and left for handles, to make interaction smooth.
+			const isNearTable = 
+				e.clientX >= rect.left - 30 &&
+				e.clientX <= rect.right + 45 &&
+				e.clientY >= rect.top - 30 &&
+				e.clientY <= rect.bottom + 45;
+			
+			if (isNearTable) {
+				isGutterVisible = false;
+				// Update table positions in case it resized
+				tableHoverPosition = {
+					top: rect.top - editorRect.top,
+					left: rect.left - editorRect.left,
+					width: rect.width,
+					height: rect.height
+				};
+
+				// Update handles to currently hovered cell inside table
+				const cell = target.closest('td, th') as HTMLElement | null;
+				if (cell) {
+					activeCellNode = cell;
+					const cellRect = cell.getBoundingClientRect();
+					columnHandlePosition = {
+						left: cellRect.left - editorRect.left + (cellRect.width / 2) - 12,
+						top: rect.top - editorRect.top - 12
+					};
+					rowHandlePosition = {
+						left: rect.left - editorRect.left - 12,
+						top: cellRect.top - editorRect.top + (cellRect.height / 2) - 12
+					};
+				}
+				return;
+			}
+		}
+
+		// Check if mouse is hovering over a table cell (td/th)
+		const cell = target.closest('td, th') as HTMLElement | null;
+		const table = cell?.closest('table') as HTMLTableElement | null;
+
+		if (table && cell) {
+			activeTableNode = table;
+			activeCellNode = cell;
+			const tableRect = table.getBoundingClientRect();
+			const cellRect = cell.getBoundingClientRect();
+			
+			tableHoverPosition = {
+				top: tableRect.top - editorRect.top,
+				left: tableRect.left - editorRect.left,
+				width: tableRect.width,
+				height: tableRect.height
+			};
+			
+			// Position column handle centered above the cell
+			columnHandlePosition = {
+				left: cellRect.left - editorRect.left + (cellRect.width / 2) - 12,
+				top: tableRect.top - editorRect.top - 12
+			};
+			
+			// Position row handle centered to the left of the cell
+			rowHandlePosition = {
+				left: tableRect.left - editorRect.left - 12,
+				top: cellRect.top - editorRect.top + (cellRect.height / 2) - 12
+			};
+
+			isTableHovered = true;
+			isGutterVisible = false;
+			return;
+		} else {
+			isTableHovered = false;
+			activeTableNode = null;
+			activeCellNode = null;
+		}
 		
-		// Ensure mouse is horizontally near the editor bounds
-		if (e.clientX < editorRect.left - 80 || e.clientX > editorRect.right + 20) {
+		// Keep the current handle alive while the pointer crosses the gap between
+		// the block and its dots, so it remains clickable.
+		if (isGutterVisible &&
+			e.clientX >= editorRect.left + gutterLeft - 8 &&
+			e.clientX <= editorRect.left + gutterLeft + 28 &&
+			e.clientY >= editorRect.top + gutterTop - 8 &&
+			e.clientY <= editorRect.top + gutterTop + 28) {
+			return;
+		}
+
+		// Ensure mouse is horizontally near the editor bounds.
+		if (e.clientX < editorRect.left - 60 || e.clientX > editorRect.right + 20) {
 			isGutterVisible = false;
 			return;
 		}
@@ -144,7 +654,7 @@
 		// Filter out column-layout and column wrapper divs BEFORE find(),
 		// otherwise the wrapper's bounding rect matches first and steals the hit.
 		const allBlocks = Array.from(editorElement.querySelectorAll(
-			'.ProseMirror > *, .ProseMirror > .column-layout > .column > *'
+			'.ProseMirror > *, .ProseMirror > .column-layout > .column > *, .ProseMirror > [data-type="details"] > div > [data-type="detailsContent"] > *'
 		)).filter(node => {
 			const el = node as HTMLElement;
 			return !el.classList.contains('column-layout') && !el.classList.contains('column');
@@ -154,22 +664,34 @@
 			return e.clientY >= rect.top - 2 &&
 				e.clientY <= rect.bottom + 2;
 		});
-		const block = blocksAtY.find(node => {
+		const blockAtPointer = blocksAtY.find(node => {
 			const rect = node.getBoundingClientRect();
 			return e.clientX >= rect.left && e.clientX <= rect.right;
-		}) ?? blocksAtY
+		});
+		// Details contains both the parent toggle and its editable children. Prefer
+		// the direct child under the pointer so its dots can turn it into a quote,
+		// list, or another supported block type.
+		const nestedBlockAtPointer = blocksAtY.find(node => {
+			const rect = node.getBoundingClientRect();
+			return node.parentElement?.matches('[data-type="detailsContent"]') &&
+				e.clientX >= rect.left && e.clientX <= rect.right;
+		});
+		const block = nestedBlockAtPointer ?? blockAtPointer ?? blocksAtY
 			.map(node => ({ node, distance: Math.abs(e.clientX - (node.getBoundingClientRect().left - 28)) }))
 			.filter(({ distance }) => distance <= GUTTER_HIT_SLOP)
 			.sort((a, b) => a.distance - b.distance)[0]?.node;
 
 		if (block && block instanceof HTMLElement) {
 			activeBlockNode = block;
-			const blockRect = block.getBoundingClientRect();
+			const toggleSummary = block.matches('[data-type="details"]')
+				? block.querySelector<HTMLElement>('summary')
+				: null;
+			const handleAnchorRect = (toggleSummary ?? block).getBoundingClientRect();
 			
-			// Position the handle next to the hovered block, including blocks inside
-			// a right-hand column, rather than keeping it in the editor's left gutter.
-			gutterTop = blockRect.top - editorRect.top + (blockRect.height / 2) - 10; 
-			gutterLeft = blockRect.left - editorRect.left - 28;
+			// A toggle's drag handle belongs beside its summary, not midway down its
+			// expanded content. This matches Notion's heading-row interaction.
+			gutterTop = handleAnchorRect.top - editorRect.top + (handleAnchorRect.height / 2) - 10;
+			gutterLeft = handleAnchorRect.left - editorRect.left - (toggleSummary ? 52 : 28);
 			isGutterVisible = true;
 		} else {
 			isGutterVisible = false;
@@ -180,6 +702,13 @@
 		const target = e.target as HTMLElement;
 		if (!target.closest('.block-gutter') && !target.closest('.block-action-menu')) {
 			isActionMenuOpen = false;
+		}
+		if (!target.closest('.color-picker-dropdown') && !target.closest('.bubble-color-btn')) {
+			isColorMenuOpen = false;
+		}
+		if (!target.closest('.table-handle-menu') && !target.closest('.table-col-handle') && !target.closest('.table-row-handle')) {
+			isColMenuOpen = false;
+			isRowMenuOpen = false;
 		}
 	}
 
@@ -318,10 +847,44 @@
 		isGutterVisible = false;
 	}
 
-	function convertActiveBlockTo(type: 'paragraph' | 'heading' | 'blockquote' | 'codeBlock', level?: number) {
+	function turnActiveBlockIntoToggleHeading(level: 1 | 2 | 3) {
 		if (!editor || !activeBlockNode) return;
-		const index = getActiveBlockIndex();
-		if (index === -1) return;
+
+		// Changing the level of an existing toggle must only update its attribute.
+		// Rebuilding it would turn the nested blocks into a new, empty toggle body.
+		if (activeBlockNode.matches('[data-type="details"]')) {
+			editor.commands.updateAttributes('details', { level, open: true });
+			return;
+		}
+
+		const pos = editor.view.posAtDOM(activeBlockNode, 0);
+		const activeNode = editor.state.doc.nodeAt(pos);
+		if (!activeNode) return;
+
+		const { schema } = editor.state;
+		const summaryContent = activeNode.isTextblock
+			? activeNode.content
+			: activeNode.textContent
+				? schema.text(activeNode.textContent)
+				: undefined;
+		const summary = schema.nodes.detailsSummary.create(null, summaryContent);
+		const content = schema.nodes.detailsContent.create(null, schema.nodes.paragraph.create());
+		const toggle = schema.nodes.details.create({ level, open: true }, [summary, content]);
+		const cursorPosition = pos + 2 + summary.content.size;
+
+		editor
+			.chain()
+			.focus()
+			.command(({ tr }) => {
+				tr.replaceWith(pos, pos + activeNode.nodeSize, toggle);
+				return true;
+			})
+			.setTextSelection(cursorPosition)
+			.run();
+	}
+
+	function convertActiveBlockTo(type: 'paragraph' | 'heading' | 'toggleHeading' | 'blockquote' | 'codeBlock' | 'todoList' | 'divider' | 'table', level?: number) {
+		if (!editor || !activeBlockNode) return;
 
 		editor.commands.focus();
 		const pos = editor.view.posAtDOM(activeBlockNode, 0);
@@ -331,10 +894,18 @@
 			editor.commands.setParagraph();
 		} else if (type === 'heading' && level) {
 			editor.commands.toggleHeading({ level: level as any });
+		} else if (type === 'toggleHeading' && level) {
+			turnActiveBlockIntoToggleHeading(level as 1 | 2 | 3);
 		} else if (type === 'blockquote') {
 			editor.commands.toggleBlockquote();
 		} else if (type === 'codeBlock') {
 			editor.commands.toggleCodeBlock();
+		} else if (type === 'todoList') {
+			editor.commands.toggleTaskList();
+		} else if (type === 'divider') {
+			editor.commands.setHorizontalRule();
+		} else if (type === 'table') {
+			editor.commands.insertTable({ rows: 3, cols: 3, withHeaderRow: true });
 		}
 
 		isActionMenuOpen = false;
@@ -666,6 +1237,10 @@
 					title="Drag to reorder block, or click to open block menu"
 					onclick={(e) => {
 						e.stopPropagation();
+						const rect = e.currentTarget.getBoundingClientRect();
+						const spaceBelow = window.innerHeight - rect.bottom;
+						// The block action menu height is about 380px now
+						openUpward = spaceBelow < 380;
 						isActionMenuOpen = !isActionMenuOpen;
 					}}
 					ondragstart={handleDragStart}
@@ -677,7 +1252,7 @@
 
 				<!-- Floating Block Action Options Dropdown -->
 				{#if isActionMenuOpen}
-					<div class="block-action-menu">
+					<div class="block-action-menu" class:open-upward={openUpward}>
 						<button class="menu-item-action" onclick={deleteActiveBlock}>
 							<Trash2 size={13} class="menu-icon" />
 							<span>Delete block</span>
@@ -704,6 +1279,18 @@
 							<Heading3 size={13} class="menu-icon" />
 							<span>Heading 3</span>
 						</button>
+						<button class="menu-item-action" onclick={() => convertActiveBlockTo('toggleHeading', 1)}>
+							<ChevronRight size={13} class="menu-icon" />
+							<span>Toggle Heading 1</span>
+						</button>
+						<button class="menu-item-action" onclick={() => convertActiveBlockTo('toggleHeading', 2)}>
+							<ChevronRight size={13} class="menu-icon" />
+							<span>Toggle Heading 2</span>
+						</button>
+						<button class="menu-item-action" onclick={() => convertActiveBlockTo('toggleHeading', 3)}>
+							<ChevronRight size={13} class="menu-icon" />
+							<span>Toggle Heading 3</span>
+						</button>
 						<button class="menu-item-action" onclick={() => convertActiveBlockTo('blockquote')}>
 							<Quote size={13} class="menu-icon" />
 							<span>Quote Block</span>
@@ -712,12 +1299,302 @@
 							<Code size={13} class="menu-icon" />
 							<span>Code Block</span>
 						</button>
+						<button class="menu-item-action" onclick={() => convertActiveBlockTo('todoList')}>
+							<CheckSquare size={13} class="menu-icon" />
+							<span>To-do List</span>
+						</button>
+						<button class="menu-item-action" onclick={() => convertActiveBlockTo('divider')}>
+							<Minus size={13} class="menu-icon" />
+							<span>Divider</span>
+						</button>
+						<button class="menu-item-action" onclick={() => convertActiveBlockTo('table')}>
+							<TableIcon size={13} class="menu-icon" />
+							<span>Table</span>
+						</button>
 					</div>
 				{/if}
 			</div>
 		{/if}
 
 		<div bind:this={editorElement} class="tiptap-editor-element"></div>
+
+		<!-- Table controls (Notion-style column/row adders) -->
+		{#if isTableHovered && activeTableNode}
+			<!-- Column Adder (vertical bar on the right) -->
+			<div 
+				class="table-column-adder"
+				style="top: {tableHoverPosition.top}px; left: {tableHoverPosition.left + tableHoverPosition.width}px; height: {tableHoverPosition.height}px;"
+			>
+				<button 
+					type="button" 
+					class="table-adder-btn"
+					title="Click to add a new column"
+					onclick={() => {
+						editor?.chain().focus().addColumnAfter().run();
+						setTimeout(updateTablePositions, 20);
+					}}
+				>
+					<Plus size={12} />
+				</button>
+			</div>
+
+			<!-- Row Adder (horizontal bar at the bottom) -->
+			<div 
+				class="table-row-adder"
+				style="top: {tableHoverPosition.top + tableHoverPosition.height}px; left: {tableHoverPosition.left}px; width: {tableHoverPosition.width}px;"
+			>
+				<button 
+					type="button" 
+					class="table-adder-btn"
+					title="Click to add a new row"
+					onclick={() => {
+						editor?.chain().focus().addRowAfter().run();
+						setTimeout(updateTablePositions, 20);
+					}}
+				>
+					<Plus size={12} />
+				</button>
+			</div>
+			<!-- Column Handle (above cell) -->
+			<button 
+				type="button"
+				class="table-col-handle"
+				style="top: {columnHandlePosition.top}px; left: {columnHandlePosition.left}px;"
+				onclick={handleColumnHandleClick}
+				title="Column options"
+			></button>
+
+			<!-- Row Handle (left of cell) -->
+			<button 
+				type="button"
+				class="table-row-handle"
+				style="top: {rowHandlePosition.top}px; left: {rowHandlePosition.left}px;"
+				onclick={handleRowHandleClick}
+				title="Row options"
+			></button>
+		{/if}
+
+		<!-- Column Options Dropdown -->
+		{#if isColMenuOpen}
+			<div 
+				class="table-handle-menu"
+				style="top: {colMenuPosition.top}px; left: {colMenuPosition.left}px;"
+			>
+				<button 
+					type="button" 
+					class="menu-item-action"
+					onclick={() => {
+						editor?.chain().focus().deleteColumn().run();
+						isColMenuOpen = false;
+						isTableHovered = false;
+					}}
+				>
+					<Trash2 size={13} class="menu-icon" />
+					<span>Delete column</span>
+				</button>
+				<button 
+					type="button" 
+					class="menu-item-action"
+					onclick={() => {
+						editor?.chain().focus().addColumnBefore().run();
+						isColMenuOpen = false;
+						setTimeout(updateTablePositions, 20);
+					}}
+				>
+					<Plus size={13} class="menu-icon" />
+					<span>Insert left</span>
+				</button>
+				<button 
+					type="button" 
+					class="menu-item-action"
+					onclick={() => {
+						editor?.chain().focus().addColumnAfter().run();
+						isColMenuOpen = false;
+						setTimeout(updateTablePositions, 20);
+					}}
+				>
+					<Plus size={13} class="menu-icon" />
+					<span>Insert right</span>
+				</button>
+			</div>
+		{/if}
+
+		<!-- Row Options Dropdown -->
+		{#if isRowMenuOpen}
+			<div 
+				class="table-handle-menu"
+				style="top: {rowMenuPosition.top}px; left: {rowMenuPosition.left}px;"
+			>
+				<button 
+					type="button" 
+					class="menu-item-action"
+					onclick={() => {
+						editor?.chain().focus().deleteRow().run();
+						isRowMenuOpen = false;
+						isTableHovered = false;
+					}}
+				>
+					<Trash2 size={13} class="menu-icon" />
+					<span>Delete row</span>
+				</button>
+				<button 
+					type="button" 
+					class="menu-item-action"
+					onclick={() => {
+						editor?.chain().focus().addRowBefore().run();
+						isRowMenuOpen = false;
+						setTimeout(updateTablePositions, 20);
+					}}
+				>
+					<Plus size={13} class="menu-icon" />
+					<span>Insert above</span>
+				</button>
+				<button 
+					type="button" 
+					class="menu-item-action"
+					onclick={() => {
+						editor?.chain().focus().addRowAfter().run();
+						isRowMenuOpen = false;
+						setTimeout(updateTablePositions, 20);
+					}}
+				>
+					<Plus size={13} class="menu-icon" />
+					<span>Insert below</span>
+				</button>
+			</div>
+		{/if}
+
+		<!-- Svelte Bubble Menu (Managed by Tiptap BubbleMenu extension) -->
+		<div bind:this={bubbleMenuElement} class="editor-bubble-menu">
+			{#if editor}
+				<button 
+					type="button"
+					class="bubble-btn" 
+					class:active={editor.isActive('bold')} 
+					onclick={() => editor.chain().focus().toggleBold().run()}
+					title="Bold"
+				>
+					<Bold size={14} />
+				</button>
+				<button 
+					type="button"
+					class="bubble-btn" 
+					class:active={editor.isActive('italic')} 
+					onclick={() => editor.chain().focus().toggleItalic().run()}
+					title="Italic"
+				>
+					<Italic size={14} />
+				</button>
+				<button 
+					type="button"
+					class="bubble-btn" 
+					class:active={editor.isActive('strike')} 
+					onclick={() => editor.chain().focus().toggleStrike().run()}
+					title="Strikethrough"
+				>
+					<span style="text-decoration: line-through; font-weight: bold; font-size: 11px; line-height: 1;">S</span>
+				</button>
+				<button 
+					type="button"
+					class="bubble-btn" 
+					class:active={editor.isActive('code')} 
+					onclick={() => editor.chain().focus().toggleCode().run()}
+					title="Inline Code"
+				>
+					<Code size={14} />
+				</button>
+				<button 
+					type="button"
+					class="bubble-btn" 
+					class:active={editor.isActive('link')} 
+					onclick={setLink}
+					title="Link"
+				>
+					<LinkIcon size={14} />
+				</button>
+
+				<div class="bubble-divider"></div>
+
+				<!-- Color & Highlight Picker -->
+				<div style="position: relative; display: inline-block;">
+					<button 
+						type="button"
+						class="bubble-btn bubble-color-btn" 
+						onclick={() => isColorMenuOpen = !isColorMenuOpen}
+						title="Text Color & Highlights"
+					>
+						<Palette size={14} />
+					</button>
+
+					{#if isColorMenuOpen}
+						<div class="color-picker-dropdown">
+							<div class="color-dropdown-section">Text Color</div>
+							{#each colors as color}
+								<button 
+									type="button"
+									class="color-dropdown-item" 
+									onclick={() => {
+										if (color.value === 'var(--text-main)') {
+											editor.chain().focus().unsetColor().run();
+										} else {
+											editor.chain().focus().setColor(color.value).run();
+										}
+										isColorMenuOpen = false;
+									}}
+								>
+									<span class="color-swatch" style="color: {color.value};">A</span>
+									<span>{color.name}</span>
+								</button>
+							{/each}
+
+							<div class="color-dropdown-section">Highlight</div>
+							{#each highlights as hl}
+								<button 
+									type="button"
+									class="color-dropdown-item" 
+									onclick={() => {
+										if (hl.value === 'transparent') {
+											editor.chain().focus().unsetHighlight().run();
+										} else {
+											editor.chain().focus().setHighlight({ color: hl.value }).run();
+										}
+										isColorMenuOpen = false;
+									}}
+								>
+									<span class="color-swatch-highlight" style="background-color: {hl.value === 'transparent' ? 'transparent' : hl.value}; border: {hl.value === 'transparent' ? '1px dashed var(--text-muted)' : 'none'};">A</span>
+									<span>{hl.name}</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/if}
+		</div>
+
+		<!-- Floating Slash Command suggestions menu -->
+		{#if isSlashMenuOpen && filteredItems.length > 0}
+			<div 
+				class="slash-command-menu" 
+				style="top: {slashMenuPosition.top}px; left: {slashMenuPosition.left}px;"
+			>
+				{#each filteredItems as item, index}
+					<button 
+						type="button"
+						class="slash-menu-item" 
+						class:selected={index === slashSelectedIndex}
+						onclick={() => handleSlashItemClick(item)}
+					>
+						<div class="slash-icon-wrapper">
+							<item.icon size={16} />
+						</div>
+						<div class="slash-text-wrapper">
+							<div class="slash-title">{item.title}</div>
+							<div class="slash-desc">{item.description}</div>
+						</div>
+					</button>
+				{/each}
+			</div>
+		{/if}
 	</div>
 </article>
 
@@ -778,6 +1655,11 @@
 		flex-direction: column;
 		gap: 2px;
 		z-index: 200;
+	}
+
+	.block-action-menu.open-upward {
+		top: auto;
+		bottom: 24px;
 	}
 
 	:root.dark .block-action-menu {
@@ -918,5 +1800,282 @@
 		z-index: 50;
 		pointer-events: none;
 		transition: left 0.05s ease, top 0.05s ease;
+	}
+
+	/* Bubble Menu styling */
+	.editor-bubble-menu {
+		display: flex;
+		align-items: center;
+		background-color: var(--bg-sidebar);
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+		padding: 4px;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+		gap: 2px;
+		z-index: 100;
+		/* BubbleMenu moves this element only after there is a text selection. */
+		visibility: hidden;
+		opacity: 0;
+		position: fixed;
+		left: 0;
+		top: 0;
+	}
+
+	.bubble-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 26px;
+		height: 26px;
+		border-radius: 4px;
+		color: var(--text-muted);
+		transition: background var(--transition-speed), color var(--transition-speed);
+	}
+
+	.bubble-btn:hover {
+		background-color: var(--hover-sidebar);
+		color: var(--text-main);
+	}
+
+	.bubble-btn.active {
+		background-color: var(--active-sidebar);
+		color: var(--accent-color);
+	}
+
+	.bubble-divider {
+		width: 1px;
+		height: 18px;
+		background-color: var(--border-color);
+		margin: 0 4px;
+	}
+
+	/* Color Picker Dropdown */
+	.color-picker-dropdown {
+		position: absolute;
+		top: 100%;
+		right: 0;
+		margin-top: 6px;
+		background-color: var(--bg-sidebar);
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+		z-index: 110;
+		width: 180px;
+		max-height: 280px;
+		overflow-y: auto;
+		padding: 6px 0;
+	}
+
+	.color-dropdown-section {
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+		color: var(--text-muted);
+		padding: 6px 12px 2px;
+		font-weight: 600;
+	}
+
+	.color-dropdown-item {
+		display: flex;
+		align-items: center;
+		width: 100%;
+		padding: 5px 12px;
+		font-size: 13px;
+		color: var(--text-main);
+		text-align: left;
+		gap: 10px;
+		transition: background var(--transition-speed);
+	}
+
+	.color-dropdown-item:hover {
+		background-color: var(--hover-sidebar);
+	}
+
+	.color-swatch {
+		font-weight: 700;
+		font-size: 14px;
+		width: 16px;
+		text-align: center;
+	}
+
+	.color-swatch-highlight {
+		display: inline-block;
+		width: 16px;
+		height: 16px;
+		border-radius: 3px;
+		font-size: 11px;
+		line-height: 16px;
+		font-weight: 700;
+		text-align: center;
+		color: var(--text-main);
+	}
+
+	/* Slash Command Menu styling */
+	.slash-command-menu {
+		position: absolute;
+		background-color: var(--bg-sidebar);
+		border: 1px solid var(--border-color);
+		border-radius: 10px;
+		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+		z-index: 120;
+		width: 280px;
+		max-height: 320px;
+		overflow-y: auto;
+		padding: 6px;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.slash-menu-item {
+		display: flex;
+		align-items: center;
+		width: 100%;
+		padding: 6px 10px;
+		border-radius: 6px;
+		text-align: left;
+		gap: 12px;
+		transition: background var(--transition-speed);
+	}
+
+	.slash-menu-item:hover,
+	.slash-menu-item.selected {
+		background-color: var(--hover-sidebar);
+	}
+
+	.slash-icon-wrapper {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 32px;
+		height: 32px;
+		border-radius: 6px;
+		background-color: var(--bg-canvas);
+		border: 1px solid var(--border-color);
+		color: var(--text-main);
+	}
+
+	.slash-text-wrapper {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.slash-title {
+		font-size: 13.5px;
+		font-weight: 550;
+		color: var(--text-main);
+	}
+
+	.slash-desc {
+		font-size: 11px;
+		color: var(--text-muted);
+		margin-top: 1px;
+	}
+
+	/* Notion-style table adders */
+	.table-column-adder, .table-row-adder {
+		position: absolute;
+		z-index: 90;
+		pointer-events: auto;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: background-color var(--transition-speed);
+	}
+
+	/* Vertical column adder track */
+	.table-column-adder {
+		width: 24px;
+		margin-left: 2px;
+	}
+
+	.table-column-adder:hover {
+		background-color: rgba(255, 255, 255, 0.02);
+	}
+
+	:root:not(.dark) .table-column-adder:hover {
+		background-color: rgba(0, 0, 0, 0.02);
+	}
+
+	/* Horizontal row adder track */
+	.table-row-adder {
+		height: 24px;
+		margin-top: 2px;
+	}
+
+	.table-row-adder:hover {
+		background-color: rgba(255, 255, 255, 0.02);
+	}
+
+	:root:not(.dark) .table-row-adder:hover {
+		background-color: rgba(0, 0, 0, 0.02);
+	}
+
+	.table-adder-btn {
+		width: 18px;
+		height: 18px;
+		background-color: var(--bg-sidebar);
+		border: 1px solid var(--border-color);
+		border-radius: 4px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--text-muted);
+		cursor: pointer;
+		opacity: 0.3;
+		transition: opacity var(--transition-speed), color var(--transition-speed), transform var(--transition-speed);
+		box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+	}
+
+	.table-column-adder:hover .table-adder-btn,
+	.table-row-adder:hover .table-adder-btn,
+	.table-adder-btn:hover {
+		opacity: 1;
+		color: var(--text-main);
+		transform: scale(1.05);
+	}
+
+	/* Row and Column selection handles */
+	.table-col-handle, .table-row-handle {
+		position: absolute;
+		background-color: var(--border-color);
+		border-radius: 4px;
+		cursor: pointer;
+		z-index: 100;
+		opacity: 0.5;
+		transition: opacity var(--transition-speed), background-color var(--transition-speed), transform var(--transition-speed);
+		border: 1px solid var(--border-color);
+		box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+	}
+
+	.table-col-handle {
+		width: 24px;
+		height: 8px;
+	}
+
+	.table-row-handle {
+		width: 8px;
+		height: 24px;
+	}
+
+	.table-col-handle:hover, .table-row-handle:hover {
+		opacity: 1;
+		background-color: var(--accent-color);
+		border-color: var(--accent-color);
+		transform: scale(1.1);
+	}
+
+	.table-handle-menu {
+		position: absolute;
+		background-color: var(--bg-canvas);
+		border: 1px solid var(--border-color);
+		border-radius: 6px;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+		padding: 4px;
+		width: 140px;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		z-index: 210;
 	}
 </style>

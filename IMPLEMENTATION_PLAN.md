@@ -50,8 +50,8 @@ To build **Quiet Pages** efficiently and ensure high quality, we will build the 
 *   **Goal**: Replicate the floating slash menu and context styling controls.
 *   **Tasks**:
     *   Implement the Slash Command (`/`) menu using Tiptap's Suggestion framework. Make a popup that filters blocks (H1, H2, Bullet List, Code Block, etc.) and is keyboard navigable (arrows + Enter).
-    *   Build the floating Bubble Menu that appears when selecting text (Bold, Italic, Code formatting, and Link insertion).
-*   **Verification**: Type `/` and select items using arrow keys to transform paragraphs. Select text to apply formatting and verify changes persist after reload.
+    *   Build the floating Bubble Menu that appears when selecting text (Bold, Italic, Code formatting, Link insertion, and Text color selection with highlight colors).
+*   **Verification**: Type `/` and select items using arrow keys to transform paragraphs. Select text to apply formatting and text colors, and verify changes persist after reload.
 
 ### Milestone 7: Custom Toggles & Advanced Blocks
 *   **Goal**: Build nested toggles and checklists.
