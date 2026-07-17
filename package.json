@@ -1,0 +1,39 @@
+{
+	"name": "aporia",
+	"private": true,
+	"version": "0.0.1",
+	"type": "module",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"prepare": "svelte-kit sync || echo ''",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+	},
+	"devDependencies": {
+		"@sveltejs/adapter-node": "^5.5.4",
+		"@sveltejs/kit": "^2.63.0",
+		"@sveltejs/vite-plugin-svelte": "^7.1.2",
+		"@types/better-sqlite3": "^7.6.13",
+		"drizzle-kit": "^0.31.10",
+		"svelte": "^5.56.1",
+		"svelte-check": "^4.6.0",
+		"typescript": "^6.0.3",
+		"vite": "^8.0.16"
+	},
+	"dependencies": {
+		"@tiptap/core": "^3.28.0",
+		"@tiptap/pm": "^3.28.0",
+		"@tiptap/starter-kit": "^3.28.0",
+		"better-sqlite3": "^12.11.1",
+		"drizzle-orm": "^0.45.2",
+		"lucide-svelte": "^1.0.1"
+	},
+	"allowScripts": {
+		"better-sqlite3@12.11.1": true,
+		"esbuild@0.18.20": true,
+		"esbuild@0.25.12": true,
+		"esbuild@0.28.1": true
+	}
+}
