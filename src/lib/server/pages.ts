@@ -104,69 +104,51 @@ export async function updatePage(
 export async function movePage(id: number, targetParentId: number | null, targetPosition: number): Promise<boolean> {
 	const now = new Date().toISOString();
 	const pageToMove = await getPageById(id);
-	if (!pageToMove) return false;
+	if (!pageToMove || pageToMove.isInTrash) return false;
+	if (!Number.isInteger(targetPosition) || targetPosition < 0 || targetParentId === id) return false;
 
-	const currentParentId = pageToMove.parentId;
-	const currentPosition = pageToMove.position;
+	const activePages = await getActivePages();
+	const pagesById = new Map(activePages.map((page) => [page.id, page]));
 
-	// If parent is unchanged and targetPosition is same, nothing to do
-	if (currentParentId === targetParentId && currentPosition === targetPosition) {
-		return true;
+	// A page cannot be moved beneath itself or one of its descendants.
+	let ancestorId = targetParentId;
+	while (ancestorId !== null) {
+		if (ancestorId === id) return false;
+		const ancestor = pagesById.get(ancestorId);
+		if (!ancestor) return false;
+		ancestorId = ancestor.parentId;
 	}
 
-	// We wrap shifting and updating inside a synchronous transaction (no await/async)
+	const oldSiblings = activePages
+		.filter((page) => page.parentId === pageToMove.parentId && page.id !== id)
+		.sort((a, b) => a.position - b.position);
+	const newSiblings = activePages
+		.filter((page) => page.parentId === targetParentId && page.id !== id)
+		.sort((a, b) => a.position - b.position);
+	const finalPosition = Math.min(targetPosition, newSiblings.length);
+
+	// Re-number both affected sibling lists. This also handles reordering within the
+	// same parent without leaving gaps or duplicating positions.
 	db.transaction((tx) => {
-		// 1. Shift positions in old sibling list to fill the gap
-		if (currentParentId === null) {
+		for (const [position, sibling] of oldSiblings.entries()) {
 			tx.update(pages)
-				.set({ position: sql`${pages.position} - 1`, updatedAt: now })
-				.where(and(
-					isNull(pages.parentId),
-					eq(pages.isInTrash, 0),
-					sql`${pages.position} > ${currentPosition}`
-				))
-				.run();
-		} else {
-			tx.update(pages)
-				.set({ position: sql`${pages.position} - 1`, updatedAt: now })
-				.where(and(
-					eq(pages.parentId, currentParentId),
-					eq(pages.isInTrash, 0),
-					sql`${pages.position} > ${currentPosition}`
-				))
+				.set({ position, updatedAt: now })
+				.where(eq(pages.id, sibling.id))
 				.run();
 		}
 
-		// 2. Shift positions in new sibling list to make room for the moved page
-		if (targetParentId === null) {
+		const reorderedSiblings = [...newSiblings];
+		reorderedSiblings.splice(finalPosition, 0, pageToMove);
+		for (const [position, sibling] of reorderedSiblings.entries()) {
 			tx.update(pages)
-				.set({ position: sql`${pages.position} + 1`, updatedAt: now })
-				.where(and(
-					isNull(pages.parentId),
-					eq(pages.isInTrash, 0),
-					sql`${pages.position} >= ${targetPosition}`
-				))
-				.run();
-		} else {
-			tx.update(pages)
-				.set({ position: sql`${pages.position} + 1`, updatedAt: now })
-				.where(and(
-					eq(pages.parentId, targetParentId),
-					eq(pages.isInTrash, 0),
-					sql`${pages.position} >= ${targetPosition}`
-				))
+				.set({
+					parentId: sibling.id === id ? targetParentId : sibling.parentId,
+					position,
+					updatedAt: now
+				})
+				.where(eq(pages.id, sibling.id))
 				.run();
 		}
-
-		// 3. Update the page to move with its new parent and position
-		tx.update(pages)
-			.set({
-				parentId: targetParentId,
-				position: targetPosition,
-				updatedAt: now
-			})
-			.where(eq(pages.id, id))
-			.run();
 	});
 
 	return true;

@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import { 
 		Menu, 
 		ChevronLeft, 
@@ -34,6 +35,8 @@
 	// Inline editing title states
 	let editingPageId = $state<number | null>(null);
 	let editingTitleText = $state('');
+	let draggedPageId = $state<number | null>(null);
+	let dropTarget = $state<{ id: number; placement: 'before' | 'inside' | 'after' } | null>(null);
 
 	// Active page tracking from route params
 	let currentPageId = $derived($page.params.id ? parseInt($page.params.id, 10) : null);
@@ -134,6 +137,92 @@
 
 	function cancelEditingTitle() {
 		editingPageId = null;
+	}
+
+	function isValidDropTarget(targetId: number) {
+		if (draggedPageId === null || draggedPageId === targetId) return false;
+
+		let ancestorId: number | null = targetId;
+		while (ancestorId !== null) {
+			if (ancestorId === draggedPageId) return false;
+			const ancestor = data.activePages?.find((page) => page.id === ancestorId);
+			ancestorId = ancestor?.parentId ?? null;
+		}
+
+		return true;
+	}
+
+	function getDropPlacement(event: DragEvent): 'before' | 'inside' | 'after' {
+		const row = event.currentTarget as HTMLElement;
+		const { top, height } = row.getBoundingClientRect();
+		const verticalPosition = event.clientY - top;
+
+		if (verticalPosition < height * 0.25) return 'before';
+		if (verticalPosition > height * 0.75) return 'after';
+		return 'inside';
+	}
+
+	function handleDragStart(event: DragEvent, node: any) {
+		if (editingPageId !== null) {
+			event.preventDefault();
+			return;
+		}
+
+		draggedPageId = node.id;
+		event.dataTransfer?.setData('text/plain', String(node.id));
+		if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+	}
+
+	function handleDragOver(event: DragEvent, node: any) {
+		if (!isValidDropTarget(node.id)) return;
+		event.preventDefault();
+		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+		dropTarget = { id: node.id, placement: getDropPlacement(event) };
+	}
+
+	function clearDragState() {
+		draggedPageId = null;
+		dropTarget = null;
+	}
+
+	async function handleDrop(event: DragEvent, node: any) {
+		event.preventDefault();
+		if (!isValidDropTarget(node.id) || !dropTarget || dropTarget.id !== node.id || draggedPageId === null) {
+			clearDragState();
+			return;
+		}
+
+		const draggedPage = data.activePages?.find((page) => page.id === draggedPageId);
+		if (!draggedPage) {
+			clearDragState();
+			return;
+		}
+
+		const placement = dropTarget.placement;
+		const targetSiblings = (data.activePages || [])
+			.filter((page) => page.parentId === node.parentId && page.id !== draggedPage.id)
+			.sort((a, b) => a.position - b.position);
+		const targetIndex = targetSiblings.findIndex((page) => page.id === node.id);
+		const parentId = placement === 'inside' ? node.id : node.parentId;
+		const position = placement === 'inside'
+			? (data.activePages || []).filter((page) => page.parentId === node.id && page.id !== draggedPage.id).length
+			: targetIndex + (placement === 'after' ? 1 : 0);
+
+		try {
+			const formData = new FormData();
+			formData.set('id', String(draggedPage.id));
+			formData.set('parentId', parentId === null ? 'null' : String(parentId));
+			formData.set('position', String(position));
+			const response = await fetch('/?/move', { method: 'POST', body: formData });
+			if (response.ok) {
+				if (placement === 'inside') {
+					expandedNodes = new Set(expandedNodes).add(node.id);
+				}
+				await invalidateAll();
+			}
+		} finally {
+			clearDragState();
+		}
 	}
 </script>
 
@@ -288,12 +377,24 @@
 </div>
 
 <!-- Snippet: Recursive Node rendering -->
-{#snippet renderNode(node)}
+{#snippet renderNode(node: any)}
 	<div class="page-tree-node">
 		<!-- Page item row container -->
 		<div 
 			class="page-item-row" 
+			role="treeitem"
+			aria-selected={currentPageId === node.id}
+			tabindex="-1"
 			class:active={currentPageId === node.id}
+			class:dragging={draggedPageId === node.id}
+			class:drop-before={dropTarget?.id === node.id && dropTarget?.placement === 'before'}
+			class:drop-inside={dropTarget?.id === node.id && dropTarget?.placement === 'inside'}
+			class:drop-after={dropTarget?.id === node.id && dropTarget?.placement === 'after'}
+			draggable={editingPageId !== node.id}
+			ondragstart={(event) => handleDragStart(event, node)}
+			ondragover={(event) => handleDragOver(event, node)}
+			ondrop={(event) => handleDrop(event, node)}
+			ondragend={clearDragState}
 		>
 			<!-- Overlapping Emoji / Chevron symbol slot -->
 			<div class="page-symbol-slot" class:has-children={node.children && node.children.length > 0}>
@@ -418,6 +519,39 @@
 
 	.page-item-row:hover .page-actions-gutter {
 		opacity: 1;
+	}
+
+	.page-item-row[draggable='true'] {
+		cursor: grab;
+	}
+
+	.page-item-row.dragging {
+		opacity: 0.45;
+		cursor: grabbing;
+	}
+
+	.page-item-row.drop-before::before,
+	.page-item-row.drop-after::after {
+		content: '';
+		position: absolute;
+		left: 4px;
+		right: 4px;
+		height: 2px;
+		background: var(--accent-color);
+		border-radius: 2px;
+	}
+
+	.page-item-row.drop-before::before {
+		top: -2px;
+	}
+
+	.page-item-row.drop-after::after {
+		bottom: -2px;
+	}
+
+	.page-item-row.drop-inside {
+		background: color-mix(in srgb, var(--accent-color) 16%, var(--hover-sidebar));
+		outline: 1px solid var(--accent-color);
 	}
 
 	.gutter-action-btn {

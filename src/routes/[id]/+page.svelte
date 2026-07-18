@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { onMount, onDestroy } from 'svelte';
 	import { Editor } from '@tiptap/core';
+	import { Selection } from '@tiptap/pm/state';
 	import StarterKit from '@tiptap/starter-kit';
 	import { ColumnLayout } from '$lib/editor/extensions/ColumnLayout';
 	import { Column } from '$lib/editor/extensions/Column';
@@ -148,6 +149,25 @@
 					renderHTML: (attributes) => ({ 'data-heading-level': attributes.level })
 				}
 			};
+		},
+		addNodeView() {
+			const createDetailsNodeView = this.parent?.();
+			return (props) => {
+				const detailsNodeView = createDetailsNodeView?.(props);
+				if (!detailsNodeView) return {};
+				const parentUpdate = detailsNodeView.update?.bind(detailsNodeView);
+
+				return {
+					...detailsNodeView,
+					update: (updatedNode, decorations, innerDecorations) => {
+						const didUpdate = parentUpdate?.(updatedNode, decorations, innerDecorations) ?? true;
+						if (didUpdate) {
+							detailsNodeView.dom.setAttribute('data-heading-level', String(updatedNode.attrs.level));
+						}
+						return didUpdate;
+					}
+				};
+			};
 		}
 	});
 
@@ -157,7 +177,7 @@
 			.focus()
 			.deleteRange(range)
 			.setDetails()
-			.updateAttributes('details', { level, open: true })
+			.updateAttributes('details', { level })
 			.run();
 	}
 
@@ -353,6 +373,7 @@
 		topIndex: number;
 		columnIndex?: number;
 		childIndex?: number;
+		detailsChildIndex?: number;
 	};
 	let draggedBlockPath = $state<BlockPath | null>(null);
 
@@ -410,7 +431,9 @@
 					}
 				}),
 				ToggleHeading.configure({
-					persist: true
+					// Details' persisted open state overwrites custom node attributes.
+					// Keep collapse state in the node view so it cannot reset `level`.
+					persist: false
 				}),
 				DetailsSummary,
 				DetailsContent,
@@ -640,7 +663,7 @@
 			e.clientX >= editorRect.left + gutterLeft - 8 &&
 			e.clientX <= editorRect.left + gutterLeft + 28 &&
 			e.clientY >= editorRect.top + gutterTop - 8 &&
-			e.clientY <= editorRect.top + gutterTop + 28) {
+			e.clientY <= editorRect.top + gutterTop + 32) {
 			return;
 		}
 
@@ -690,7 +713,7 @@
 			
 			// A toggle's drag handle belongs beside its summary, not midway down its
 			// expanded content. This matches Notion's heading-row interaction.
-			gutterTop = handleAnchorRect.top - editorRect.top + (handleAnchorRect.height / 2) - 10;
+			gutterTop = handleAnchorRect.top - editorRect.top + (handleAnchorRect.height / 2) - 12;
 			gutterLeft = handleAnchorRect.left - editorRect.left - (toggleSummary ? 52 : 28);
 			isGutterVisible = true;
 		} else {
@@ -782,6 +805,20 @@
 		const topIndex = topNodes.indexOf(activeBlockNode);
 		if (topIndex !== -1) return { topIndex };
 
+		// Blocks directly inside a toggle's DetailsContent are a separate JSON
+		// container and need their own child index for drag reordering.
+		const detailsContentEl = activeBlockNode.parentElement?.matches('[data-type="detailsContent"]')
+			? activeBlockNode.parentElement
+			: null;
+		const detailsEl = detailsContentEl?.closest<HTMLElement>('[data-type="details"]');
+		if (detailsContentEl && detailsEl) {
+			const detailsTopIndex = topNodes.indexOf(detailsEl);
+			const detailsChildIndex = Array.from(detailsContentEl.children).indexOf(activeBlockNode);
+			if (detailsTopIndex !== -1 && detailsChildIndex !== -1) {
+				return { topIndex: detailsTopIndex, detailsChildIndex };
+			}
+		}
+
 		// Check if it's inside a column
 		const columnEl = activeBlockNode.closest('[data-type="column"]');
 		const layoutEl = columnEl?.closest('[data-type="columnLayout"]');
@@ -796,6 +833,55 @@
 		const childIndex = children.indexOf(activeBlockNode);
 
 		return { topIndex: layoutTopIndex, columnIndex, childIndex };
+	}
+
+	function getBlockPathForElement(block: HTMLElement): BlockPath | null {
+		if (!editorElement) return null;
+		const topNodes = Array.from(editorElement.querySelector('.ProseMirror')?.children || []);
+		const topIndex = topNodes.indexOf(block);
+		if (topIndex !== -1) return { topIndex };
+
+		const detailsContentEl = block.parentElement?.matches('[data-type="detailsContent"]')
+			? block.parentElement
+			: null;
+		const detailsEl = detailsContentEl?.closest<HTMLElement>('[data-type="details"]');
+		if (detailsContentEl && detailsEl) {
+			const detailsTopIndex = topNodes.indexOf(detailsEl);
+			const detailsChildIndex = Array.from(detailsContentEl.children).indexOf(block);
+			if (detailsTopIndex !== -1 && detailsChildIndex !== -1) {
+				return { topIndex: detailsTopIndex, detailsChildIndex };
+			}
+		}
+
+		const columnEl = block.closest('[data-type="column"]');
+		const layoutEl = columnEl?.closest('[data-type="columnLayout"]');
+		if (!columnEl || !layoutEl) return null;
+		const layoutTopIndex = topNodes.indexOf(layoutEl);
+		const columnIndex = Array.from(layoutEl.children).indexOf(columnEl);
+		const childIndex = Array.from(columnEl.children).indexOf(block);
+		return layoutTopIndex !== -1 && columnIndex !== -1 && childIndex !== -1
+			? { topIndex: layoutTopIndex, columnIndex, childIndex }
+			: null;
+	}
+
+	function sameBlockPath(a: BlockPath, b: BlockPath): boolean {
+		return a.topIndex === b.topIndex &&
+			a.columnIndex === b.columnIndex &&
+			a.childIndex === b.childIndex &&
+			a.detailsChildIndex === b.detailsChildIndex;
+	}
+
+	function getDragTargetBlock(e: DragEvent): HTMLElement | null {
+		if (!editorElement) return null;
+		const candidates = Array.from(editorElement.querySelectorAll(
+			'.ProseMirror > *, .ProseMirror > [data-type="details"] > div > [data-type="detailsContent"] > *'
+		)).filter((node): node is HTMLElement => node instanceof HTMLElement);
+		const atPointer = candidates.filter(node => {
+			const rect = node.getBoundingClientRect();
+			return e.clientY >= rect.top && e.clientY <= rect.bottom &&
+				e.clientX >= rect.left && e.clientX <= rect.right;
+		});
+		return atPointer.find(node => node.parentElement?.matches('[data-type="detailsContent"]')) ?? atPointer[0] ?? null;
 	}
 
 	function deleteActiveBlock() {
@@ -849,17 +935,23 @@
 
 	function turnActiveBlockIntoToggleHeading(level: 1 | 2 | 3) {
 		if (!editor || !activeBlockNode) return;
+		const activeBlock = getActiveBlock();
+		if (!activeBlock) return;
 
 		// Changing the level of an existing toggle must only update its attribute.
 		// Rebuilding it would turn the nested blocks into a new, empty toggle body.
-		if (activeBlockNode.matches('[data-type="details"]')) {
-			editor.commands.updateAttributes('details', { level, open: true });
+		if (activeBlock.node.type.name === 'details') {
+			editor.chain().focus().command(({ tr }) => {
+				tr.setNodeMarkup(activeBlock.pos, undefined, {
+					...activeBlock.node.attrs,
+					level
+				});
+				return true;
+			}).run();
 			return;
 		}
 
-		const pos = editor.view.posAtDOM(activeBlockNode, 0);
-		const activeNode = editor.state.doc.nodeAt(pos);
-		if (!activeNode) return;
+		const { pos, node: activeNode } = activeBlock;
 
 		const { schema } = editor.state;
 		const summaryContent = activeNode.isTextblock
@@ -869,7 +961,7 @@
 				: undefined;
 		const summary = schema.nodes.detailsSummary.create(null, summaryContent);
 		const content = schema.nodes.detailsContent.create(null, schema.nodes.paragraph.create());
-		const toggle = schema.nodes.details.create({ level, open: true }, [summary, content]);
+		const toggle = schema.nodes.details.create({ level }, [summary, content]);
 		const cursorPosition = pos + 2 + summary.content.size;
 
 		editor
@@ -883,19 +975,71 @@
 			.run();
 	}
 
+	function getActiveBlock(): { pos: number; node: NonNullable<ReturnType<Editor['state']['doc']['nodeAt']>> } | null {
+		if (!editor || !activeBlockNode) return null;
+		let exactMatch: { pos: number; node: NonNullable<ReturnType<Editor['state']['doc']['nodeAt']>> } | null = null;
+		editor.state.doc.descendants((node, pos) => {
+			if (!exactMatch && editor?.view.nodeDOM(pos) === activeBlockNode) {
+				exactMatch = { pos, node };
+				return false;
+			}
+			return true;
+		});
+		if (exactMatch) return exactMatch;
+
+		const domPosition = editor.view.posAtDOM(activeBlockNode, 0);
+		const candidatePositions = new Set<number>([domPosition, domPosition - 1]);
+		const resolvedPosition = editor.state.doc.resolve(domPosition);
+
+		// `posAtDOM` points inside node views such as Details. Add every enclosing
+		// node boundary, then match it back to the exact DOM element that the user
+		// hovered. This is safe for top-level blocks, columns, and toggle children.
+		for (let depth = resolvedPosition.depth; depth > 0; depth -= 1) {
+			candidatePositions.add(resolvedPosition.before(depth));
+		}
+
+		for (const pos of candidatePositions) {
+			if (pos < 0) continue;
+			const node = editor.state.doc.nodeAt(pos);
+			if (node && editor.view.nodeDOM(pos) === activeBlockNode) {
+				return { pos, node };
+			}
+		}
+
+		return null;
+	}
+
+	function selectActiveBlockContent(): boolean {
+		if (!editor) return false;
+		const activeBlock = getActiveBlock();
+		if (!activeBlock) return false;
+
+		// Find the first editable text position inside the exact node selected by
+		// its gutter. This works for nested quotes, lists, and toggle children.
+		const selection = Selection.findFrom(editor.state.doc.resolve(activeBlock.pos), 1, true);
+		if (!selection) return false;
+		editor.view.dispatch(editor.state.tr.setSelection(selection));
+		return true;
+	}
+
 	function convertActiveBlockTo(type: 'paragraph' | 'heading' | 'toggleHeading' | 'blockquote' | 'codeBlock' | 'todoList' | 'divider' | 'table', level?: number) {
 		if (!editor || !activeBlockNode) return;
-
 		editor.commands.focus();
-		const pos = editor.view.posAtDOM(activeBlockNode, 0);
-		editor.commands.setTextSelection(pos);
 
-		if (type === 'paragraph') {
-			editor.commands.setParagraph();
+		if (type === 'toggleHeading' && level) {
+			turnActiveBlockIntoToggleHeading(level as 1 | 2 | 3);
+		} else if (!selectActiveBlockContent()) {
+			return;
+		} else if (type === 'paragraph') {
+			// "Text paragraph" means removing a quote wrapper, not merely changing
+			// its already-paragraph child into another paragraph.
+			if (editor.isActive('blockquote')) {
+				editor.commands.toggleBlockquote();
+			} else {
+				editor.commands.setParagraph();
+			}
 		} else if (type === 'heading' && level) {
 			editor.commands.toggleHeading({ level: level as any });
-		} else if (type === 'toggleHeading' && level) {
-			turnActiveBlockIntoToggleHeading(level as 1 | 2 | 3);
 		} else if (type === 'blockquote') {
 			editor.commands.toggleBlockquote();
 		} else if (type === 'codeBlock') {
@@ -954,17 +1098,16 @@
 
 		const editorRect = editorElement.getBoundingClientRect();
 
-		// Resolve the target block node at the current mouse Y coordinate
-		const domNodes = Array.from(editorElement.querySelectorAll('.ProseMirror > *'));
-		const targetBlock = domNodes.find(node => {
-			const rect = node.getBoundingClientRect();
-			return e.clientY >= rect.top && e.clientY <= rect.bottom;
-		}) as HTMLElement;
+		const targetBlock = getDragTargetBlock(e);
 		
 		if (!targetBlock) { dropLineTop = null; dropLineVertical = null; return; }
-
-		const targetIndex = domNodes.indexOf(targetBlock);
-		if (targetIndex === -1 || targetIndex === draggedBlockIndex) { dropLineTop = null; dropLineVertical = null; return; }
+		const targetPath = getBlockPathForElement(targetBlock);
+		if (!targetPath || !draggedBlockPath || sameBlockPath(targetPath, draggedBlockPath)) {
+			dropLineTop = null;
+			dropLineVertical = null;
+			return;
+		}
+		const targetIndex = targetPath.topIndex;
 
 		const rect = targetBlock.getBoundingClientRect();
 		const relativeX = e.clientX - rect.left;
@@ -974,7 +1117,8 @@
 		const isNearLeftEdge = relativeX < COLUMN_EDGE_THRESHOLD;
 		const isNearRightEdge = relativeX > (rect.width - COLUMN_EDGE_THRESHOLD);
 
-		if (isNearLeftEdge || isNearRightEdge) {
+		if ((isNearLeftEdge || isNearRightEdge) &&
+			draggedBlockPath.detailsChildIndex === undefined && targetPath.detailsChildIndex === undefined) {
 			// Check column count limit: if target is already a columnLayout, count existing columns
 			const docJson = editor?.getJSON();
 			const targetNode = docJson?.content?.[targetIndex];
@@ -1013,6 +1157,12 @@
 	 * Also cleans up empty columns and single-column layouts.
 	 */
 	function extractBlockByPath(docContent: any[], path: BlockPath): any {
+		if (path.detailsChildIndex !== undefined) {
+			const details = docContent[path.topIndex];
+			const detailsContent = details?.content?.find((node: any) => node.type === 'detailsContent');
+			if (!detailsContent?.content) return undefined;
+			return detailsContent.content.splice(path.detailsChildIndex, 1)[0];
+		}
 		if (path.columnIndex !== undefined && path.childIndex !== undefined) {
 			// Block is inside a column
 			const layout = docContent[path.topIndex];
@@ -1049,17 +1199,33 @@
 		e.preventDefault();
 		e.stopPropagation();
 
-		// Resolve drop target block node (top-level only for target)
-		const domNodes = Array.from(editorElement.querySelectorAll('.ProseMirror > *'));
-		const targetBlock = domNodes.find(node => {
-			const rect = node.getBoundingClientRect();
-			return e.clientY >= rect.top && e.clientY <= rect.bottom;
-		}) as HTMLElement;
+		const targetBlock = getDragTargetBlock(e);
 
 		if (!targetBlock) { handleDragEnd(); return; }
+		const targetPath = getBlockPathForElement(targetBlock);
+		if (!targetPath || sameBlockPath(targetPath, draggedBlockPath)) { handleDragEnd(); return; }
+		const targetIndex = targetPath.topIndex;
 
-		const targetIndex = domNodes.indexOf(targetBlock);
-		if (targetIndex === -1) { handleDragEnd(); return; }
+		// Reorder direct children of the same toggle without extracting them into
+		// the top-level document. Toggle content remains inside DetailsContent.
+		if (draggedBlockPath.detailsChildIndex !== undefined &&
+			targetPath.detailsChildIndex !== undefined &&
+			draggedBlockPath.topIndex === targetPath.topIndex) {
+			const docJson = editor.getJSON();
+			const detailsContent = docJson.content?.[draggedBlockPath.topIndex]?.content?.find((node: any) => node.type === 'detailsContent');
+			if (!detailsContent?.content) { handleDragEnd(); return; }
+
+			const rect = targetBlock.getBoundingClientRect();
+			const insertBefore = e.clientY - rect.top < rect.height / 2;
+			const [draggedBlock] = detailsContent.content.splice(draggedBlockPath.detailsChildIndex, 1);
+			let insertIndex = targetPath.detailsChildIndex;
+			if (draggedBlockPath.detailsChildIndex < targetPath.detailsChildIndex) insertIndex -= 1;
+			if (!insertBefore) insertIndex += 1;
+			detailsContent.content.splice(insertIndex, 0, draggedBlock);
+			editor.commands.setContent(docJson, true);
+			handleDragEnd();
+			return;
+		}
 
 		// Don't drop on itself (for top-level blocks)
 		if (draggedBlockPath.columnIndex === undefined && targetIndex === draggedBlockPath.topIndex) {
@@ -1247,7 +1413,7 @@
 					ondragend={handleDragEnd}
 					onkeydown={(e) => e.key === ' ' && (isActionMenuOpen = !isActionMenuOpen)}
 				>
-					<GripVertical size={14} />
+					<GripVertical size={19} />
 				</div>
 
 				<!-- Floating Block Action Options Dropdown -->
@@ -1610,14 +1776,14 @@
 		display: flex;
 		align-items: center;
 		gap: 2px;
-		height: 20px;
+		height: 24px;
 		z-index: 100;
 		user-select: none;
 	}
 
 	.gutter-btn {
 		width: 20px;
-		height: 20px;
+		height: 24px;
 		border-radius: 4px;
 		display: flex;
 		align-items: center;

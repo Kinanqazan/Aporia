@@ -1,6 +1,6 @@
 import { redirect, fail } from '@sveltejs/kit';
 import type { PageServerLoad, Actions } from './$types';
-import { getActivePages, getTrashPages, createPage, sendToTrash, restoreFromTrash, deletePermanently, emptyTrash, updatePage } from '$lib/server/pages';
+import { getActivePages, getTrashPages, createPage, sendToTrash, restoreFromTrash, deletePermanently, emptyTrash, movePage, updatePage } from '$lib/server/pages';
 
 export const load: PageServerLoad = async () => {
 	const active = await getActivePages();
@@ -41,6 +41,25 @@ export const actions: Actions = {
 		try {
 			const page = await updatePage(id, { title });
 			return { success: true, page };
+		} catch (err: any) {
+			return fail(500, { message: err.message });
+		}
+	},
+	move: async ({ request }) => {
+		const data = await request.formData();
+		const id = parseInt(data.get('id') as string, 10);
+		const parentIdValue = data.get('parentId') as string | null;
+		const parentId = parentIdValue && parentIdValue !== 'null' ? parseInt(parentIdValue, 10) : null;
+		const position = parseInt(data.get('position') as string, 10);
+
+		if (isNaN(id) || (parentId !== null && isNaN(parentId)) || isNaN(position) || position < 0) {
+			return fail(400, { message: 'Invalid page move' });
+		}
+
+		try {
+			const moved = await movePage(id, parentId, position);
+			if (!moved) return fail(400, { message: 'Invalid page move' });
+			return { success: true };
 		} catch (err: any) {
 			return fail(500, { message: err.message });
 		}
