@@ -580,7 +580,7 @@
 			<div class="left-controls">
 				{#if !isSidebarOpen || isMobile}
 					<button class="icon-btn menu-btn" onclick={toggleSidebar} title="Open sidebar">
-						<Menu size={16} />
+						<Menu size={isMobile ? 20 : 16} />
 					</button>
 				{/if}
 				{#if isMobile && currentPageId}
@@ -594,7 +594,7 @@
 							title={activePage.isLocked ? 'Unlock page' : 'Lock page'}
 							aria-label={activePage.isLocked ? 'Unlock page' : 'Lock page'}
 						>
-							{#if activePage.isLocked}<Lock size={16} />{:else}<Unlock size={16} />{/if}
+							{#if activePage.isLocked}<Lock size={20} />{:else}<Unlock size={20} />{/if}
 						</button>
 					{/if}
 				{/if}

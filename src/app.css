@@ -186,11 +186,11 @@ input, textarea {
 }
 
 .sidebar-header {
-	height: var(--header-height);
+	height: calc(var(--header-height) + env(safe-area-inset-top));
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 0 12px;
+	padding: env(safe-area-inset-top) 12px 0;
 	flex-shrink: 0;
 }
 
@@ -472,6 +472,7 @@ input, textarea {
 	display: flex;
 	flex-direction: column;
 	padding: 8px 4px;
+	padding-bottom: calc(8px + env(safe-area-inset-bottom));
 	gap: 2px;
 	border-top: 1px solid var(--border-color);
 	flex-shrink: 0;
@@ -500,11 +501,11 @@ input, textarea {
 }
 
 .header {
-	height: var(--header-height);
+	height: calc(var(--header-height) + env(safe-area-inset-top));
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 0 16px;
+	padding: env(safe-area-inset-top) 16px 0;
 	flex-shrink: 0;
 }
 
@@ -552,7 +553,9 @@ input, textarea {
 .canvas-wrapper {
 	flex: 1;
 	overflow-y: auto;
-	padding: 48px 16px 96px;
+	padding: 48px 16px calc(96px + env(safe-area-inset-bottom));
+	padding-left: max(16px, env(safe-area-inset-left));
+	padding-right: max(16px, env(safe-area-inset-right));
 	display: flex;
 	justify-content: center;
 }
@@ -591,6 +594,25 @@ input, textarea {
 
 .mobile .main-content {
 	padding-left: 0 !important;
+}
+
+/* Mobile icon size overrides — larger touch targets */
+.mobile .icon-btn {
+	width: 36px;
+	height: 36px;
+}
+
+.mobile .footer-icon-btn {
+	width: 44px;
+	height: 44px;
+}
+
+.mobile .footer-row {
+	justify-content: space-around;
+}
+
+.mobile .canvas-wrapper {
+	padding-top: 16px;
 }
 
 /* ==========================================================================

@@ -4,6 +4,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { Editor, Extension } from '@tiptap/core';
 	import { Selection, Plugin } from '@tiptap/pm/state';
+	import { DOMSerializer } from '@tiptap/pm/model';
 	import StarterKit from '@tiptap/starter-kit';
 	import { ColumnLayout } from '$lib/editor/extensions/ColumnLayout';
 	import { Column } from '$lib/editor/extensions/Column';
@@ -733,6 +734,16 @@
 				const jsonStr = JSON.stringify(jsonContent);
 				triggerAutosave(jsonStr);
 			}
+		});
+
+		// Override the clipboard serializer so copy/cut uses the schema's
+		// toDOM (renderHTML) instead of the node views. The DetailsContent node
+		// view starts with hidden="hidden", which causes the browser to skip
+		// the nested content during clipboard serialization. By using a
+		// schema-based serializer, all content (including collapsed toggle
+		// bodies) is always included in the clipboard payload.
+		editor.view.setProps({
+			clipboardSerializer: DOMSerializer.fromSchema(editor.schema)
 		});
 
 		editorPageId = data.pageRecord.id;
@@ -2143,6 +2154,12 @@
 		padding-top: 24px;
 	}
 
+	@media (max-width: 768px) {
+		.editor-page {
+			padding-top: 8px;
+		}
+	}
+
 	/* Floating Gutter handles */
 	.block-gutter {
 		position: absolute;
@@ -2245,8 +2262,8 @@
 	/* Autosave Floating indicator */
 	.autosave-indicator {
 		position: fixed;
-		top: 10px;
-		right: 16px;
+		top: calc(10px + env(safe-area-inset-top));
+		right: max(16px, env(safe-area-inset-right));
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
