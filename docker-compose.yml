@@ -1,0 +1,17 @@
+services:
+  aporia:
+    image: ${APORIA_IMAGE:-ghcr.io/kinanqaz/aporia}:latest
+    container_name: aporia
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: /app/data/app.db
+    volumes:
+      - aporia-data:/app/data
+
+volumes:
+  aporia-data:
