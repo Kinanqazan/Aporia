@@ -21,3 +21,8 @@ Thumbs.db
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Local SQLite runtime state
+data/*.db
+data/*.db-shm
+data/*.db-wal
