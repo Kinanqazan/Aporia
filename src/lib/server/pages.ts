@@ -1,10 +1,21 @@
 import { db, sqlite } from './database';
 import { pages } from './schema';
 import { eq, and, isNull, sql } from 'drizzle-orm';
+import { randomBytes } from 'crypto';
+
+export function generateId(length: number = 10): string {
+	const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+	const bytes = randomBytes(length);
+	let result = '';
+	for (let i = 0; i < length; i++) {
+		result += chars[bytes[i] % chars.length];
+	}
+	return result;
+}
 
 export interface PageNode {
-	id: number;
-	parentId: number | null;
+	id: string;
+	parentId: string | null;
 	position: number;
 	title: string;
 	icon: string | null;
@@ -20,10 +31,10 @@ export interface PageNode {
 }
 
 export interface SearchResult {
-	id: number;
+	id: string;
 	title: string;
 	icon: string | null;
-	parentId: number | null;
+	parentId: string | null;
 	/** HTML escaped; only generated <b> tags are preserved for match highlighting. */
 	snippet: string;
 }
@@ -45,13 +56,13 @@ export async function getTrashPages(): Promise<PageNode[]> {
 }
 
 // Get a single page by ID
-export async function getPageById(id: number): Promise<PageNode | null> {
+export async function getPageById(id: string): Promise<PageNode | null> {
 	const result = await db.select().from(pages).where(eq(pages.id, id)).limit(1) as PageNode[];
 	return result.length > 0 ? result[0] : null;
 }
 
 // Create a new page
-export async function createPage(parentId: number | null = null, title: string = 'Untitled', emoji: string | null = null): Promise<PageNode> {
+export async function createPage(parentId: string | null = null, title: string = 'Untitled', emoji: string | null = null): Promise<PageNode> {
 	const now = new Date().toISOString();
 	
 	// Determine the next position among siblings
@@ -68,7 +79,10 @@ export async function createPage(parentId: number | null = null, title: string =
 		nextPosition = siblings[0]?.count || 0;
 	}
 
+	const newId = generateId();
+
 	const result = await db.insert(pages).values({
+		id: newId,
 		parentId,
 		position: nextPosition,
 		title,
@@ -87,7 +101,7 @@ export async function createPage(parentId: number | null = null, title: string =
 
 // Update page attributes (metadata, content, etc.)
 export async function updatePage(
-	id: number, 
+	id: string, 
 	updates: Partial<Pick<PageNode, 'title' | 'icon' | 'contentJson' | 'contentText' | 'isLocked'>>
 ): Promise<PageNode | null> {
 	const now = new Date().toISOString();
@@ -115,7 +129,7 @@ export async function updatePage(
 }
 
 // Move a page to a new parent and position
-export async function movePage(id: number, targetParentId: number | null, targetPosition: number): Promise<boolean> {
+export async function movePage(id: string, targetParentId: string | null, targetPosition: number): Promise<boolean> {
 	const now = new Date().toISOString();
 	const pageToMove = await getPageById(id);
 	if (!pageToMove || pageToMove.isInTrash) return false;
@@ -169,7 +183,7 @@ export async function movePage(id: number, targetParentId: number | null, target
 }
 
 // Send a page (and recursively all its children) to the Trash Bin
-export async function sendToTrash(id: number): Promise<boolean> {
+export async function sendToTrash(id: string): Promise<boolean> {
 	const now = new Date().toISOString();
 	const page = await getPageById(id);
 	if (!page) return false;
@@ -186,7 +200,7 @@ export async function sendToTrash(id: number): Promise<boolean> {
 			.run();
 
 		// Recursively flag children (they follow parent to trash)
-		const findAndTrashChildren = (parentId: number) => {
+		const findAndTrashChildren = (parentId: string) => {
 			const children = tx.select().from(pages).where(eq(pages.parentId, parentId)).all();
 			for (const child of children) {
 				tx.update(pages)
@@ -208,7 +222,7 @@ export async function sendToTrash(id: number): Promise<boolean> {
 }
 
 // Restore a page from the Trash Bin
-export async function restoreFromTrash(id: number, newParentId: number | null = null): Promise<boolean> {
+export async function restoreFromTrash(id: string, newParentId: string | null = null): Promise<boolean> {
 	const now = new Date().toISOString();
 	const page = await getPageById(id);
 	if (!page) return false;
@@ -252,7 +266,7 @@ export async function restoreFromTrash(id: number, newParentId: number | null = 
 			.run();
 
 		// Recursively restore direct children to keep tree structure intact
-		const restoreChildren = (pId: number) => {
+		const restoreChildren = (pId: string) => {
 			const children = tx.select().from(pages).where(and(eq(pages.parentId, pId), eq(pages.isInTrash, 1))).all();
 			let childPos = 0;
 			for (const child of children) {
@@ -276,7 +290,7 @@ export async function restoreFromTrash(id: number, newParentId: number | null = 
 }
 
 // Permanently delete a page and all its descendants
-export async function deletePermanently(id: number): Promise<boolean> {
+export async function deletePermanently(id: string): Promise<boolean> {
 	const page = await getPageById(id);
 	if (!page) return false;
 
@@ -308,10 +322,10 @@ export function searchPages(query: string): SearchResult[] {
 		`).all(ftsQuery) as any[];
 
 		return results.map(row => ({
-			id: Number(row.id),
+			id: String(row.id),
 			title: String(row.title),
 			icon: row.icon ? String(row.icon) : null,
-			parentId: row.parentId ? Number(row.parentId) : null,
+			parentId: row.parentId ? String(row.parentId) : null,
 			snippet: row.snippet ? toSafeHighlightedSnippet(String(row.snippet)) : ''
 		}));
 	} catch (err) {

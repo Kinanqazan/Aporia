@@ -4,7 +4,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { enhance } from '$app/forms';
-	import { invalidateAll, goto } from '$app/navigation';
+	import { invalidateAll, goto, afterNavigate } from '$app/navigation';
 	import { 
 		Menu, 
 		ChevronLeft, 
@@ -20,8 +20,10 @@
 		RotateCcw,
 		Edit3,
 		Lock,
-		Unlock
+		Unlock,
+		FileDown
 	} from 'lucide-svelte';
+	import type { PageNode } from '$lib/server/pages';
 
 	// SvelteKit Props
 	let { data, children } = $props();
@@ -31,11 +33,11 @@
 	let isDarkMode = $state(false);
 	let isMobile = $state(false);
 	let isTrashOpen = $state(false);
-	let sidebarWidth = $state(240);
+	let sidebarWidth = $state(data.sidebarWidth ?? 240);
 	let isResizing = $state(false);
 	
 	// Track expanded nodes in the page tree sidebar
-	let expandedNodes = $state(new Set<number>());
+	let expandedNodes = $state(new Set<string>());
 
 	// Search States
 	let isSearchOpen = $state(false);
@@ -46,14 +48,31 @@
 	let searchContainerEl = $state<HTMLDivElement | null>(null);
 
 	// Inline editing title states
-	let editingPageId = $state<number | null>(null);
+	let editingPageId = $state<string | null>(null);
 	let editingTitleText = $state('');
-	let draggedPageId = $state<number | null>(null);
-	let dropTarget = $state<{ id: number; placement: 'before' | 'inside' | 'after' } | null>(null);
+	let draggedPageId = $state<string | null>(null);
+	let dropTarget = $state<{ id: string; placement: 'before' | 'inside' | 'after' } | null>(null);
 	let isLockRequestInFlight = $state(false);
+	
+	// Section Title States
+	let sectionTitle = $state(data.sectionTitle ?? 'Private');
+	let isEditingSectionTitle = $state(false);
 
 	// Active page tracking from route params
-	let currentPageId = $derived($page.params.id ? parseInt($page.params.id, 10) : null);
+	let currentPageId = $derived($page.params.id || null);
+
+	// Breadcrumb path tracking
+	let breadcrumbs = $derived.by(() => {
+		if (!currentPageId || !data.activePages) return [];
+		const path: any[] = [];
+		const pagesMap = new Map(data.activePages.map((p) => [p.id, p]));
+		let current = pagesMap.get(currentPageId);
+		while (current) {
+			path.unshift(current);
+			current = current.parentId ? pagesMap.get(current.parentId) : undefined;
+		}
+		return path;
+	});
 
 	// Tree structure derived from active database pages
 	let pageTree = $derived(buildTree(data.activePages || []));
@@ -107,10 +126,13 @@
 		};
 		window.addEventListener('click', handleClickOutside);
 
-		// Sidebar width restoration
-		const savedWidth = localStorage.getItem('sidebar-width');
-		if (savedWidth) {
-			sidebarWidth = parseInt(savedWidth, 10);
+		// Sidebar width cookie migration & restoration
+		if (!document.cookie.includes('sidebar-width=')) {
+			const savedWidth = localStorage.getItem('sidebar-width');
+			if (savedWidth) {
+				sidebarWidth = parseInt(savedWidth, 10);
+				document.cookie = `sidebar-width=${savedWidth}; path=/; max-age=31536000; SameSite=Lax`;
+			}
 		}
 
 		// Dark Mode Initialization
@@ -129,6 +151,13 @@
 			window.removeEventListener('resize', handleResize);
 			window.removeEventListener('click', handleClickOutside);
 		};
+	});
+
+	afterNavigate(() => {
+		isSearchOpen = false;
+		if (isMobile) {
+			isSidebarOpen = false;
+		}
 	});
 
 	async function handleSearchInput() {
@@ -208,6 +237,7 @@
 			window.removeEventListener('mousemove', handleMouseMove);
 			window.removeEventListener('mouseup', handleMouseUp);
 			localStorage.setItem('sidebar-width', String(sidebarWidth));
+			document.cookie = `sidebar-width=${sidebarWidth}; path=/; max-age=31536000; SameSite=Lax`;
 		};
 		window.addEventListener('mousemove', handleMouseMove);
 		window.addEventListener('mouseup', handleMouseUp);
@@ -228,7 +258,7 @@
 		}
 	}
 
-	function toggleNodeExpand(id: number, e: MouseEvent) {
+	function toggleNodeExpand(id: string, e: MouseEvent) {
 		e.stopPropagation();
 		const next = new Set(expandedNodes);
 		if (next.has(id)) {
@@ -239,7 +269,7 @@
 		expandedNodes = next;
 	}
 
-	function startEditingTitle(id: number, currentTitle: string, e: MouseEvent) {
+	function startEditingTitle(id: string, currentTitle: string, e: MouseEvent) {
 		e.stopPropagation();
 		editingPageId = id;
 		editingTitleText = currentTitle;
@@ -249,10 +279,10 @@
 		editingPageId = null;
 	}
 
-	function isValidDropTarget(targetId: number) {
+	function isValidDropTarget(targetId: string) {
 		if (draggedPageId === null || draggedPageId === targetId) return false;
 
-		let ancestorId: number | null = targetId;
+		let ancestorId: string | null = targetId;
 		while (ancestorId !== null) {
 			if (ancestorId === draggedPageId) return false;
 			const ancestor = data.activePages?.find((page) => page.id === ancestorId);
@@ -391,19 +421,59 @@
 					</div>
 				{/if}
 			</div>
-			<form method="POST" action="/?/create" use:enhance>
-				<input type="hidden" name="parentId" value="null" />
-				<input type="hidden" name="title" value="Untitled" />
-				<button type="submit" class="action-item add-page-action-btn">
-					<Plus size={14} />
-					<span>New Page</span>
-				</button>
-			</form>
 		</div>
 
 		<!-- Page list -->
 		<div class="sidebar-nav">
-			<div class="section-title">Private</div>
+			<div class="section-header">
+				{#if isEditingSectionTitle}
+					<input
+						type="text"
+						class="section-title-input"
+						bind:value={sectionTitle}
+						onblur={async () => {
+							isEditingSectionTitle = false;
+							if (!sectionTitle.trim()) sectionTitle = 'Private';
+							document.cookie = `sidebar-section-title=${encodeURIComponent(sectionTitle)}; path=/; max-age=31536000; SameSite=Lax`;
+							await fetch('/api/settings', {
+								method: 'POST',
+								headers: { 'Content-Type': 'application/json' },
+								body: JSON.stringify({ key: 'sidebar-section-title', value: sectionTitle })
+							});
+						}}
+						onkeydown={async (e) => {
+							if (e.key === 'Enter') {
+								isEditingSectionTitle = false;
+								if (!sectionTitle.trim()) sectionTitle = 'Private';
+								document.cookie = `sidebar-section-title=${encodeURIComponent(sectionTitle)}; path=/; max-age=31536000; SameSite=Lax`;
+								await fetch('/api/settings', {
+									method: 'POST',
+									headers: { 'Content-Type': 'application/json' },
+									body: JSON.stringify({ key: 'sidebar-section-title', value: sectionTitle })
+								});
+							}
+						}}
+						use:focusOnMount
+					/>
+				{:else}
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div 
+						class="section-title editable" 
+						onclick={() => isEditingSectionTitle = true} 
+						title="Click to edit section name"
+					>
+						{sectionTitle}
+					</div>
+				{/if}
+				<form method="POST" action="/?/create" use:enhance style="display: inline-flex;">
+					<input type="hidden" name="parentId" value="null" />
+					<input type="hidden" name="title" value="Untitled" />
+					<button type="submit" class="add-section-btn" title="Create new page">
+						<Plus size={13} />
+					</button>
+				</form>
+			</div>
 			
 			<div class="pages-list">
 				{#each pageTree as pageNode}
@@ -411,7 +481,7 @@
 				{/each}
 				
 				{#if pageTree.length === 0}
-					<div class="empty-tree-message">No pages created yet. Click "New Page" to start.</div>
+					<div class="empty-tree-message">No pages created yet. Click the "+" to start.</div>
 				{/if}
 			</div>
 		</div>
@@ -459,17 +529,29 @@
 
 		<!-- Trash & Export -->
 		<div class="sidebar-footer">
-			<button class="footer-item" onclick={() => isTrashOpen = !isTrashOpen}>
-				<Trash2 size={14} />
-				<span>Trash</span>
-				{#if data.trashPages && data.trashPages.length > 0}
-					<span class="trash-badge">{data.trashPages.length}</span>
+			<div class="footer-row">
+				<button class="footer-icon-btn" onclick={() => isTrashOpen = !isTrashOpen} title="Trash Bin">
+					<Trash2 size={18} />
+					{#if data.trashPages && data.trashPages.length > 0}
+						<span class="trash-badge-bubble">{data.trashPages.length}</span>
+					{/if}
+				</button>
+				<a href="/api/export?all=true" download class="footer-icon-btn" title="Export all pages to Markdown">
+					<Download size={18} />
+				</a>
+				{#if currentPageId}
+					<a href="/api/export?id={currentPageId}" download class="footer-icon-btn" title="Export current page to Markdown">
+						<FileDown size={18} />
+					</a>
 				{/if}
-			</button>
-			<a href="/api/export?all=true" download class="footer-item">
-				<Download size={14} />
-				<span>Export</span>
-			</a>
+				<button class="footer-icon-btn" onclick={toggleTheme} title="Toggle dark/light theme">
+					{#if isDarkMode}
+						<Sun size={18} />
+					{:else}
+						<Moon size={18} />
+					{/if}
+				</button>
+			</div>
 		</div>
 
 		<!-- Resizer handle -->
@@ -501,51 +583,62 @@
 						<Menu size={16} />
 					</button>
 				{/if}
-				<div class="breadcrumbs">
-					<span class="breadcrumb-item">Aporia</span>
-					<span class="breadcrumb-separator">/</span>
-					<span class="breadcrumb-item active">
+				{#if isMobile && currentPageId}
+					{@const activePage = data.activePages?.find(p => p.id === currentPageId)}
+					{#if activePage}
+						<button
+							class="icon-btn mobile-lock-btn"
+							type="button"
+							onclick={togglePageLock}
+							disabled={isLockRequestInFlight}
+							title={activePage.isLocked ? 'Unlock page' : 'Lock page'}
+							aria-label={activePage.isLocked ? 'Unlock page' : 'Lock page'}
+						>
+							{#if activePage.isLocked}<Lock size={16} />{:else}<Unlock size={16} />{/if}
+						</button>
+					{/if}
+				{/if}
+				{#if !isMobile}
+					<div class="breadcrumbs">
+						<span class="breadcrumb-item">Aporia</span>
 						{#if currentPageId}
-							{@const activePage = data.activePages?.find(p => p.id === currentPageId)}
-							{#if activePage}
-								<span style="display: inline-flex; align-items: center; margin-right: 6px; vertical-align: middle;">
-									<PageIcon icon={activePage.icon} size={14} />
-								</span>
-								<span>{activePage.title}</span>
-								<button
-									class="breadcrumb-lock-btn"
-									type="button"
-									onclick={togglePageLock}
-									disabled={isLockRequestInFlight}
-									title={activePage.isLocked ? 'Unlock page' : 'Lock page'}
-									aria-label={activePage.isLocked ? 'Unlock page' : 'Lock page'}
-								>
-									{#if activePage.isLocked}<Lock size={13} />{:else}<Unlock size={13} />{/if}
-								</button>
-							{:else}
-								Loading...
-							{/if}
+							{#each breadcrumbs as crumb, i}
+								<span class="breadcrumb-separator">/</span>
+								{#if i === breadcrumbs.length - 1}
+									<span class="breadcrumb-item active">
+										<span style="display: inline-flex; align-items: center; margin-right: 6px; vertical-align: middle;">
+											<PageIcon icon={crumb.icon} size={14} />
+										</span>
+										<span>{crumb.title || 'Untitled'}</span>
+										<button
+											class="breadcrumb-lock-btn"
+											type="button"
+											onclick={togglePageLock}
+											disabled={isLockRequestInFlight}
+											title={crumb.isLocked ? 'Unlock page' : 'Lock page'}
+											aria-label={crumb.isLocked ? 'Unlock page' : 'Lock page'}
+										>
+											{#if crumb.isLocked}<Lock size={13} />{:else}<Unlock size={13} />{/if}
+										</button>
+									</span>
+								{:else}
+									<a href="/{crumb.id}" class="breadcrumb-item link">
+										<span style="display: inline-flex; align-items: center; margin-right: 4px; vertical-align: middle;">
+											<PageIcon icon={crumb.icon} size={12} />
+										</span>
+										<span>{crumb.title || 'Untitled'}</span>
+									</a>
+								{/if}
+							{/each}
 						{:else}
-							Workspace
+							<span class="breadcrumb-separator">/</span>
+							<span class="breadcrumb-item active">Workspace</span>
 						{/if}
-					</span>
-				</div>
+					</div>
+				{/if}
 			</div>
 
-			<div class="right-controls">
-				{#if currentPageId}
-					<a href="/api/export?id={currentPageId}" download class="icon-btn export-btn" title="Export page to Markdown">
-						<Download size={16} />
-					</a>
-				{/if}
-				<button class="icon-btn theme-btn" onclick={toggleTheme} title="Toggle theme">
-					{#if isDarkMode}
-						<Sun size={16} />
-					{:else}
-						<Moon size={16} />
-					{/if}
-				</button>
-			</div>
+
 		</header>
 
 		<!-- Canvas Area -->
@@ -560,7 +653,7 @@
 
 
 <!-- Snippet: Recursive Node rendering -->
-{#snippet renderNode(node: any)}
+{#snippet renderNode(node: PageNode & { children?: any[] })}
 	<div class="page-tree-node">
 		<!-- Page item row container -->
 		<div 
@@ -704,10 +797,6 @@
 	}
 
 	/* Sidebar Custom Additions */
-	.add-page-action-btn {
-		justify-content: flex-start;
-		font-weight: 500;
-	}
 
 	.empty-tree-message {
 		font-size: 13px;
@@ -910,16 +999,6 @@
 		padding: 24px;
 	}
 
-	.trash-badge {
-		background-color: var(--border-color);
-		color: var(--text-muted);
-		font-size: 11px;
-		padding: 1px 6px;
-		border-radius: 10px;
-		margin-left: auto;
-		font-weight: 600;
-	}
-
 	/* Sidebar Search Styles */
 	.sidebar-search-container {
 		position: relative;
@@ -1045,5 +1124,48 @@
 		background-color: var(--selection-bg);
 		padding: 0 2px;
 		border-radius: 2px;
+	}
+
+	.footer-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		padding: 4px 8px;
+	}
+
+	.footer-icon-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 38px;
+		height: 38px;
+		border-radius: 6px;
+		color: var(--text-muted);
+		transition: background var(--transition-speed), color var(--transition-speed);
+		position: relative;
+	}
+
+	.footer-icon-btn:hover {
+		background-color: var(--hover-sidebar);
+		color: var(--text-main);
+	}
+
+	.trash-badge-bubble {
+		position: absolute;
+		top: 1px;
+		right: 1px;
+		background-color: var(--border-color);
+		color: var(--text-muted);
+		font-size: 9px;
+		min-width: 14px;
+		height: 14px;
+		padding: 0 3px;
+		border-radius: 7px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-weight: 700;
+		border: 1px solid var(--bg-sidebar);
 	}
 </style>

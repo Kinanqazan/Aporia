@@ -25,6 +25,14 @@ export const db = drizzle(sqlite, { schema });
 // This ordering is essential for a fresh database on first application start.
 migrate(db, { migrationsFolder: './drizzle' });
 
+// Initialize Settings Table
+sqlite.exec(`
+	CREATE TABLE IF NOT EXISTS settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	);
+`);
+
 // Initialize FTS5 Search
 sqlite.exec(`
 	CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(

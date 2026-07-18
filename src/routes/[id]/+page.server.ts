@@ -3,8 +3,8 @@ import type { PageServerLoad, Actions } from './$types';
 import { getPageById, updatePage } from '$lib/server/pages';
 
 export const load: PageServerLoad = async ({ params }) => {
-	const id = parseInt(params.id, 10);
-	if (isNaN(id)) throw error(400, 'Invalid page ID');
+	const id = params.id;
+	if (!id) throw error(400, 'Invalid page ID');
 
 	const pageRecord = await getPageById(id);
 	if (!pageRecord || pageRecord.isInTrash === 1) {
@@ -18,8 +18,8 @@ export const load: PageServerLoad = async ({ params }) => {
 
 export const actions: Actions = {
 	renamePage: async ({ params, request }) => {
-		const id = parseInt(params.id, 10);
-		if (isNaN(id)) return fail(400, { message: 'Invalid page ID' });
+		const id = params.id;
+		if (!id) return fail(400, { message: 'Invalid page ID' });
 
 		const data = await request.formData();
 		const title = data.get('title') as string;
@@ -34,8 +34,8 @@ export const actions: Actions = {
 		}
 	},
 	changeIcon: async ({ params, request }) => {
-		const id = parseInt(params.id, 10);
-		if (isNaN(id)) return fail(400, { message: 'Invalid page ID' });
+		const id = params.id;
+		if (!id) return fail(400, { message: 'Invalid page ID' });
 
 		const data = await request.formData();
 		const icon = data.get('icon') as string | null;
@@ -50,8 +50,8 @@ export const actions: Actions = {
 		}
 	},
 	toggleLock: async ({ params, request }) => {
-		const id = parseInt(params.id, 10);
-		if (isNaN(id)) return fail(400, { message: 'Invalid page ID' });
+		const id = params.id;
+		if (!id) return fail(400, { message: 'Invalid page ID' });
 
 		const data = await request.formData();
 		const isLocked = data.get('isLocked') === 'true';

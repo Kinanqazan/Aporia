@@ -3,8 +3,8 @@ import type { RequestHandler } from './$types';
 import { getPageById, updatePage } from '$lib/server/pages';
 
 export const POST: RequestHandler = async ({ params, request }) => {
-	const id = parseInt(params.id, 10);
-	if (isNaN(id)) {
+	const id = params.id;
+	if (!id) {
 		return json({ success: false, error: 'Invalid page ID' }, { status: 400 });
 	}
 

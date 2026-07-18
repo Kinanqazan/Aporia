@@ -32,10 +32,16 @@
 
 	let { data } = $props();
 	
+	let subPages = $derived(
+		(data.activePages || [])
+			.filter((p: any) => p.parentId === data.pageRecord.id)
+			.sort((a: any, b: any) => a.position - b.position)
+	);
+	
 	// Local state bound to input elements for title and icon
-	let title = $state('');
-	let isLocked = $state(false);
-	let icon = $state('📄');
+	let title = $state(data.pageRecord.title);
+	let isLocked = $state(data.pageRecord.isLocked === 1);
+	let icon = $state(data.pageRecord.icon || '📄');
 	
 	let isIconPickerOpen = $state(false);
 	let iconInputText = $state('');
@@ -52,7 +58,7 @@
 	// Tiptap states
 	let editorElement = $state<HTMLDivElement>();
 	let editor = $state<Editor>();
-	let editorPageId = $state<number | null>(null);
+	let editorPageId = $state<string | null>(null);
 	let autosaveStatus = $state<'saved' | 'saving' | 'error'>('saved');
 	let autosaveTimeout: any;
 	let saveInFlight: Promise<void> | null = null;
@@ -938,7 +944,7 @@
 	}
 
 	// Holds the content and page ID for any pending unsaved edit.
-	let pendingSave: { pageId: number; contentJson: string } | null = null;
+	let pendingSave: { pageId: string; contentJson: string } | null = null;
 
 	async function flushPendingSave(options: { keepalive?: boolean } = {}) {
 		while (saveInFlight || pendingSave) {
@@ -1732,6 +1738,20 @@
 			/>
 		</form>
 	</div>
+	
+	<!-- Subpages nested within this page -->
+	{#if subPages.length > 0}
+		<div class="subpages-list">
+			{#each subPages as subPage}
+				<a href="/{subPage.id}" class="subpages-item">
+					<span class="subpages-icon-wrapper">
+						<PageIcon icon={subPage.icon || '📄'} size={20} />
+					</span>
+					<span class="subpages-item-text">{subPage.title || 'Untitled'}</span>
+				</a>
+			{/each}
+		</div>
+	{/if}
 
 	<!-- Tiptap Canvas Container -->
 	<div class="editor-canvas-container">
@@ -2224,9 +2244,9 @@
 
 	/* Autosave Floating indicator */
 	.autosave-indicator {
-		position: absolute;
-		top: -15px;
-		right: 0;
+		position: fixed;
+		top: 10px;
+		right: 16px;
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
@@ -2239,6 +2259,7 @@
 		user-select: none;
 		pointer-events: none;
 		transition: color var(--transition-speed), border-color var(--transition-speed);
+		z-index: 1000;
 	}
 
 	.autosave-indicator.status-saving {
@@ -2374,6 +2395,58 @@
 
 	.reset-icon-btn:hover {
 		color: var(--text-main);
+	}
+
+	/* Subpages nested list styling */
+	.subpages-list {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		margin-top: 12px;
+		margin-bottom: 20px;
+		padding: 4px 0;
+	}
+
+	.subpages-item {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 17px;
+		color: var(--text-main);
+		text-decoration: none;
+		padding: 5px 8px;
+		border-radius: 4px;
+		width: max-content;
+		max-width: 100%;
+		transition: background-color var(--transition-speed);
+	}
+
+	.subpages-item:hover {
+		background-color: var(--hover-sidebar);
+	}
+
+	.subpages-item-text {
+		font-weight: 550;
+		border-bottom: 1px solid rgba(120, 120, 120, 0.15);
+		line-height: 1.25;
+		transition: border-color var(--transition-speed), color var(--transition-speed);
+	}
+
+	.subpages-item:hover .subpages-item-text {
+		border-bottom-color: rgba(120, 120, 120, 0.6);
+		color: var(--text-main);
+	}
+
+	.subpages-icon-wrapper {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--text-main);
+		transition: transform var(--transition-speed);
+	}
+
+	.subpages-item:hover .subpages-icon-wrapper {
+		transform: scale(1.05);
 	}
 
 	.title-row {

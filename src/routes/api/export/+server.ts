@@ -8,9 +8,7 @@ export const GET: RequestHandler = async ({ url }) => {
 	const all = url.searchParams.get('all') === 'true';
 
 	if (idStr) {
-		const id = parseInt(idStr, 10);
-		if (isNaN(id)) throw error(400, 'Invalid page ID');
-		
+		const id = idStr;
 		const page = await getPageById(id);
 		if (!page || page.isInTrash) throw error(404, 'Page not found');
 

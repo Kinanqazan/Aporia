@@ -19,7 +19,7 @@ export const actions: Actions = {
 		const parentIdStr = data.get('parentId') as string | null;
 		const title = (data.get('title') as string) || 'Untitled';
 		const icon = data.get('icon') as string | null;
-		const parentId = parentIdStr && parentIdStr !== 'null' ? parseInt(parentIdStr, 10) : null;
+		const parentId = parentIdStr && parentIdStr !== 'null' ? parentIdStr : null;
 
 		let page;
 		try {
@@ -32,11 +32,10 @@ export const actions: Actions = {
 	},
 	rename: async ({ request }) => {
 		const data = await request.formData();
-		const idStr = data.get('id') as string;
+		const id = data.get('id') as string;
 		const title = data.get('title') as string;
-		const id = parseInt(idStr, 10);
 
-		if (isNaN(id)) return fail(400, { message: 'Invalid page ID' });
+		if (!id) return fail(400, { message: 'Invalid page ID' });
 
 		try {
 			const page = await updatePage(id, { title });
@@ -47,12 +46,12 @@ export const actions: Actions = {
 	},
 	move: async ({ request }) => {
 		const data = await request.formData();
-		const id = parseInt(data.get('id') as string, 10);
+		const id = data.get('id') as string;
 		const parentIdValue = data.get('parentId') as string | null;
-		const parentId = parentIdValue && parentIdValue !== 'null' ? parseInt(parentIdValue, 10) : null;
+		const parentId = parentIdValue && parentIdValue !== 'null' ? parentIdValue : null;
 		const position = parseInt(data.get('position') as string, 10);
 
-		if (isNaN(id) || (parentId !== null && isNaN(parentId)) || isNaN(position) || position < 0) {
+		if (!id || isNaN(position) || position < 0) {
 			return fail(400, { message: 'Invalid page move' });
 		}
 
@@ -66,11 +65,10 @@ export const actions: Actions = {
 	},
 	updateIcon: async ({ request }) => {
 		const data = await request.formData();
-		const idStr = data.get('id') as string;
+		const id = data.get('id') as string;
 		const icon = data.get('icon') as string | null;
-		const id = parseInt(idStr, 10);
 
-		if (isNaN(id)) return fail(400, { message: 'Invalid page ID' });
+		if (!id) return fail(400, { message: 'Invalid page ID' });
 
 		try {
 			const page = await updatePage(id, { icon });
@@ -81,10 +79,9 @@ export const actions: Actions = {
 	},
 	trash: async ({ request }) => {
 		const data = await request.formData();
-		const idStr = data.get('id') as string;
-		const id = parseInt(idStr, 10);
+		const id = data.get('id') as string;
 
-		if (isNaN(id)) return fail(400, { message: 'Invalid page ID' });
+		if (!id) return fail(400, { message: 'Invalid page ID' });
 
 		try {
 			await sendToTrash(id);
@@ -95,10 +92,9 @@ export const actions: Actions = {
 	},
 	restore: async ({ request }) => {
 		const data = await request.formData();
-		const idStr = data.get('id') as string;
-		const id = parseInt(idStr, 10);
+		const id = data.get('id') as string;
 
-		if (isNaN(id)) return fail(400, { message: 'Invalid page ID' });
+		if (!id) return fail(400, { message: 'Invalid page ID' });
 
 		try {
 			await restoreFromTrash(id);
@@ -109,10 +105,9 @@ export const actions: Actions = {
 	},
 	delete: async ({ request }) => {
 		const data = await request.formData();
-		const idStr = data.get('id') as string;
-		const id = parseInt(idStr, 10);
+		const id = data.get('id') as string;
 
-		if (isNaN(id)) return fail(400, { message: 'Invalid page ID' });
+		if (!id) return fail(400, { message: 'Invalid page ID' });
 
 		try {
 			await deletePermanently(id);

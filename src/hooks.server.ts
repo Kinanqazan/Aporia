@@ -16,6 +16,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 		path === '/login' || 
 		path === '/logo.svg' || 
 		path === '/favicon.svg' || 
+		path === '/manifest.webmanifest' ||
+		path === '/apple-touch-icon.png' ||
+		path.startsWith('/logo-') ||
 		path.startsWith('/_app') || 
 		path.startsWith('/favicon')
 	) {

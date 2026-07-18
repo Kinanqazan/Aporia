@@ -15,6 +15,13 @@
       "when": 1784380000000,
       "tag": "0001_add_page_lock",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784409279365,
+      "tag": "0002_panoramic_tiger_shark",
+      "breakpoints": true
     }
   ]
 }

@@ -285,13 +285,68 @@ input, textarea {
 	padding: 16px 10px;
 }
 
+.section-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0 6px 6px;
+}
+
 .section-title {
-	font-size: 12px;
+	font-size: 11px;
 	font-weight: 600;
 	text-transform: uppercase;
 	color: var(--text-muted);
 	letter-spacing: 0.5px;
-	padding: 0 6px 6px;
+	margin: 0;
+	padding: 0;
+}
+
+.section-title.editable {
+	cursor: pointer;
+	border-radius: 3px;
+	padding: 2px 4px;
+	margin-left: -4px;
+	transition: background-color var(--transition-speed), color var(--transition-speed);
+}
+
+.section-title.editable:hover {
+	background-color: var(--hover-sidebar);
+	color: var(--text-main);
+}
+
+.section-title-input {
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	color: var(--text-main);
+	letter-spacing: 0.5px;
+	background: transparent;
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	outline: none;
+	padding: 2px 4px;
+	margin-left: -4px;
+	width: 120px;
+}
+
+.add-section-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	border-radius: 4px;
+	color: var(--text-muted);
+	background: transparent;
+	border: none;
+	cursor: pointer;
+	transition: background var(--transition-speed), color var(--transition-speed);
+}
+
+.add-section-btn:hover {
+	background: var(--hover-sidebar);
+	color: var(--text-main);
 }
 
 .pages-list {
@@ -450,7 +505,6 @@ input, textarea {
 	align-items: center;
 	justify-content: space-between;
 	padding: 0 16px;
-	border-bottom: 1px solid var(--border-color);
 	flex-shrink: 0;
 }
 
@@ -475,6 +529,17 @@ input, textarea {
 .breadcrumb-item.active {
 	color: var(--text-main);
 	font-weight: 500;
+}
+
+.breadcrumb-item.link {
+	color: var(--text-muted);
+	text-decoration: none;
+	transition: color var(--transition-speed);
+	cursor: pointer;
+}
+
+.breadcrumb-item.link:hover {
+	color: var(--text-main);
 }
 
 .right-controls {
