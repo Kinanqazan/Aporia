@@ -11,7 +11,4 @@ services:
       PORT: 3000
       DATABASE_URL: /app/data/app.db
     volumes:
-      - aporia-data:/app/data
-
-volumes:
-  aporia-data:
+      - ./config/aporia:/app/data

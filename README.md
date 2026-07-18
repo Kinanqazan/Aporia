@@ -1,108 +1,113 @@
-# Aporia
+# Aporia deployment
 
-Aporia is a SvelteKit application backed by SQLite.
+## 1. Publish the image
 
-## Developing
+Push the repository to GitHub. The workflow in
+`.github/workflows/docker-publish.yml` builds and publishes the image to GHCR:
 
-```sh
-npm install
-npm run dev
+```text
+ghcr.io/<github-owner>/<repository>:latest
 ```
 
-## Docker deployment
+Wait for the GitHub Actions workflow to finish successfully.
 
-### Run the published image
+## 2. Prepare the Docker host
 
-Set the GHCR image path in `.env`:
-
-```sh
-cp .env.example .env
-```
-
-Then pull and start the image:
+On the Docker host or LXC, create a directory for the SQLite database:
 
 ```sh
-docker compose pull
-docker compose up -d
+mkdir -p /opt/appsstack/config/aporia
+chown -R 1000:1000 /opt/appsstack/config/aporia
 ```
 
-Open <http://localhost:3001>. The host port is `3001`; the app listens on
-container port `3000`. The SQLite database persists in the
-`aporia-data` Docker volume.
+The directory can be changed, but it must match the Compose bind mount.
 
-```sh
-docker compose logs -f aporia
-docker compose down
-```
+## 3. Add the service to Compose
 
-### GitHub Actions and GHCR
-
-`.github/workflows/docker-publish.yml` builds and publishes the Docker image
-to GitHub Container Registry whenever `main` is updated. Push the workflow to
-GitHub:
-
-```sh
-git add .
-git commit -m "Add Docker deployment"
-git push origin main
-```
-
-The workflow uses the automatic `GITHUB_TOKEN`; no repository secret is
-required. It already requests `packages: write` permission.
-
-### Deploy in the LXC
-
-Copy the Aporia service from `docker-compose.yml` into the existing
-`/opt/appsstack/docker-compose.yml` under its `services:` section. Do not add a
-second top-level `services:` key.
+Add this service under the existing top-level `services:` section in your
+Compose file:
 
 ```yaml
   aporia:
-    image: ghcr.io/kinanqaz/aporia:latest
+    image: ghcr.io/<github-owner>/<repository>:latest
     container_name: aporia
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 3000
       DATABASE_URL: /app/data/app.db
     volumes:
-      - aporia-data:/app/data
+      - ./config/aporia:/app/data
 ```
 
-Add this top-level section if it does not already exist:
+Replace `<github-owner>/<repository>` with the actual GHCR image path.
+
+Port `3000` is the container port. Port `3001` is the host port used by the
+reverse proxy. If the app should be directly accessible without a reverse
+proxy, change the mapping to:
 
 ```yaml
-volumes:
-  aporia-data:
+      - "3001:3000"
 ```
 
-The left side of `3001:3000` is the LXC host port. The right side must remain
-`3000`, which is the port used inside the container. The app will be available
-at `http://LXC_IP:3001`.
+## 4. Authenticate to GHCR
 
-After editing `/opt/appsstack/docker-compose.yml`, validate and start it:
-
-```sh
-cd /opt/appsstack
-docker compose config
-docker compose pull aporia
-docker compose up -d aporia
-```
-
-For a private GHCR package, authenticate first with a GitHub Personal Access
-Token having `read:packages` permission:
+For a private image, log in on the Docker host with a GitHub token that has
+`read:packages` permission:
 
 ```sh
 docker login ghcr.io
 ```
 
-After a new push to GitHub, update the LXC:
+Public images do not normally require login.
+
+## 5. Start the service
+
+Run these commands from the directory containing the Compose file:
 
 ```sh
-cd /opt/appsstack
+docker compose config
 docker compose pull aporia
 docker compose up -d aporia
 ```
+
+Check the service:
+
+```sh
+docker compose ps aporia
+docker compose logs -f aporia
+```
+
+## 6. Optional: use Caddy
+
+For an HTTPS hostname, add a site to the Caddyfile:
+
+```caddy
+aporia.example.com {
+    reverse_proxy 127.0.0.1:3001
+}
+```
+
+Point the hostname to the Docker host and reload Caddy:
+
+```sh
+caddy validate --config /etc/caddy/Caddyfile
+systemctl reload caddy
+```
+
+Open the app at `https://aporia.example.com`. No `.env` file or `ORIGIN`
+setting is required when Caddy provides HTTPS.
+
+## 7. Update the app
+
+After a new image has been published:
+
+```sh
+docker compose pull aporia
+docker compose up -d aporia
+```
+
+The SQLite database remains in the bind-mounted host directory.
