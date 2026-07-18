@@ -1,6 +1,8 @@
 import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core';
 
-export const pages = sqliteTable('pages', {
+// The self-referencing parent relation otherwise creates a circular type
+// inference error with newer TypeScript/Drizzle combinations.
+export const pages: any = sqliteTable('pages', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
 	parentId: integer('parent_id').references(() => pages.id, { onDelete: 'cascade' }),
 	position: integer('position').notNull().default(0),
@@ -10,6 +12,7 @@ export const pages = sqliteTable('pages', {
 	contentText: text('content_text').notNull().default(''),
 	schemaVersion: integer('schema_version').notNull().default(1),
 	revision: integer('revision').notNull().default(1),
+	isLocked: integer('is_locked').notNull().default(0), // 0 = unlocked, 1 = locked
 	isInTrash: integer('is_in_trash').notNull().default(0), // 0 = false, 1 = true
 	createdAt: text('created_at').notNull(),
 	updatedAt: text('updated_at').notNull(),

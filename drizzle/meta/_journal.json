@@ -8,6 +8,13 @@
       "when": 1784292408461,
       "tag": "0000_cultured_cloak",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784380000000,
+      "tag": "0001_add_page_lock",
+      "breakpoints": true
     }
   ]
 }

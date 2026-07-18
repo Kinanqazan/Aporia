@@ -1,4 +1,4 @@
-import { db } from './database';
+import { db, sqlite } from './database';
 import { pages } from './schema';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 
@@ -12,31 +12,41 @@ export interface PageNode {
 	contentText: string;
 	schemaVersion: number;
 	revision: number;
+	isLocked: number;
 	isInTrash: number;
 	createdAt: string;
 	updatedAt: string;
 	trashAt: string | null;
 }
 
+export interface SearchResult {
+	id: number;
+	title: string;
+	icon: string | null;
+	parentId: number | null;
+	/** HTML escaped; only generated <b> tags are preserved for match highlighting. */
+	snippet: string;
+}
+
 // Get all pages that are NOT in the trash
 export async function getActivePages(): Promise<PageNode[]> {
-	return db.select()
+	return await db.select()
 		.from(pages)
 		.where(eq(pages.isInTrash, 0))
-		.orderBy(pages.parentId, pages.position);
+		.orderBy(pages.parentId, pages.position) as PageNode[];
 }
 
 // Get all pages currently in the trash
 export async function getTrashPages(): Promise<PageNode[]> {
-	return db.select()
+	return await db.select()
 		.from(pages)
 		.where(eq(pages.isInTrash, 1))
-		.orderBy(pages.trashAt);
+		.orderBy(pages.trashAt) as PageNode[];
 }
 
 // Get a single page by ID
 export async function getPageById(id: number): Promise<PageNode | null> {
-	const result = await db.select().from(pages).where(eq(pages.id, id)).limit(1);
+	const result = await db.select().from(pages).where(eq(pages.id, id)).limit(1) as PageNode[];
 	return result.length > 0 ? result[0] : null;
 }
 
@@ -62,7 +72,7 @@ export async function createPage(parentId: number | null = null, title: string =
 		parentId,
 		position: nextPosition,
 		title,
-		icon: emoji,
+		icon: emoji || 'lucide:file-text',
 		createdAt: now,
 		updatedAt: now,
 		contentJson: '{"type":"doc","content":[]}',
@@ -70,7 +80,7 @@ export async function createPage(parentId: number | null = null, title: string =
 		schemaVersion: 1,
 		revision: 1,
 		isInTrash: 0
-	}).returning();
+	}).returning() as PageNode[];
 
 	return result[0];
 }
@@ -78,11 +88,15 @@ export async function createPage(parentId: number | null = null, title: string =
 // Update page attributes (metadata, content, etc.)
 export async function updatePage(
 	id: number, 
-	updates: Partial<Pick<PageNode, 'title' | 'icon' | 'contentJson' | 'contentText'>>
+	updates: Partial<Pick<PageNode, 'title' | 'icon' | 'contentJson' | 'contentText' | 'isLocked'>>
 ): Promise<PageNode | null> {
 	const now = new Date().toISOString();
 	const page = await getPageById(id);
 	if (!page) return null;
+
+	if (updates.contentJson !== undefined) {
+		updates.contentText = extractTextFromJson(updates.contentJson);
+	}
 
 	const newRevision = updates.contentJson && updates.contentJson !== page.contentJson 
 		? page.revision + 1 
@@ -95,7 +109,7 @@ export async function updatePage(
 			updatedAt: now
 		})
 		.where(eq(pages.id, id))
-		.returning();
+		.returning() as PageNode[];
 
 	return result[0] || null;
 }
@@ -274,4 +288,65 @@ export async function deletePermanently(id: number): Promise<boolean> {
 // Empty the trash completely
 export async function emptyTrash(): Promise<void> {
 	await db.delete(pages).where(eq(pages.isInTrash, 1));
+}
+
+// Search pages using FTS5 virtual table
+export function searchPages(query: string): SearchResult[] {
+	if (!query) return [];
+	const terms = query.trim().split(/\s+/).filter(Boolean).map(term => `${term.replace(/"/g, '""')}*`);
+	if (terms.length === 0) return [];
+	const ftsQuery = terms.join(' AND ');
+
+	try {
+		const results = sqlite.prepare(`
+			SELECT p.id, p.title, p.icon, p.parent_id as parentId,
+			       snippet(pages_fts, -1, '\u0001', '\u0002', '...', 16) as snippet
+			FROM pages_fts fts
+			JOIN pages p ON p.id = fts.id
+			WHERE pages_fts MATCH ? AND p.is_in_trash = 0
+			LIMIT 25
+		`).all(ftsQuery) as any[];
+
+		return results.map(row => ({
+			id: Number(row.id),
+			title: String(row.title),
+			icon: row.icon ? String(row.icon) : null,
+			parentId: row.parentId ? Number(row.parentId) : null,
+			snippet: row.snippet ? toSafeHighlightedSnippet(String(row.snippet)) : ''
+		}));
+	} catch (err) {
+		console.error('FTS5 search error:', err);
+		return [];
+	}
+}
+
+function toSafeHighlightedSnippet(snippet: string): string {
+	return snippet
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/\u0001/g, '<b>')
+		.replace(/\u0002/g, '</b>');
+}
+
+// Helper to extract text from Tiptap JSON string
+export function extractTextFromJson(jsonStr: string): string {
+	try {
+		const doc = JSON.parse(jsonStr);
+		return walkNode(doc).trim();
+	} catch {
+		return '';
+	}
+}
+
+function walkNode(node: any): string {
+	if (!node) return '';
+	let text = '';
+	if (node.type === 'text' && typeof node.text === 'string') {
+		text += node.text;
+	}
+	if (Array.isArray(node.content)) {
+		text += ' ' + node.content.map(walkNode).join(' ');
+	}
+	return text;
 }

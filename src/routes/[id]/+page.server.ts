@@ -23,6 +23,8 @@ export const actions: Actions = {
 
 		const data = await request.formData();
 		const title = data.get('title') as string;
+		const page = await getPageById(id);
+		if (page?.isLocked) return fail(423, { message: 'This page is locked' });
 
 		try {
 			const pageRecord = await updatePage(id, { title });
@@ -37,9 +39,25 @@ export const actions: Actions = {
 
 		const data = await request.formData();
 		const icon = data.get('icon') as string | null;
+		const page = await getPageById(id);
+		if (page?.isLocked) return fail(423, { message: 'This page is locked' });
 
 		try {
 			const pageRecord = await updatePage(id, { icon });
+			return { success: true, pageRecord };
+		} catch (err: any) {
+			return fail(500, { message: err.message });
+		}
+	},
+	toggleLock: async ({ params, request }) => {
+		const id = parseInt(params.id, 10);
+		if (isNaN(id)) return fail(400, { message: 'Invalid page ID' });
+
+		const data = await request.formData();
+		const isLocked = data.get('isLocked') === 'true';
+		try {
+			const pageRecord = await updatePage(id, { isLocked: isLocked ? 1 : 0 });
+			if (!pageRecord) return fail(404, { message: 'Page not found' });
 			return { success: true, pageRecord };
 		} catch (err: any) {
 			return fail(500, { message: err.message });

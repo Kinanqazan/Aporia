@@ -8,7 +8,7 @@
 {#if data.isEmptyWorkspace}
 	<div class="welcome-screen">
 		<div class="welcome-icon">📓</div>
-		<h1 class="welcome-title">Welcome to Quiet Pages</h1>
+		<h1 class="welcome-title">Welcome to Aporia</h1>
 		<p class="welcome-subtitle">
 			A private, local-first space for your thoughts. Create your first page in the sidebar or click the button below to get started.
 		</p>

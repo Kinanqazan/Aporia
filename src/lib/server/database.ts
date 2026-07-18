@@ -21,8 +21,44 @@ sqlite.pragma('journal_mode = WAL');
 
 export const db = drizzle(sqlite, { schema });
 
-// Run migrations on startup
+// The pages table must exist before creating or backfilling the FTS index.
+// This ordering is essential for a fresh database on first application start.
 migrate(db, { migrationsFolder: './drizzle' });
+
+// Initialize FTS5 Search
+sqlite.exec(`
+	CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
+		id UNINDEXED,
+		title,
+		content_text
+	);
+`);
+
+// Backfill existing pages into FTS index
+sqlite.exec(`
+	INSERT INTO pages_fts (id, title, content_text)
+	SELECT id, title, content_text FROM pages
+	WHERE id NOT IN (SELECT id FROM pages_fts);
+`);
+
+// Create triggers to keep FTS index synced
+sqlite.exec(`
+	CREATE TRIGGER IF NOT EXISTS pages_fts_ai AFTER INSERT ON pages BEGIN
+		INSERT INTO pages_fts(id, title, content_text) VALUES(new.id, new.title, new.content_text);
+	END;
+`);
+
+sqlite.exec(`
+	CREATE TRIGGER IF NOT EXISTS pages_fts_ad AFTER DELETE ON pages BEGIN
+		DELETE FROM pages_fts WHERE id = old.id;
+	END;
+`);
+
+sqlite.exec(`
+	CREATE TRIGGER IF NOT EXISTS pages_fts_au AFTER UPDATE ON pages BEGIN
+		UPDATE pages_fts SET title = new.title, content_text = new.content_text WHERE id = old.id;
+	END;
+`);
 
 export type DatabaseClient = typeof db;
 export { sqlite };

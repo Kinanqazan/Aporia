@@ -1,6 +1,6 @@
-# Step-by-Step Implementation Plan - Quiet Pages (Notion Clone)
+# Step-by-Step Implementation Plan - Aporia (Notion Clone)
 
-To build **Quiet Pages** efficiently and ensure high quality, we will build the application in **9 incremental milestones**. You will be able to run and test the application at the end of each step before we proceed to the next.
+To build **Aporia** efficiently and ensure high quality, we will build the application in **9 incremental milestones**. You will be able to run and test the application at the end of each step before we proceed to the next.
 
 ---
 
@@ -10,7 +10,7 @@ To build **Quiet Pages** efficiently and ensure high quality, we will build the 
 *   **Goal**: Create the foundation, directory structures, and the responsive desktop/mobile layout.
 *   **Tasks**:
     *   Initialize SvelteKit with Svelte 5/runes, TypeScript, and pnpm.
-    *   Set up vanilla CSS variables for themes (Quiet light mode, warm dark mode).
+    *   Set up vanilla CSS variables for themes (Aporia light mode, warm dark mode).
     *   Build the main responsive container: Collapsible Sidebar + Centered Editor Canvas (max-width `720px`).
 *   **Verification**: Run `npm run dev`, verify the layout is fully responsive on mobile and desktop, and test theme toggles.
 

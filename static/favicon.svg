@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="52 55 408 380" width="100%" height="100%">
+  <!-- Sleek, thick solid-color Triquetra Paradox Knot with zero padding -->
+  <path 
+    d="M 256 95 
+       C 330 185, 420 220, 420 305 
+       C 420 390, 330 420, 256 325 
+       C 182 420, 92 390, 92 305 
+       C 92 220, 182 185, 256 95 Z"
+    fill="none" 
+    stroke="#2383e2" 
+    stroke-width="80" 
+    stroke-linecap="round" 
+    stroke-linejoin="round"
+  />
+</svg>

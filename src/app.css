@@ -156,7 +156,7 @@ input, textarea {
 	border-right: 1px solid var(--border-color);
 	display: flex;
 	flex-direction: column;
-	transition: transform var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1);
+	transition: transform var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1), margin-left var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1);
 	z-index: 10;
 	flex-shrink: 0;
 	position: relative;
@@ -164,6 +164,25 @@ input, textarea {
 
 .sidebar-closed .sidebar {
 	transform: translateX(-100%);
+	margin-left: calc(-1 * var(--sidebar-width));
+}
+
+/* Sidebar Resizer */
+.sidebar-resizer {
+	position: absolute;
+	top: 0;
+	right: -4px;
+	width: 8px;
+	height: 100%;
+	cursor: col-resize;
+	z-index: 20;
+	transition: background-color var(--transition-speed);
+}
+
+.sidebar-resizer:hover,
+.sidebar-resizer.resizing {
+	background-color: var(--accent-color);
+	opacity: 0.5;
 }
 
 .sidebar-header {
@@ -194,6 +213,12 @@ input, textarea {
 	justify-content: center;
 	font-size: 11px;
 	font-weight: 700;
+}
+
+.workspace-logo {
+	width: 22px;
+	height: 22px;
+	object-fit: contain;
 }
 
 .workspace-name {
@@ -257,7 +282,7 @@ input, textarea {
 .sidebar-nav {
 	flex: 1;
 	overflow-y: auto;
-	padding: 16px 4px;
+	padding: 16px 10px;
 }
 
 .section-title {
@@ -266,7 +291,7 @@ input, textarea {
 	text-transform: uppercase;
 	color: var(--text-muted);
 	letter-spacing: 0.5px;
-	padding: 0 12px 6px;
+	padding: 0 6px 6px;
 }
 
 .pages-list {
@@ -374,6 +399,7 @@ input, textarea {
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	font-weight: 600;
 }
 
 .page-children {
@@ -553,7 +579,7 @@ input, textarea {
 .ProseMirror [data-type='details'] > button {
 	position: absolute;
 	top: 5px;
-	left: -26px;
+	left: -2px;
 	width: 20px;
 	height: 20px;
 	border: 0;
@@ -590,6 +616,7 @@ input, textarea {
 	cursor: text;
 	color: var(--text-main);
 	margin: 0;
+	padding-left: 24px;
 }
 
 .ProseMirror [data-type='details'] summary::-webkit-details-marker {
@@ -627,7 +654,7 @@ input, textarea {
 }
 
 .ProseMirror [data-type='detailsContent'] {
-	margin-left: 8px;
+	margin-left: 24px;
 	padding-top: 0.35em;
 }
 

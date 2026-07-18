@@ -12,7 +12,7 @@ export const Commands = Extension.create<CommandsOptions>({
 		return {
 			suggestion: {
 				char: '/',
-				command: ({ editor, range, props }) => {
+				command: ({ editor, range, props }: any) => {
 					props.command({ editor, range });
 				}
 			}

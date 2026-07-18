@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { page } from '$app/stores';
 	import { onMount, onDestroy } from 'svelte';
-	import { Editor } from '@tiptap/core';
-	import { Selection } from '@tiptap/pm/state';
+	import { Editor, Extension } from '@tiptap/core';
+	import { Selection, Plugin } from '@tiptap/pm/state';
 	import StarterKit from '@tiptap/starter-kit';
 	import { ColumnLayout } from '$lib/editor/extensions/ColumnLayout';
 	import { Column } from '$lib/editor/extensions/Column';
@@ -23,20 +24,38 @@
 		Cloud, CloudLightning, Plus, GripVertical, Trash2, Copy, 
 		Heading1, Heading2, Heading3, Type, Quote, Code, 
 		List, ListOrdered, Bold, Italic, Link as LinkIcon, Palette,
-		CheckSquare, Minus, Table as TableIcon, ChevronRight
+		CheckSquare, Minus, Table as TableIcon, ChevronRight, Lock
 	} from 'lucide-svelte';
+
+	import { CURATED_ICONS } from '$lib/icons';
+	import PageIcon from '$lib/components/PageIcon.svelte';
 
 	let { data } = $props();
 	
 	// Local state bound to input elements for title and icon
-	let title = $state(data.pageRecord.title);
-	let icon = $state(data.pageRecord.icon || '📄');
+	let title = $state('');
+	let isLocked = $state(false);
+	let icon = $state('📄');
+	
+	let isIconPickerOpen = $state(false);
+	let iconInputText = $state('');
+
+	function selectIcon(newIcon: string) {
+		if (isLocked) return;
+		icon = newIcon.trim();
+		isIconPickerOpen = false;
+		setTimeout(() => {
+			iconForm?.requestSubmit();
+		}, 0);
+	}
 	
 	// Tiptap states
 	let editorElement = $state<HTMLDivElement>();
 	let editor = $state<Editor>();
+	let editorPageId = $state<number | null>(null);
 	let autosaveStatus = $state<'saved' | 'saving' | 'error'>('saved');
 	let autosaveTimeout: any;
+	let saveInFlight: Promise<void> | null = null;
 
 	// Bubble Menu elements and states
 	let bubbleMenuElement = $state<HTMLDivElement>();
@@ -152,9 +171,17 @@
 		},
 		addNodeView() {
 			const createDetailsNodeView = this.parent?.();
+			if (!createDetailsNodeView) return null;
+
 			return (props) => {
-				const detailsNodeView = createDetailsNodeView?.(props);
-				if (!detailsNodeView) return {};
+				const detailsNodeView = createDetailsNodeView(props);
+				if (!detailsNodeView) return detailsNodeView;
+				
+				const updateHeadingLevel = (node: typeof props.node) => {
+					detailsNodeView.dom.setAttribute('data-heading-level', String(node.attrs.level));
+				};
+				updateHeadingLevel(props.node);
+
 				const parentUpdate = detailsNodeView.update?.bind(detailsNodeView);
 
 				return {
@@ -162,12 +189,50 @@
 					update: (updatedNode, decorations, innerDecorations) => {
 						const didUpdate = parentUpdate?.(updatedNode, decorations, innerDecorations) ?? true;
 						if (didUpdate) {
-							detailsNodeView.dom.setAttribute('data-heading-level', String(updatedNode.attrs.level));
+							updateHeadingLevel(updatedNode);
 						}
 						return didUpdate;
 					}
 				};
 			};
+		}
+	});
+
+	const PreserveDetailsLevel = Extension.create({
+		name: 'preserveDetailsLevel',
+		addProseMirrorPlugins() {
+			return [
+				new Plugin({
+					appendTransaction(transactions, oldState, newState) {
+						// A user-initiated level change must win over the compatibility
+						// preservation below. Without this guard, H3 -> H1 is immediately
+						// changed back to H3.
+						if (transactions.some((transaction) => transaction.getMeta('toggleHeadingLevelChange'))) {
+							return null;
+						}
+
+						let tr = newState.tr;
+						let modified = false;
+
+						newState.doc.descendants((node, pos) => {
+							if (node.type.name === 'details') {
+								const oldNode = oldState.doc.nodeAt(pos);
+								if (oldNode && oldNode.type.name === 'details') {
+									if (node.attrs.level !== oldNode.attrs.level && node.attrs.level === 1) {
+										tr = tr.setNodeMarkup(pos, undefined, {
+											...node.attrs,
+											level: oldNode.attrs.level
+										});
+										modified = true;
+									}
+								}
+							}
+						});
+
+						return modified ? tr : null;
+					}
+				})
+			];
 		}
 	});
 
@@ -352,6 +417,21 @@
 		editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
 	}
 
+	function handleTitleKeyDown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			(e.currentTarget as HTMLInputElement).blur();
+			if (editor) {
+				const firstNode = editor.state.doc.firstChild;
+				if (!firstNode || (firstNode.type.name === 'paragraph' && firstNode.content.size === 0)) {
+					editor.chain().focus().run();
+				} else {
+					editor.chain().insertContentAt(0, { type: 'paragraph' }).focus('start').run();
+				}
+			}
+		}
+	}
+
 	// Floating block gutter states
 	let activeBlockNode = $state<HTMLElement | null>(null);
 	let isGutterVisible = $state(false);
@@ -362,6 +442,8 @@
 	const GUTTER_HIT_SLOP = 36;
 	
 	// Drag state
+	let dragExpandTimeout: any = null;
+	let lastDragTargetDetails: HTMLElement | null = null;
 	let draggedBlockIndex = $state<number | null>(null);
 	let dropLineTop = $state<number | null>(null);
 	// Vertical drop indicator for column creation
@@ -389,7 +471,21 @@
 		icon = data.pageRecord.icon || '📄';
 		isGutterVisible = false;
 		isActionMenuOpen = false;
+		isLocked = data.pageRecord.isLocked === 1;
+
+		// Flush any pending save for the previous page immediately before switching.
+		// This preserves the last edit even if the user navigates before the 1s debounce.
+		clearTimeout(autosaveTimeout);
+		flushPendingSave();
 		
+		if (editor && editorPageId !== data.pageRecord.id) {
+			editor.destroy();
+			editor = undefined;
+			editorElement?.replaceChildren();
+			createEditor();
+			return;
+		}
+
 		if (editor && data.pageRecord) {
 			const currentJson = editor.getJSON();
 			const serverJsonStr = data.pageRecord.contentJson;
@@ -401,12 +497,73 @@
 			}
 
 			if (JSON.stringify(currentJson) !== JSON.stringify(serverJson)) {
-				editor.commands.setContent(serverJson, false);
+				editor.commands.setContent(serverJson, { emitUpdate: false });
 			}
 		}
 	});
 
-	onMount(() => {
+	// Highlight and scroll to matching term if requested
+	$effect(() => {
+		const highlightQuery = $page.url.searchParams.get('highlight');
+		if (editor && highlightQuery) {
+			setTimeout(() => {
+				if (!editor) return;
+				const text = highlightQuery.trim();
+				if (!text) return;
+
+				// Strip the ?highlight= param from the URL immediately so refresh won't re-trigger
+				const cleanUrl = window.location.pathname;
+				history.replaceState({}, '', cleanUrl);
+
+				// Find the first text node in the editor that contains the term
+				let pos = -1;
+				editor.state.doc.descendants((node, nodePos) => {
+					if (node.isText && node.text && pos === -1) {
+						const textIdx = node.text.toLowerCase().indexOf(text.toLowerCase());
+						if (textIdx !== -1) {
+							pos = nodePos + textIdx;
+							return false;
+						}
+					}
+				});
+
+				if (pos !== -1) {
+					editor.commands.focus();
+
+					// Open any collapsed details/toggle blocks that contain this position
+					const resolved = editor.state.doc.resolve(pos);
+					const tr = editor.state.tr;
+					let updated = false;
+					for (let depth = 1; depth <= resolved.depth; depth++) {
+						const node = resolved.node(depth);
+						if (node.type.name === 'details' && !node.attrs.open) {
+							tr.setNodeMarkup(resolved.before(depth), undefined, { ...node.attrs, open: true });
+							updated = true;
+						}
+					}
+					if (updated) editor.view.dispatch(tr);
+
+					// Select the matching text and scroll it into view
+					editor.commands.setTextSelection({ from: pos, to: pos + text.length });
+
+					// Wait one frame for toggle expand to layout, then scroll the canvas
+					setTimeout(() => {
+						const sel = window.getSelection();
+						if (sel && sel.rangeCount > 0) {
+							const rect = sel.getRangeAt(0).getBoundingClientRect();
+							const scrollContainer = editorElement?.closest('.canvas-wrapper');
+							if (scrollContainer) {
+								const relativeTop = rect.top - scrollContainer.getBoundingClientRect().top + scrollContainer.scrollTop;
+								scrollContainer.scrollTo({ top: relativeTop - 120, behavior: 'smooth' });
+							}
+						}
+					}, 60);
+				}
+			}, 200);
+		}
+	});
+
+	function createEditor() {
 		// BubbleMenu v3 uses Floating UI. Its default absolute positioning is relative
 		// to the editor container and can lag behind a nested scrolling canvas, which
 		// makes the first selection appear away from the selected text.
@@ -424,6 +581,7 @@
 
 		editor = new Editor({
 			element: editorElement,
+			editable: !data.pageRecord.isLocked,
 			extensions: [
 				StarterKit.configure({
 					heading: {
@@ -431,10 +589,9 @@
 					}
 				}),
 				ToggleHeading.configure({
-					// Details' persisted open state overwrites custom node attributes.
-					// Keep collapse state in the node view so it cannot reset `level`.
-					persist: false
+					persist: true
 				}),
+				PreserveDetailsLevel,
 				DetailsSummary,
 				DetailsContent,
 				ColumnLayout,
@@ -541,6 +698,28 @@
 			editorProps: {
 				attributes: {
 					class: 'tiptap-content-canvas'
+				},
+				handleKeyDown: (view, event) => {
+					if (event.key === 'Enter' && !event.shiftKey) {
+						const { state } = view;
+						const { selection } = state;
+						const { empty } = selection;
+						if (empty) {
+							const fromNode = selection.$from;
+							const parent = fromNode.parent;
+							if (parent.type.name === 'detailsSummary') {
+								if (fromNode.parentOffset === 0) {
+									const detailsNodeDepth = fromNode.depth - 1;
+									const detailsStartPos = fromNode.before(detailsNodeDepth);
+									const tr = state.tr.insert(detailsStartPos, view.state.schema.nodes.paragraph.create());
+									view.dispatch(tr);
+									event.preventDefault();
+									return true;
+								}
+							}
+						}
+					}
+					return false;
 				}
 			},
 			onUpdate: ({ editor }) => {
@@ -550,6 +729,23 @@
 			}
 		});
 
+		editorPageId = data.pageRecord.id;
+	}
+
+	$effect(() => {
+		editor?.setEditable(!isLocked);
+		if (isLocked) {
+			isIconPickerOpen = false;
+			isSlashMenuOpen = false;
+		}
+	});
+
+	onMount(() => {
+		createEditor();
+		const handlePageHide = () => {
+			void flushPendingSave({ keepalive: true });
+		};
+
 		// Listen to global mousemoves to position the floating gutter block handle
 		window.addEventListener('mousemove', handleMouseMove);
 		window.addEventListener('click', handleGlobalClick);
@@ -558,9 +754,15 @@
 		
 		handleResize();
 		window.addEventListener('resize', handleResize);
+		window.addEventListener('pagehide', handlePageHide);
+
+		return () => {
+			window.removeEventListener('pagehide', handlePageHide);
+		};
 	});
 
 	onDestroy(() => {
+		void flushPendingSave({ keepalive: true });
 		if (editor) {
 			editor.destroy();
 		}
@@ -714,7 +916,7 @@
 			// A toggle's drag handle belongs beside its summary, not midway down its
 			// expanded content. This matches Notion's heading-row interaction.
 			gutterTop = handleAnchorRect.top - editorRect.top + (handleAnchorRect.height / 2) - 12;
-			gutterLeft = handleAnchorRect.left - editorRect.left - (toggleSummary ? 52 : 28);
+			gutterLeft = handleAnchorRect.left - editorRect.left - 28;
 			isGutterVisible = true;
 		} else {
 			isGutterVisible = false;
@@ -735,29 +937,60 @@
 		}
 	}
 
-	function triggerAutosave(contentJson: string) {
-		autosaveStatus = 'saving';
-		clearTimeout(autosaveTimeout);
-		autosaveTimeout = setTimeout(async () => {
-			try {
-				const response = await fetch(`/api/pages/${data.pageRecord.id}`, {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json'
-					},
-					body: JSON.stringify({ contentJson })
-				});
-				const result = await response.json();
-				if (result.success) {
-					autosaveStatus = 'saved';
-				} else {
-					autosaveStatus = 'error';
-				}
-			} catch (err) {
-				console.error('Autosave failed:', err);
-				autosaveStatus = 'error';
+	// Holds the content and page ID for any pending unsaved edit.
+	let pendingSave: { pageId: number; contentJson: string } | null = null;
+
+	async function flushPendingSave(options: { keepalive?: boolean } = {}) {
+		while (saveInFlight || pendingSave) {
+			if (saveInFlight) {
+				await saveInFlight;
+				continue;
 			}
-		}, 1000);
+
+			const save = pendingSave;
+			if (!save) continue;
+			pendingSave = null;
+			saveInFlight = (async () => {
+				const controller = new AbortController();
+				const timeoutId = setTimeout(() => controller.abort(), 5000);
+				try {
+					const response = await fetch(`/api/pages/${save.pageId}`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ contentJson: save.contentJson }),
+						keepalive: options.keepalive,
+						signal: controller.signal
+					});
+					const result = await response.json();
+					autosaveStatus = result.success ? 'saved' : 'error';
+				} catch (err) {
+					console.error('Autosave failed:', err);
+					autosaveStatus = 'error';
+				} finally {
+					clearTimeout(timeoutId);
+				}
+			})();
+
+			try {
+				await saveInFlight;
+			} finally {
+				saveInFlight = null;
+			}
+		}
+	}
+
+	function triggerAutosave(contentJson: string) {
+		// Read-only pages must never queue or send content updates. This also
+		// prevents a stale editor transaction from turning the status back to
+		// "Saving..." immediately after a page is locked.
+		if (isLocked) {
+			return;
+		}
+		autosaveStatus = 'saving';
+		// Capture page ID immediately so a navigation mid-debounce can't corrupt another page
+		pendingSave = { pageId: data.pageRecord.id, contentJson };
+		clearTimeout(autosaveTimeout);
+		autosaveTimeout = setTimeout(flushPendingSave, 1000);
 	}
 
 	let titleForm: HTMLFormElement;
@@ -766,12 +999,6 @@
 	function handleTitleBlur() {
 		if (title !== data.pageRecord.title) {
 			titleForm.requestSubmit();
-		}
-	}
-
-	function handleIconBlur() {
-		if (icon !== data.pageRecord.icon) {
-			iconForm.requestSubmit();
 		}
 	}
 
@@ -893,24 +1120,32 @@
 		editor.commands.focus();
 		
 		// Calculate position bounds
-		let currentPos = 0;
+		let currentPos = -1;
+		let nodeSize = 0;
 		editor.state.doc.descendants((node, pos) => {
-			if (node.isBlock && pos > 0 && currentPos === 0) {
-				const domNode = editor.view.nodeDOM(pos);
+			if (node.isBlock && node.type.name !== 'doc' && currentPos === -1) {
+					const domNode = editor!.view.nodeDOM(pos);
 				if (domNode === activeBlockNode) {
 					currentPos = pos;
+					nodeSize = node.nodeSize;
 				}
 			}
 			return true;
 		});
 
-		if (currentPos > 0) {
-			editor.commands.deleteRange({ from: currentPos - 1, to: currentPos + activeBlockNode.textContent!.length + 1 });
+		if (currentPos !== -1) {
+			editor.commands.deleteRange({ from: currentPos, to: currentPos + nodeSize });
 		} else {
 			const pos = editor.view.posAtDOM(activeBlockNode, 0);
-			editor.commands.setTextSelection(pos);
-			editor.commands.selectNodeBackward();
-			editor.commands.deleteSelection();
+			const resolvedPos = editor.state.doc.resolve(pos);
+			const node = resolvedPos.nodeAfter || resolvedPos.nodeBefore;
+			if (node) {
+				editor.commands.deleteRange({ from: pos, to: pos + node.nodeSize });
+			} else {
+				editor.commands.setTextSelection(pos);
+				editor.commands.selectNodeBackward();
+				editor.commands.deleteSelection();
+			}
 		}
 
 		isActionMenuOpen = false;
@@ -919,14 +1154,30 @@
 
 	function duplicateActiveBlock() {
 		if (!editor || !activeBlockNode) return;
-		const index = getActiveBlockIndex();
-		if (index === -1) return;
+		const path = getActiveBlockPath();
+		if (!path) return;
 
-		const docJson = editor.getJSON();
-		if (docJson.content && docJson.content[index]) {
-			const blockClone = JSON.parse(JSON.stringify(docJson.content[index]));
-			docJson.content.splice(index + 1, 0, blockClone);
-			editor.commands.setContent(docJson, true);
+		const docJson: any = JSON.parse(JSON.stringify(editor.getJSON()));
+		let container: any[] | undefined;
+		let index = -1;
+
+		if (path.detailsChildIndex !== undefined) {
+			const detailsContent = docJson.content?.[path.topIndex]?.content?.find(
+				(node: any) => node.type === 'detailsContent'
+			);
+			container = detailsContent?.content;
+			index = path.detailsChildIndex;
+		} else if (path.columnIndex !== undefined && path.childIndex !== undefined) {
+			container = docJson.content?.[path.topIndex]?.content?.[path.columnIndex]?.content;
+			index = path.childIndex;
+		} else {
+			container = docJson.content;
+			index = path.topIndex;
+		}
+
+		if (container?.[index]) {
+			container.splice(index + 1, 0, JSON.parse(JSON.stringify(container[index])));
+			editor.commands.setContent(docJson, { emitUpdate: true });
 		}
 
 		isActionMenuOpen = false;
@@ -942,6 +1193,7 @@
 		// Rebuilding it would turn the nested blocks into a new, empty toggle body.
 		if (activeBlock.node.type.name === 'details') {
 			editor.chain().focus().command(({ tr }) => {
+				tr.setMeta('toggleHeadingLevelChange', true);
 				tr.setNodeMarkup(activeBlock.pos, undefined, {
 					...activeBlock.node.attrs,
 					level
@@ -1085,6 +1337,8 @@
 		dropLineVertical = null;
 		dropMode = 'vertical';
 		isGutterVisible = false;
+		clearTimeout(dragExpandTimeout);
+		lastDragTargetDetails = null;
 	}
 
 	/** Edge detection threshold in px — how close to left/right edge triggers column mode */
@@ -1100,7 +1354,32 @@
 
 		const targetBlock = getDragTargetBlock(e);
 		
-		if (!targetBlock) { dropLineTop = null; dropLineVertical = null; return; }
+		if (!targetBlock) { 
+			dropLineTop = null; 
+			dropLineVertical = null; 
+			clearTimeout(dragExpandTimeout);
+			lastDragTargetDetails = null;
+			return; 
+		}
+
+		// Expand details toggle on hover
+		if (targetBlock.matches('[data-type="details"]')) {
+			if (lastDragTargetDetails !== targetBlock) {
+				clearTimeout(dragExpandTimeout);
+				lastDragTargetDetails = targetBlock;
+				if (!targetBlock.classList.contains('is-open')) {
+					dragExpandTimeout = setTimeout(() => {
+						if (lastDragTargetDetails === targetBlock) {
+							targetBlock.querySelector('button')?.click();
+						}
+					}, 500);
+				}
+			}
+		} else {
+			clearTimeout(dragExpandTimeout);
+			lastDragTargetDetails = null;
+		}
+
 		const targetPath = getBlockPathForElement(targetBlock);
 		if (!targetPath || !draggedBlockPath || sameBlockPath(targetPath, draggedBlockPath)) {
 			dropLineTop = null;
@@ -1211,7 +1490,7 @@
 		if (draggedBlockPath.detailsChildIndex !== undefined &&
 			targetPath.detailsChildIndex !== undefined &&
 			draggedBlockPath.topIndex === targetPath.topIndex) {
-			const docJson = editor.getJSON();
+			const docJson: any = editor.getJSON();
 			const detailsContent = docJson.content?.[draggedBlockPath.topIndex]?.content?.find((node: any) => node.type === 'detailsContent');
 			if (!detailsContent?.content) { handleDragEnd(); return; }
 
@@ -1222,18 +1501,53 @@
 			if (draggedBlockPath.detailsChildIndex < targetPath.detailsChildIndex) insertIndex -= 1;
 			if (!insertBefore) insertIndex += 1;
 			detailsContent.content.splice(insertIndex, 0, draggedBlock);
-			editor.commands.setContent(docJson, true);
+			editor.commands.setContent(docJson, { emitUpdate: true });
+			handleDragEnd();
+			return;
+		}
+
+		// Drop from anywhere into a details content block (toggle heading children)
+		if (targetPath.detailsChildIndex !== undefined) {
+			const docJson: any = editor.getJSON();
+			if (!docJson.content) { handleDragEnd(); return; }
+
+			// Extract the dragged block from its source path
+			const draggedBlock = extractBlockByPath(docJson.content, draggedBlockPath);
+			if (!draggedBlock) { handleDragEnd(); return; }
+
+			// Recalculate target's topIndex since extraction might have shifted the top-level array indices
+			let actualTargetTopIndex = targetPath.topIndex;
+			if (draggedBlockPath.detailsChildIndex === undefined && draggedBlockPath.columnIndex === undefined) {
+				if (draggedBlockPath.topIndex < targetPath.topIndex) {
+					actualTargetTopIndex -= 1;
+				}
+			}
+
+			const details = docJson.content[actualTargetTopIndex];
+			const detailsContent = details?.content?.find((node: any) => node.type === 'detailsContent');
+			if (!detailsContent?.content) { handleDragEnd(); return; }
+
+			const rect = targetBlock.getBoundingClientRect();
+			const insertBefore = e.clientY - rect.top < rect.height / 2;
+
+			let insertIndex = targetPath.detailsChildIndex;
+			if (!insertBefore) {
+				insertIndex += 1;
+			}
+
+			detailsContent.content.splice(insertIndex, 0, draggedBlock);
+			editor.commands.setContent(docJson, { emitUpdate: true });
 			handleDragEnd();
 			return;
 		}
 
 		// Don't drop on itself (for top-level blocks)
-		if (draggedBlockPath.columnIndex === undefined && targetIndex === draggedBlockPath.topIndex) {
+		if (draggedBlockPath.columnIndex === undefined && draggedBlockPath.detailsChildIndex === undefined && targetIndex === draggedBlockPath.topIndex) {
 			handleDragEnd();
 			return;
 		}
 
-		const docJson = editor.getJSON();
+		const docJson: any = editor.getJSON();
 		if (!docJson.content) { handleDragEnd(); return; }
 
 		// Extract the dragged block using its path (handles nested column blocks)
@@ -1247,22 +1561,11 @@
 			const isLeftSide = relativeX < COLUMN_EDGE_THRESHOLD;
 
 			// Find the target node in the (now possibly shifted) content array
-			// We need to re-find it since extraction may have shifted indices
-			let actualTargetIndex = -1;
-			for (let i = 0; i < docJson.content.length; i++) {
-				const node = docJson.content[i];
-				// Match by reference or by finding the node at the original target position
-				if (i === targetIndex || (targetIndex > draggedBlockPath.topIndex && i === targetIndex - 1) || 
-					(targetIndex <= draggedBlockPath.topIndex && i === targetIndex)) {
-					actualTargetIndex = i;
-					break;
+			let actualTargetIndex = targetIndex;
+			if (draggedBlockPath.columnIndex === undefined && draggedBlockPath.detailsChildIndex === undefined) {
+				if (draggedBlockPath.topIndex < targetIndex) {
+					actualTargetIndex = targetIndex - 1;
 				}
-			}
-			
-			// Simpler: recalculate target after extraction
-			// If dragged was before target, target shifted back by however many nodes were removed
-			if (actualTargetIndex === -1 || actualTargetIndex >= docJson.content.length) {
-				actualTargetIndex = Math.min(targetIndex, docJson.content.length - 1);
 			}
 
 			const targetNode = docJson.content[actualTargetIndex];
@@ -1289,7 +1592,7 @@
 				docJson.content[actualTargetIndex] = layout;
 			}
 
-			editor.commands.setContent(docJson, true);
+			editor.commands.setContent(docJson, { emitUpdate: true });
 		} else {
 			// === VERTICAL DROP: Standard above/below reorder ===
 			const rect = targetBlock.getBoundingClientRect();
@@ -1298,7 +1601,7 @@
 
 			// Calculate insert index (content may have shifted after extraction)
 			let insertIndex = Math.min(targetIndex, docJson.content.length);
-			if (draggedBlockPath.columnIndex === undefined) {
+			if (draggedBlockPath.columnIndex === undefined && draggedBlockPath.detailsChildIndex === undefined) {
 				// Top-level drag: standard index adjustment
 				if (draggedBlockPath.topIndex < targetIndex) {
 					insertIndex = targetIndex - 1;
@@ -1320,7 +1623,7 @@
 				return node;
 			}).flat();
 
-			editor.commands.setContent(docJson, true);
+			editor.commands.setContent(docJson, { emitUpdate: true });
 		}
 
 		handleDragEnd();
@@ -1330,9 +1633,15 @@
 <article class="editor-page">
 	<!-- Autosave Status Floating Indicator -->
 	<div class="autosave-indicator" class:status-saving={autosaveStatus === 'saving'} class:status-error={autosaveStatus === 'error'}>
-		{#if autosaveStatus === 'saved'}
+		{#if isLocked}
+			<Lock size={14} />
+			<span>Locked</span>
+		{:else if autosaveStatus === 'saved'}
 			<Cloud size={14} />
 			<span>Saved</span>
+		{:else if autosaveStatus === 'error'}
+			<CloudLightning size={14} />
+			<span>Save failed</span>
 		{:else}
 			<CloudLightning size={14} />
 			<span>Saving...</span>
@@ -1341,6 +1650,17 @@
 
 	<!-- Page Icon emoji picker input -->
 	<div class="page-icon-wrapper">
+		<!-- Clickable Icon button -->
+		<button 
+			type="button" 
+			class="icon-btn-picker" 
+			disabled={isLocked}
+			onclick={() => isIconPickerOpen = !isIconPickerOpen}
+			title="Change page icon"
+		>
+			<PageIcon icon={icon} size={78} className="main-page-icon" />
+		</button>
+
 		<form 
 			bind:this={iconForm}
 			method="POST" 
@@ -1348,37 +1668,70 @@
 			use:enhance
 			class="icon-form"
 		>
-			<input 
-				type="text" 
-				name="icon" 
-				bind:value={icon}
-				onblur={handleIconBlur}
-				onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-				class="icon-input"
-				title="Click to edit page emoji icon"
-			/>
+			<input type="hidden" name="icon" value={icon} />
 		</form>
+
+		{#if isIconPickerOpen}
+			<!-- svelte-ignore a11y_click_events_have_key_events -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="icon-picker-overlay" onclick={() => isIconPickerOpen = false}></div>
+			<div class="icon-picker-popover">
+				<div class="icon-picker-search">
+					<input 
+						type="text" 
+						placeholder="Paste custom emoji..." 
+						bind:value={iconInputText}
+						onkeydown={(e) => {
+							if (e.key === 'Enter') {
+								e.preventDefault();
+								selectIcon(iconInputText);
+							}
+						}}
+					/>
+					<button type="button" class="apply-emoji-btn" onclick={() => selectIcon(iconInputText)}>Apply</button>
+				</div>
+				<div class="icon-picker-grid">
+					{#each CURATED_ICONS as curated}
+						<button 
+							type="button" 
+							class="icon-picker-item" 
+							class:active={icon === 'lucide:' + curated.name}
+							onclick={() => selectIcon('lucide:' + curated.name)}
+							title={curated.label}
+						>
+							<curated.component size={18} strokeWidth={1.5} />
+						</button>
+					{/each}
+				</div>
+				<div class="icon-picker-footer">
+					<button type="button" class="reset-icon-btn" onclick={() => selectIcon('📄')}>Reset to default</button>
+				</div>
+			</div>
+		{/if}
 	</div>
 
 	<!-- Page Title editor input -->
-	<form 
-		bind:this={titleForm}
-		method="POST" 
-		action="?/renamePage" 
-		use:enhance
-		class="title-form"
-	>
-		<input 
-			type="text" 
-			name="title" 
-			bind:value={title} 
-			onblur={handleTitleBlur}
-			onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-			class="page-title-input"
-			placeholder="Untitled"
-			spellcheck="false"
-		/>
-	</form>
+	<div class="title-row">
+		<form 
+			bind:this={titleForm}
+			method="POST" 
+			action="?/renamePage" 
+			use:enhance
+			class="title-form"
+		>
+			<input 
+				type="text" 
+				name="title" 
+				bind:value={title} 
+				onblur={handleTitleBlur}
+				onkeydown={handleTitleKeyDown}
+				class="page-title-input"
+				placeholder="Untitled"
+				spellcheck="false"
+				disabled={isLocked}
+			/>
+		</form>
+	</div>
 
 	<!-- Tiptap Canvas Container -->
 	<div class="editor-canvas-container">
@@ -1636,8 +1989,8 @@
 				<button 
 					type="button"
 					class="bubble-btn" 
-					class:active={editor.isActive('bold')} 
-					onclick={() => editor.chain().focus().toggleBold().run()}
+					class:active={editor!.isActive('bold')} 
+					onclick={() => editor!.chain().focus().toggleBold().run()}
 					title="Bold"
 				>
 					<Bold size={14} />
@@ -1645,8 +1998,8 @@
 				<button 
 					type="button"
 					class="bubble-btn" 
-					class:active={editor.isActive('italic')} 
-					onclick={() => editor.chain().focus().toggleItalic().run()}
+					class:active={editor!.isActive('italic')} 
+					onclick={() => editor!.chain().focus().toggleItalic().run()}
 					title="Italic"
 				>
 					<Italic size={14} />
@@ -1654,8 +2007,8 @@
 				<button 
 					type="button"
 					class="bubble-btn" 
-					class:active={editor.isActive('strike')} 
-					onclick={() => editor.chain().focus().toggleStrike().run()}
+					class:active={editor!.isActive('strike')} 
+					onclick={() => editor!.chain().focus().toggleStrike().run()}
 					title="Strikethrough"
 				>
 					<span style="text-decoration: line-through; font-weight: bold; font-size: 11px; line-height: 1;">S</span>
@@ -1663,8 +2016,8 @@
 				<button 
 					type="button"
 					class="bubble-btn" 
-					class:active={editor.isActive('code')} 
-					onclick={() => editor.chain().focus().toggleCode().run()}
+					class:active={editor!.isActive('code')} 
+					onclick={() => editor!.chain().focus().toggleCode().run()}
 					title="Inline Code"
 				>
 					<Code size={14} />
@@ -1701,9 +2054,9 @@
 									class="color-dropdown-item" 
 									onclick={() => {
 										if (color.value === 'var(--text-main)') {
-											editor.chain().focus().unsetColor().run();
+											editor!.chain().focus().unsetColor().run();
 										} else {
-											editor.chain().focus().setColor(color.value).run();
+											editor!.chain().focus().setColor(color.value).run();
 										}
 										isColorMenuOpen = false;
 									}}
@@ -1720,9 +2073,9 @@
 									class="color-dropdown-item" 
 									onclick={() => {
 										if (hl.value === 'transparent') {
-											editor.chain().focus().unsetHighlight().run();
+											editor!.chain().focus().unsetHighlight().run();
 										} else {
-											editor.chain().focus().setHighlight({ color: hl.value }).run();
+											editor!.chain().focus().setHighlight({ color: hl.value }).run();
 										}
 										isColorMenuOpen = false;
 									}}
@@ -1902,22 +2255,137 @@
 		margin-bottom: 8px;
 		user-select: none;
 		display: inline-block;
+		position: relative;
 	}
 
-	.icon-input {
-		font-size: 78px;
+	.icon-btn-picker {
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		width: 90px;
 		height: 90px;
-		border: none;
+		border-radius: 8px;
 		background: transparent;
 		cursor: pointer;
-		text-align: left;
-		outline: none;
+		transition: background var(--transition-speed);
+		padding: 0;
+	}
+
+	.icon-btn-picker:hover {
+		background-color: var(--hover-icon);
+	}
+
+	:global(.main-page-icon) {
+		font-size: 78px;
+		color: var(--text-main);
+	}
+
+	.icon-picker-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 100;
+	}
+
+	.icon-picker-popover {
+		position: absolute;
+		top: 100%;
+		left: 0;
+		margin-top: 8px;
+		width: 280px;
+		background-color: var(--bg-sidebar);
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+		z-index: 110;
+		padding: 8px;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.icon-picker-search {
+		display: flex;
+		gap: 6px;
+	}
+
+	.icon-picker-search input {
+		flex: 1;
+		background-color: var(--bg-canvas);
+		border: 1px solid var(--border-color);
+		border-radius: 4px;
+		padding: 4px 8px;
+		font-size: 13px;
+		color: var(--text-main);
+	}
+
+	.apply-emoji-btn {
+		background-color: var(--accent-color);
+		color: white;
+		border-radius: 4px;
+		padding: 4px 8px;
+		font-size: 12px;
+		font-weight: 500;
+	}
+
+	.icon-picker-grid {
+		display: grid;
+		grid-template-columns: repeat(6, 1fr);
+		gap: 4px;
+		max-height: 180px;
+		overflow-y: auto;
+		padding-right: 4px;
+	}
+
+	.icon-picker-item {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		aspect-ratio: 1;
+		border-radius: 4px;
+		color: var(--text-muted);
+		transition: background var(--transition-speed), color var(--transition-speed);
+	}
+
+	.icon-picker-item:hover {
+		background-color: var(--hover-icon);
+		color: var(--text-main);
+	}
+
+	.icon-picker-item.active {
+		background-color: var(--active-sidebar);
+		color: var(--accent-color);
+	}
+
+	.icon-picker-footer {
+		border-top: 1px solid var(--border-color);
+		padding-top: 6px;
+		display: flex;
+		justify-content: flex-end;
+	}
+
+	.reset-icon-btn {
+		font-size: 11px;
+		color: var(--text-muted);
+		transition: color var(--transition-speed);
+	}
+
+	.reset-icon-btn:hover {
+		color: var(--text-main);
+	}
+
+	.title-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 8px;
 	}
 
 	.title-form {
-		width: 100%;
-		margin-bottom: 24px;
+		flex: 1;
+		min-width: 0;
 	}
 
 	.page-title-input {

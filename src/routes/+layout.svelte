@@ -1,9 +1,10 @@
 <script lang="ts">
 	import '../app.css';
+	import PageIcon from '$lib/components/PageIcon.svelte';
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { enhance } from '$app/forms';
-	import { invalidateAll } from '$app/navigation';
+	import { invalidateAll, goto } from '$app/navigation';
 	import { 
 		Menu, 
 		ChevronLeft, 
@@ -17,7 +18,9 @@
 		ChevronDown,
 		Trash,
 		RotateCcw,
-		Edit3
+		Edit3,
+		Lock,
+		Unlock
 	} from 'lucide-svelte';
 
 	// SvelteKit Props
@@ -28,15 +31,26 @@
 	let isDarkMode = $state(false);
 	let isMobile = $state(false);
 	let isTrashOpen = $state(false);
+	let sidebarWidth = $state(240);
+	let isResizing = $state(false);
 	
 	// Track expanded nodes in the page tree sidebar
 	let expandedNodes = $state(new Set<number>());
+
+	// Search States
+	let isSearchOpen = $state(false);
+	let searchQuery = $state('');
+	let searchResults = $state<any[]>([]);
+	let searchFocusedIndex = $state(0);
+	let sidebarSearchInputEl = $state<HTMLInputElement | null>(null);
+	let searchContainerEl = $state<HTMLDivElement | null>(null);
 
 	// Inline editing title states
 	let editingPageId = $state<number | null>(null);
 	let editingTitleText = $state('');
 	let draggedPageId = $state<number | null>(null);
 	let dropTarget = $state<{ id: number; placement: 'before' | 'inside' | 'after' } | null>(null);
+	let isLockRequestInFlight = $state(false);
 
 	// Active page tracking from route params
 	let currentPageId = $derived($page.params.id ? parseInt($page.params.id, 10) : null);
@@ -86,6 +100,19 @@
 		handleResize();
 		window.addEventListener('resize', handleResize);
 
+		const handleClickOutside = (e: MouseEvent) => {
+			if (isSearchOpen && searchContainerEl && !searchContainerEl.contains(e.target as Node)) {
+				isSearchOpen = false;
+			}
+		};
+		window.addEventListener('click', handleClickOutside);
+
+		// Sidebar width restoration
+		const savedWidth = localStorage.getItem('sidebar-width');
+		if (savedWidth) {
+			sidebarWidth = parseInt(savedWidth, 10);
+		}
+
 		// Dark Mode Initialization
 		if (
 			localStorage.theme === 'dark' || 
@@ -100,8 +127,91 @@
 
 		return () => {
 			window.removeEventListener('resize', handleResize);
+			window.removeEventListener('click', handleClickOutside);
 		};
 	});
+
+	async function handleSearchInput() {
+		searchFocusedIndex = 0;
+		if (!searchQuery.trim()) {
+			searchResults = [];
+			return;
+		}
+		try {
+			const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
+			const data = await res.json();
+			searchResults = data.results || [];
+		} catch (err) {
+			console.error(err);
+		}
+	}
+
+	function handleSearchKeydown(e: KeyboardEvent) {
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			if (searchResults.length > 0) {
+				searchFocusedIndex = (searchFocusedIndex + 1) % searchResults.length;
+			}
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			if (searchResults.length > 0) {
+				searchFocusedIndex = (searchFocusedIndex - 1 + searchResults.length) % searchResults.length;
+			}
+		} else if (e.key === 'Enter') {
+			e.preventDefault();
+			if (searchResults[searchFocusedIndex]) {
+				selectSearchResult(searchResults[searchFocusedIndex]);
+			}
+		} else if (e.key === 'Escape') {
+			isSearchOpen = false;
+		}
+	}
+
+	function selectSearchResult(result: any) {
+		isSearchOpen = false;
+		goto(`/${result.id}`);
+	}
+
+	async function togglePageLock() {
+		if (!currentPageId || isLockRequestInFlight) return;
+		const activePage = data.activePages?.find((page) => page.id === currentPageId);
+		if (!activePage) return;
+
+		isLockRequestInFlight = true;
+		try {
+			const response = await fetch(`/api/pages/${currentPageId}/lock`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ isLocked: activePage.isLocked !== 1 })
+			});
+			if (response.ok) await invalidateAll();
+		} catch (err) {
+			console.error('Lock update failed:', err);
+		} finally {
+			isLockRequestInFlight = false;
+		}
+	}
+
+	function startResizing(e: MouseEvent) {
+		e.preventDefault();
+		isResizing = true;
+		document.body.style.userSelect = 'none';
+		document.body.style.cursor = 'col-resize';
+		
+		const handleMouseMove = (moveEvent: MouseEvent) => {
+			sidebarWidth = Math.max(160, Math.min(480, moveEvent.clientX));
+		};
+		const handleMouseUp = () => {
+			isResizing = false;
+			document.body.style.userSelect = '';
+			document.body.style.cursor = '';
+			window.removeEventListener('mousemove', handleMouseMove);
+			window.removeEventListener('mouseup', handleMouseUp);
+			localStorage.setItem('sidebar-width', String(sidebarWidth));
+		};
+		window.addEventListener('mousemove', handleMouseMove);
+		window.addEventListener('mouseup', handleMouseUp);
+	}
 
 	function toggleSidebar() {
 		isSidebarOpen = !isSidebarOpen;
@@ -226,13 +336,13 @@
 	}
 </script>
 
-<div class="app-container" class:sidebar-closed={!isSidebarOpen} class:mobile={isMobile}>
+<div class="app-container" class:sidebar-closed={!isSidebarOpen} class:mobile={isMobile} style="--sidebar-width: {sidebarWidth}px;">
 	<!-- Sidebar -->
 	<aside class="sidebar">
 		<div class="sidebar-header">
 			<div class="user-workspace">
-				<span class="avatar">Q</span>
-				<span class="workspace-name">Quiet Workspace</span>
+				<img src="/logo.svg" alt="Aporia Logo" class="workspace-logo" />
+				<span class="workspace-name">Aporia Workspace</span>
 			</div>
 			<button class="icon-btn toggle-sidebar-btn" onclick={toggleSidebar} title="Close sidebar">
 				<ChevronLeft size={16} />
@@ -241,10 +351,46 @@
 
 		<!-- Action items -->
 		<div class="sidebar-actions">
-			<button class="action-item">
-				<Search size={14} />
-				<span>Search</span>
-			</button>
+			<div class="sidebar-search-container" bind:this={searchContainerEl}>
+				<div class="sidebar-search-input-wrapper">
+					<Search size={14} class="sidebar-search-icon" />
+					<input
+						bind:this={sidebarSearchInputEl}
+						type="text"
+						placeholder="Search..."
+						bind:value={searchQuery}
+						oninput={handleSearchInput}
+						onkeydown={handleSearchKeydown}
+						onfocus={() => isSearchOpen = true}
+					/>
+					{#if searchQuery}
+						<button type="button" class="clear-search-btn" onclick={() => { searchQuery = ''; searchResults = []; }}>✕</button>
+					{/if}
+				</div>
+				
+				{#if isSearchOpen && searchResults.length > 0}
+					<div class="sidebar-search-results">
+						{#each searchResults as result, idx}
+							<a
+								href="/{result.id}?highlight={encodeURIComponent(searchQuery)}"
+								class="sidebar-search-result-item"
+								class:focused={idx === searchFocusedIndex}
+								onclick={() => { isSearchOpen = false; }}
+							>
+								<span class="sidebar-result-icon">
+									<PageIcon icon={result.icon} size={14} />
+								</span>
+								<div class="sidebar-result-body">
+									<span class="sidebar-result-title">{result.title}</span>
+									{#if result.snippet}
+										<span class="sidebar-result-snippet">{@html result.snippet}</span>
+									{/if}
+								</div>
+							</a>
+						{/each}
+					</div>
+				{/if}
+			</div>
 			<form method="POST" action="/?/create" use:enhance>
 				<input type="hidden" name="parentId" value="null" />
 				<input type="hidden" name="title" value="Untitled" />
@@ -285,7 +431,9 @@
 				<div class="trash-list">
 					{#each data.trashPages || [] as trashPage}
 						<div class="trash-item">
-							<span class="trash-item-emoji">{trashPage.icon || '📄'}</span>
+							<span class="trash-item-emoji">
+								<PageIcon icon={trashPage.icon} size={14} />
+							</span>
 							<span class="trash-item-title" title={trashPage.title}>{trashPage.title}</span>
 							<div class="trash-item-actions">
 								<form method="POST" action="/?/restore" use:enhance>
@@ -318,11 +466,22 @@
 					<span class="trash-badge">{data.trashPages.length}</span>
 				{/if}
 			</button>
-			<button class="footer-item">
+			<a href="/api/export?all=true" download class="footer-item">
 				<Download size={14} />
 				<span>Export</span>
-			</button>
+			</a>
 		</div>
+
+		<!-- Resizer handle -->
+		{#if !isMobile}
+			<!-- svelte-ignore a11y_click_events_have_key_events -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div 
+				class="sidebar-resizer" 
+				class:resizing={isResizing}
+				onmousedown={startResizing}
+			></div>
+		{/if}
 	</aside>
 
 	<!-- Mobile Overlay -->
@@ -343,12 +502,29 @@
 					</button>
 				{/if}
 				<div class="breadcrumbs">
-					<span class="breadcrumb-item">Quiet Pages</span>
+					<span class="breadcrumb-item">Aporia</span>
 					<span class="breadcrumb-separator">/</span>
 					<span class="breadcrumb-item active">
 						{#if currentPageId}
 							{@const activePage = data.activePages?.find(p => p.id === currentPageId)}
-							{activePage ? (activePage.icon ? activePage.icon + ' ' : '') + activePage.title : 'Loading...'}
+							{#if activePage}
+								<span style="display: inline-flex; align-items: center; margin-right: 6px; vertical-align: middle;">
+									<PageIcon icon={activePage.icon} size={14} />
+								</span>
+								<span>{activePage.title}</span>
+								<button
+									class="breadcrumb-lock-btn"
+									type="button"
+									onclick={togglePageLock}
+									disabled={isLockRequestInFlight}
+									title={activePage.isLocked ? 'Unlock page' : 'Lock page'}
+									aria-label={activePage.isLocked ? 'Unlock page' : 'Lock page'}
+								>
+									{#if activePage.isLocked}<Lock size={13} />{:else}<Unlock size={13} />{/if}
+								</button>
+							{:else}
+								Loading...
+							{/if}
 						{:else}
 							Workspace
 						{/if}
@@ -357,6 +533,11 @@
 			</div>
 
 			<div class="right-controls">
+				{#if currentPageId}
+					<a href="/api/export?id={currentPageId}" download class="icon-btn export-btn" title="Export page to Markdown">
+						<Download size={16} />
+					</a>
+				{/if}
 				<button class="icon-btn theme-btn" onclick={toggleTheme} title="Toggle theme">
 					{#if isDarkMode}
 						<Sun size={16} />
@@ -375,6 +556,8 @@
 		</div>
 	</main>
 </div>
+
+
 
 <!-- Snippet: Recursive Node rendering -->
 {#snippet renderNode(node: any)}
@@ -410,9 +593,13 @@
 							<ChevronRight size={12} />
 						{/if}
 					</button>
-					<span class="page-emoji">{node.icon || '📄'}</span>
+					<span class="page-emoji">
+						<PageIcon icon={node.icon} size={16} />
+					</span>
 				{:else}
-					<span class="page-emoji">{node.icon || '📄'}</span>
+					<span class="page-emoji">
+						<PageIcon icon={node.icon} size={16} />
+					</span>
 				{/if}
 			</div>
 
@@ -493,6 +680,29 @@
 </script>
 
 <style>
+	.breadcrumb-lock-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 22px;
+		height: 22px;
+		margin-left: 2px;
+		border-radius: 4px;
+		color: var(--text-muted);
+		vertical-align: middle;
+		transition: background var(--transition-speed), color var(--transition-speed);
+	}
+
+	.breadcrumb-lock-btn:hover {
+		background: var(--hover-icon);
+		color: var(--text-main);
+	}
+
+	.breadcrumb-lock-btn:disabled {
+		cursor: wait;
+		opacity: 0.55;
+	}
+
 	/* Sidebar Custom Additions */
 	.add-page-action-btn {
 		justify-content: flex-start;
@@ -708,5 +918,132 @@
 		border-radius: 10px;
 		margin-left: auto;
 		font-weight: 600;
+	}
+
+	/* Sidebar Search Styles */
+	.sidebar-search-container {
+		position: relative;
+		width: 100%;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.sidebar-search-input-wrapper {
+		display: flex;
+		align-items: center;
+		background-color: var(--hover-sidebar);
+		border: 1px solid var(--border-color);
+		border-radius: 6px;
+		padding: 5px 8px;
+		gap: 8px;
+		width: 100%;
+	}
+
+	.sidebar-search-input-wrapper input {
+		flex: 1;
+		background: transparent;
+		border: none;
+		outline: none;
+		font-size: 13px;
+		color: var(--text-main);
+		font-family: inherit;
+		min-width: 0;
+	}
+
+	.sidebar-search-input-wrapper input::placeholder {
+		color: var(--text-muted);
+	}
+
+	:global(.sidebar-search-icon) {
+		color: var(--text-muted);
+		flex-shrink: 0;
+	}
+
+	.clear-search-btn {
+		font-size: 10px;
+		color: var(--text-muted);
+		padding: 2px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.clear-search-btn:hover {
+		color: var(--text-main);
+	}
+
+	.sidebar-search-results {
+		position: absolute;
+		top: 100%;
+		left: 0;
+		right: 0;
+		margin-top: 4px;
+		background-color: var(--bg-sidebar);
+		border: 1px solid var(--border-color);
+		border-radius: 6px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+		z-index: 100;
+		max-height: 250px;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		padding: 4px;
+	}
+
+	.sidebar-search-result-item {
+		display: flex;
+		align-items: flex-start;
+		padding: 6px 10px;
+		border-radius: 4px;
+		gap: 8px;
+		font-size: 13px;
+		color: var(--text-main);
+		text-decoration: none;
+		transition: background var(--transition-speed);
+	}
+
+	.sidebar-search-result-item:hover,
+	.sidebar-search-result-item.focused {
+		background-color: var(--hover-sidebar);
+	}
+
+	.sidebar-result-icon {
+		display: flex;
+		align-items: center;
+		color: var(--text-muted);
+		flex-shrink: 0;
+		margin-top: 2px;
+	}
+
+	.sidebar-result-body {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		flex: 1;
+	}
+
+	.sidebar-result-title {
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		font-weight: 500;
+	}
+
+	.sidebar-result-snippet {
+		font-size: 11px;
+		color: var(--text-muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		margin-top: 2px;
+	}
+
+	.sidebar-result-snippet :global(b) {
+		color: var(--text-main);
+		font-weight: 700;
+		background-color: var(--selection-bg);
+		padding: 0 2px;
+		border-radius: 2px;
 	}
 </style>
