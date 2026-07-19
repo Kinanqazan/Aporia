@@ -1789,8 +1789,8 @@
 		<div class="subpages-list">
 			{#each subPages as subPage}
 				<a href="/{subPage.id}" class="subpages-item">
-					<span class="subpages-icon-wrapper">
-						<PageIcon icon={subPage.icon || '📄'} size={20} />
+							<span class="subpages-icon-wrapper">
+								<PageIcon icon={subPage.icon || '📄'} size={24} />
 					</span>
 					<span class="subpages-item-text">{subPage.title || 'Untitled'}</span>
 				</a>
@@ -2323,6 +2323,10 @@
 		border-color: var(--error-color);
 	}
 
+	:global(.mobile) .autosave-indicator {
+		top: calc(18px + env(safe-area-inset-top));
+	}
+
 	.page-icon-wrapper {
 		margin-bottom: 8px;
 		user-select: none;
@@ -2461,11 +2465,11 @@
 	.subpages-item {
 		display: inline-flex;
 		align-items: center;
-		gap: 8px;
-		font-size: 17px;
+		gap: 10px;
+		font-size: 18px;
 		color: var(--text-main);
 		text-decoration: none;
-		padding: 5px 8px;
+		padding: 7px 10px;
 		border-radius: 4px;
 		width: max-content;
 		max-width: 100%;

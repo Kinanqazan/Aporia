@@ -3,7 +3,7 @@
   <mask id="cutouts" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
     <rect width="512" height="512" fill="#fff"/>
   </mask>
-  <g fill="#7FA2B8" mask="url(#cutouts)">
+  <g fill="#fff" mask="url(#cutouts)">
     <path d="M143 215C99 179 84 111 98 35c55 36 91 94 113 164l-8 26-60-10Z"/>
     <path d="M245 198c-2-82 27-151 79-191 41 66 45 130 24 191l-40 28-63-28Z"/>
     <path d="M332 282c52 8 101 34 128 74 30 44 25 86-5 116-16 16-36 26-55 36-22 12-31 25-32 40l-1 8h-99c6-27 24-50 59-70 35-20 48-43 39-68-10-28-36-50-73-66l-8-54c16-8 31-13 47-16Z"/>

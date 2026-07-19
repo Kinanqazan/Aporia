@@ -39,6 +39,7 @@
 	
 	// Track expanded nodes in the page tree sidebar
 	let expandedNodes = $state(new Set<string>());
+	const expandedNodesStorageKey = 'aporia-expanded-sidebar-pages';
 
 	// Search States
 	let isSearchOpen = $state(false);
@@ -146,6 +147,18 @@
 			if (savedWidth) {
 				sidebarWidth = parseInt(savedWidth, 10);
 				document.cookie = `sidebar-width=${savedWidth}; path=/; max-age=31536000; SameSite=Lax`;
+			}
+		}
+
+		const savedExpandedNodes = localStorage.getItem(expandedNodesStorageKey);
+		if (savedExpandedNodes) {
+			try {
+				const savedIds = JSON.parse(savedExpandedNodes);
+				if (Array.isArray(savedIds)) {
+					expandedNodes = new Set(savedIds.filter((id): id is string => typeof id === 'string'));
+				}
+			} catch {
+				localStorage.removeItem(expandedNodesStorageKey);
 			}
 		}
 
@@ -281,6 +294,7 @@
 			next.add(id);
 		}
 		expandedNodes = next;
+		localStorage.setItem(expandedNodesStorageKey, JSON.stringify([...next]));
 	}
 
 	function startEditingTitle(id: string, currentTitle: string, e: MouseEvent) {
@@ -370,7 +384,9 @@
 			const response = await fetch('/?/move', { method: 'POST', body: formData });
 			if (response.ok) {
 				if (placement === 'inside') {
-					expandedNodes = new Set(expandedNodes).add(node.id);
+					const nextExpandedNodes = new Set(expandedNodes).add(node.id);
+					expandedNodes = nextExpandedNodes;
+					localStorage.setItem(expandedNodesStorageKey, JSON.stringify([...nextExpandedNodes]));
 				}
 				await invalidateAll();
 			}
@@ -404,7 +420,7 @@
 		// Ensure swipe is horizontal and exceeds threshold
 		if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 60) {
 			if (isMobile) {
-				if (diffX > 0 && !isSidebarOpen && touchStartX < 60) {
+				if (diffX > 0 && !isSidebarOpen && touchStartX > 30) {
 					isSidebarOpen = true;
 				} else if (diffX < 0 && isSidebarOpen) {
 					isSidebarOpen = false;
@@ -641,7 +657,7 @@
 			<div class="left-controls">
 				{#if !isSidebarOpen || isMobile}
 					<button class="icon-btn menu-btn" onclick={toggleSidebar} title="Open sidebar">
-						<Menu size={isMobile ? 20 : 16} />
+						<Menu size={isMobile ? 22 : 16} />
 					</button>
 				{/if}
 				{#if isMobile && currentPageId}
@@ -655,7 +671,7 @@
 							title={activePage.isLocked ? 'Unlock page' : 'Lock page'}
 							aria-label={activePage.isLocked ? 'Unlock page' : 'Lock page'}
 						>
-							{#if activePage.isLocked}<Lock size={20} />{:else}<Unlock size={20} />{/if}
+							{#if activePage.isLocked}<Lock size={isMobile ? 22 : 20} />{:else}<Unlock size={isMobile ? 22 : 20} />{/if}
 						</button>
 					{/if}
 				{/if}
@@ -796,7 +812,7 @@
 			<!-- Gutter Actions (Hover states) -->
 			<div class="page-actions-gutter" class:menu-open={openMenuPageId === node.id}>
 				<button class="gutter-action-btn" title="Options" onclick={(e) => { e.stopPropagation(); openMenuPageId = openMenuPageId === node.id ? null : node.id; }}>
-					<MoreHorizontal size={14} />
+					<MoreHorizontal size={isMobile ? 18 : 14} />
 				</button>
 				
 				{#if openMenuPageId === node.id}
@@ -807,16 +823,16 @@
 							<input type="hidden" name="parentId" value={node.id} />
 							<input type="hidden" name="title" value="Untitled" />
 							<button type="submit" class="dropdown-action-btn" title="Add child page">
-								<Plus size={14} /> <span>Add subpage</span>
+								<Plus size={isMobile ? 18 : 14} /> <span>Add subpage</span>
 							</button>
 						</form>
 						<button class="dropdown-action-btn" title="Rename inline" onclick={(e) => { openMenuPageId = null; startEditingTitle(node.id, node.title, e); }}>
-							<Edit3 size={14} /> <span>Rename</span>
+							<Edit3 size={isMobile ? 18 : 14} /> <span>Rename</span>
 						</button>
 						<form method="POST" action="/?/trash" use:enhance={() => { openMenuPageId = null; }}>
 							<input type="hidden" name="id" value={node.id} />
 							<button type="submit" class="dropdown-action-btn hover-trash" title="Move to trash">
-								<Trash size={14} /> <span>Delete</span>
+								<Trash size={isMobile ? 18 : 14} /> <span>Delete</span>
 							</button>
 						</form>
 					</div>
@@ -893,6 +909,10 @@
 		opacity: 1;
 	}
 
+	:global(.mobile) .page-actions-gutter {
+		opacity: 1;
+	}
+
 	.page-item-row[draggable='true'] {
 		cursor: grab;
 	}
@@ -946,6 +966,12 @@
 		color: var(--error-color);
 	}
 
+	:global(.mobile) .gutter-action-btn {
+		width: 32px;
+		height: 32px;
+		border-radius: 5px;
+	}
+
 	/* Page Options Dropdown */
 	.page-options-dropdown {
 		position: absolute;
@@ -986,6 +1012,19 @@
 	.dropdown-action-btn.hover-trash:hover {
 		background-color: var(--bg-red);
 		color: var(--error-color);
+	}
+
+	:global(.mobile) .page-options-dropdown {
+		min-width: 190px;
+		padding: 6px;
+		gap: 3px;
+	}
+
+	:global(.mobile) .dropdown-action-btn {
+		gap: 10px;
+		padding: 10px 12px;
+		font-size: 15px;
+		border-radius: 5px;
 	}
 
 	/* Inline rename formatting */
@@ -1148,6 +1187,21 @@
 
 	.sidebar-search-input-wrapper input::placeholder {
 		color: var(--text-muted);
+	}
+
+	:global(.mobile) .sidebar-search-input-wrapper {
+		padding: 9px 12px;
+		gap: 10px;
+		border-radius: 8px;
+	}
+
+	:global(.mobile) .sidebar-search-input-wrapper input {
+		font-size: 16px;
+	}
+
+	:global(.mobile) :global(.sidebar-search-icon) {
+		width: 18px;
+		height: 18px;
 	}
 
 	:global(.sidebar-search-icon) {
