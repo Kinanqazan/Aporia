@@ -116,8 +116,15 @@
 
 	onMount(() => {
 		const handleResize = () => {
-			isMobile = window.innerWidth < 768;
-			if (isMobile) isSidebarOpen = false;
+			const nextIsMobile = window.innerWidth < 768;
+
+			// Opening the on-screen keyboard in an installed PWA can emit a resize
+			// event without changing the responsive breakpoint. Do not close the
+			// drawer for those viewport resizes after it has been opened.
+			if (nextIsMobile !== isMobile) {
+				isMobile = nextIsMobile;
+				if (nextIsMobile) isSidebarOpen = false;
+			}
 		};
 		
 		handleResize();
@@ -421,14 +428,11 @@
 	ontouchend={handleTouchEnd}
 >
 	<!-- Sidebar -->
-	<aside
-		class="sidebar"
-		style="backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);"
-	>
+	<aside class="sidebar">
 		<div class="sidebar-header">
 			<div class="user-workspace">
 				<img src="/logo.svg" alt="Aporia Logo" class="workspace-logo" />
-				<span class="workspace-name">Aporia Workspace</span>
+				<span class="workspace-name">Aporia</span>
 			</div>
 			<button class="icon-btn toggle-sidebar-btn" onclick={toggleSidebar} title="Close sidebar">
 				<ChevronLeft size={16} />
@@ -448,6 +452,7 @@
 						oninput={handleSearchInput}
 						onkeydown={handleSearchKeydown}
 						onfocus={() => isSearchOpen = true}
+						onclick={(e) => e.stopPropagation()}
 					/>
 					{#if searchQuery}
 						<button type="button" class="clear-search-btn" onclick={() => { searchQuery = ''; searchResults = []; }}>✕</button>

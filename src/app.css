@@ -3,11 +3,12 @@
 
 	/* Light Mode (Notion Aesthetic) */
 	--bg-canvas: #ffffff;
-	--bg-sidebar: #f7f7f5;
-	--sidebar-surface: rgba(247, 247, 245, 0.15);
+	--bg-sidebar: #ffffff;
+	--sidebar-surface: rgba(240, 240, 240, 0.4);
+	--sidebar-blur: 12px;
 	--text-main: #37352f;
 	--text-muted: #7c7b77;
-	--border-color: #efefe8;
+	--border-color: #c7c7c7;
 	--hover-sidebar: #efeee9;
 	--hover-icon: #efefe8;
 	--active-sidebar: #e8e8e3;
@@ -46,7 +47,7 @@
 	/* Dark Mode (Notion Aesthetic) */
 	--bg-canvas: #191919;
 	--bg-sidebar: #202020;
-	--sidebar-surface: rgba(51, 51, 51, 0.15);
+	--sidebar-surface: rgba(25, 25, 25, 0.4);
 	--text-main: #e3e3e3;
 	--text-muted: #8f8f8f;
 	--border-color: #2d2d2d;
@@ -160,11 +161,9 @@ textarea {
 .sidebar {
 	width: var(--sidebar-width);
 	height: 100%;
-	/* Keep the glass effect subtle enough to preserve readability on mobile overlays. */
 	background-color: var(--sidebar-surface);
-	--sidebar-backdrop-filter: blur(20px);
-	backdrop-filter: var(--sidebar-backdrop-filter);
-	-webkit-backdrop-filter: var(--sidebar-backdrop-filter);
+	backdrop-filter: blur(var(--sidebar-blur));
+	-webkit-backdrop-filter: blur(var(--sidebar-blur));
 	border-right: 1px solid var(--border-color);
 	display: flex;
 	flex-direction: column;
@@ -228,8 +227,8 @@ textarea {
 }
 
 .workspace-logo {
-	width: 22px;
-	height: 22px;
+	width: 28px;
+	height: 28px;
 	object-fit: contain;
 }
 
@@ -596,6 +595,7 @@ textarea {
 	left: 0;
 	top: 0;
 	height: 100%;
+	z-index: 20;
 	transform: translateX(-100%);
 }
 
@@ -689,7 +689,7 @@ textarea {
 
 .ProseMirror [data-type='details']>button {
 	position: absolute;
-	top: 5px;
+	top: 6px;
 	left: -2px;
 	width: 20px;
 	height: 20px;
@@ -708,9 +708,9 @@ textarea {
 	display: block;
 	width: 0;
 	height: 0;
-	border-top: 6px solid transparent;
-	border-bottom: 6px solid transparent;
-	border-left: 7.5px solid var(--text-muted);
+	border-top: 7px solid transparent;
+	border-bottom: 7px solid transparent;
+	border-left: 9px solid var(--text-muted);
 }
 
 .ProseMirror [data-type='details'].is-open>button {
@@ -741,7 +741,7 @@ textarea {
 }
 
 .ProseMirror [data-type='details'][data-heading-level='1']>button {
-	top: calc((2.43em - 20px) / 2 + 2.5px);
+	top: calc((2.43em - 20px) / 2 + 3.5px);
 }
 
 .ProseMirror [data-type='details'][data-heading-level='2'] summary {
@@ -751,7 +751,7 @@ textarea {
 }
 
 .ProseMirror [data-type='details'][data-heading-level='2']>button {
-	top: calc((1.96em - 20px) / 2 + 1.5px);
+	top: calc((1.96em - 20px) / 2 + 2.5px);
 }
 
 .ProseMirror [data-type='details'][data-heading-level='3'] summary {
@@ -761,7 +761,7 @@ textarea {
 }
 
 .ProseMirror [data-type='details'][data-heading-level='3']>button {
-	top: calc((1.8em - 20px) / 2 + 1px);
+	top: calc((1.8em - 20px) / 2 + 2px);
 }
 
 .ProseMirror [data-type='detailsContent'] {
@@ -791,7 +791,7 @@ textarea {
 .ProseMirror blockquote {
 	border-left: 3px solid var(--border-color);
 	padding-left: 14px;
-	color: var(--text-muted);
+	color: var(--text-main);
 	font-style: italic;
 	margin: 1em 0;
 }

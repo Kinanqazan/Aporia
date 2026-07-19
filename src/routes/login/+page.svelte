@@ -15,7 +15,7 @@
 	<div class="login-card">
 		<div class="login-logo-wrapper">
 			<img src="/logo.svg" alt="Aporia Logo" class="login-logo" />
-			<h1>Aporia Workspace</h1>
+		<h1>Aporia</h1>
 			<p class="subtitle">Enter password to unlock your personal workspace</p>
 		</div>
 
