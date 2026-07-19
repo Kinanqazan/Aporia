@@ -162,7 +162,6 @@ textarea {
 	width: var(--sidebar-width);
 	height: 100%;
 	background-color: var(--sidebar-surface);
-	backdrop-filter: blur(var(--sidebar-blur));
 	-webkit-backdrop-filter: blur(var(--sidebar-blur));
 	border-right: 1px solid var(--border-color);
 	display: flex;
@@ -171,6 +170,13 @@ textarea {
 	z-index: 10;
 	flex-shrink: 0;
 	position: relative;
+}
+
+/* Keep the standards-based declaration in production builds as well as the WebKit fallback. */
+@supports (backdrop-filter: blur(1px)) {
+	.sidebar {
+		backdrop-filter: blur(var(--sidebar-blur));
+	}
 }
 
 .sidebar-closed .sidebar {
@@ -590,6 +596,21 @@ textarea {
 }
 
 /* Mobile Overlay and Drawer overrides */
+/* Apply the closed drawer state before Svelte hydrates and adds the `.mobile` class. */
+@media (max-width: 767px) {
+	.app-container:not(.mobile) .sidebar {
+		position: absolute;
+		left: 0;
+		top: 0;
+		height: 100%;
+		transform: translateX(-100%);
+	}
+
+	.app-container:not(.mobile) .main-content {
+		padding-left: 0;
+	}
+}
+
 .mobile-overlay {
 	position: absolute;
 	top: 0;
