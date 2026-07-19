@@ -421,7 +421,10 @@
 	ontouchend={handleTouchEnd}
 >
 	<!-- Sidebar -->
-	<aside class="sidebar">
+	<aside
+		class="sidebar"
+		style="backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);"
+	>
 		<div class="sidebar-header">
 			<div class="user-workspace">
 				<img src="/logo.svg" alt="Aporia Logo" class="workspace-logo" />

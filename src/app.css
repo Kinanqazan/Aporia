@@ -4,6 +4,7 @@
 	/* Light Mode (Notion Aesthetic) */
 	--bg-canvas: #ffffff;
 	--bg-sidebar: #f7f7f5;
+	--sidebar-surface: rgba(247, 247, 245, 0.15);
 	--text-main: #37352f;
 	--text-muted: #7c7b77;
 	--border-color: #efefe8;
@@ -45,6 +46,7 @@
 	/* Dark Mode (Notion Aesthetic) */
 	--bg-canvas: #191919;
 	--bg-sidebar: #202020;
+	--sidebar-surface: rgba(51, 51, 51, 0.15);
 	--text-main: #e3e3e3;
 	--text-muted: #8f8f8f;
 	--border-color: #2d2d2d;
@@ -158,9 +160,11 @@ textarea {
 .sidebar {
 	width: var(--sidebar-width);
 	height: 100%;
-	background-color: color-mix(in srgb, var(--bg-sidebar) 40%, transparent);
-	backdrop-filter: blur(15px);
-	-webkit-backdrop-filter: blur(10px);
+	/* Keep the glass effect subtle enough to preserve readability on mobile overlays. */
+	background-color: var(--sidebar-surface);
+	--sidebar-backdrop-filter: blur(20px);
+	backdrop-filter: var(--sidebar-backdrop-filter);
+	-webkit-backdrop-filter: var(--sidebar-backdrop-filter);
 	border-right: 1px solid var(--border-color);
 	display: flex;
 	flex-direction: column;

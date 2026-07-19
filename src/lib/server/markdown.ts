@@ -107,6 +107,37 @@ function convertNode(node: any, indentLevel = 0): string {
 			return mdRows.join('\n');
 		}
 
+		case 'databaseBlock': {
+			const columns = node.attrs?.columns || [];
+			const rows = node.attrs?.rows || [];
+			if (columns.length === 0) return '';
+
+			const mdRows: string[] = [];
+
+			// Header row
+			const headerCols = columns.map((col: any) => col.name || 'Unnamed');
+			mdRows.push(`| ${headerCols.join(' | ')} |`);
+
+			// Delimiter row
+			const alignCols = columns.map(() => '---');
+			mdRows.push(`| ${alignCols.join(' | ')} |`);
+
+			// Data rows
+			rows.forEach((row: any) => {
+				const rowCells = columns.map((col: any) => {
+					const val = row[col.id];
+					if (val === undefined || val === null) return '';
+					if (Array.isArray(val)) {
+						return val.map((v: any) => String(v).replace(/\|/g, '\\|')).join(', ');
+					}
+					return String(val).replace(/\|/g, '\\|');
+				});
+				mdRows.push(`| ${rowCells.join(' | ')} |`);
+			});
+
+			return mdRows.join('\n');
+		}
+
 		default:
 			if (Array.isArray(node.content)) {
 				return node.content.map((child: any) => convertNode(child, indentLevel)).join('\n');

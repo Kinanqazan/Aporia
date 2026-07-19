@@ -9,6 +9,7 @@
 	import { ColumnLayout } from '$lib/editor/extensions/ColumnLayout';
 	import { Column } from '$lib/editor/extensions/Column';
 	import { Commands } from '$lib/editor/extensions/Commands';
+	import { DatabaseBlock } from '$lib/editor/extensions/DatabaseBlockExtension.svelte';
 	import { TextStyle } from '@tiptap/extension-text-style';
 	import { Color } from '@tiptap/extension-color';
 	import { Highlight } from '@tiptap/extension-highlight';
@@ -25,7 +26,8 @@
 		Cloud, CloudLightning, Plus, GripVertical, Trash2, Copy, 
 		Heading1, Heading2, Heading3, Type, Quote, Code, 
 		List, ListOrdered, Bold, Italic, Link as LinkIcon, Palette,
-		CheckSquare, Minus, Table as TableIcon, ChevronRight, Lock
+		CheckSquare, Minus, Table as TableIcon, ChevronRight, Lock,
+		Database
 	} from 'lucide-svelte';
 
 	import { CURATED_ICONS } from '$lib/icons';
@@ -373,6 +375,37 @@
 			action: (editor: Editor, range: any) => {
 				editor.chain().focus().deleteRange(range).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
 			}
+		},
+		{
+			title: 'Database Table',
+			description: 'Insert a data table with sorting, filtering, and typed columns.',
+			searchTerms: ['database', 'table', 'grid', 'datatable', 'sort', 'filter'],
+			icon: Database,
+			action: (editor: Editor, range: any) => {
+				editor
+					.chain()
+					.focus()
+					.deleteRange(range)
+					.insertContent({
+						type: 'databaseBlock',
+						attrs: {
+							columns: [
+								{ id: 'name', name: 'Name', type: 'text' },
+								{ id: 'status', name: 'Status', type: 'status' },
+								{ id: 'date', name: 'Date', type: 'date' }
+							],
+							rows: [
+								{ id: 'row-1', name: 'Draft implementation plan', status: 'Done', date: '2026-07-19' },
+								{ id: 'row-2', name: 'Build Svelte 5 component', status: 'In Progress', date: '2026-07-20' },
+								{ id: 'row-3', name: 'Verify Markdown export', status: 'Todo', date: '2026-07-21' }
+							],
+							options: {
+								status: ['Todo', 'In Progress', 'Done']
+							}
+						}
+					})
+					.run();
+			}
 		}
 	];
 
@@ -603,6 +636,7 @@
 				DetailsContent,
 				ColumnLayout,
 				Column,
+				DatabaseBlock,
 				TextStyle,
 				Color,
 				Highlight.configure({ multicolor: true }),
