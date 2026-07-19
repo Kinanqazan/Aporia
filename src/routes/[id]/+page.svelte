@@ -99,7 +99,7 @@
 
 	function handleColumnHandleClick(e: MouseEvent) {
 		e.stopPropagation();
-		if (!editor || !activeCellNode) return;
+		if (isLocked || !editor || !activeCellNode) return;
 		
 		// Focus editor and select the cell
 		editor.commands.focus();
@@ -116,7 +116,7 @@
 
 	function handleRowHandleClick(e: MouseEvent) {
 		e.stopPropagation();
-		if (!editor || !activeCellNode) return;
+		if (isLocked || !editor || !activeCellNode) return;
 		
 		// Focus editor and select the cell
 		editor.commands.focus();
@@ -788,6 +788,11 @@
 		if (isLocked) {
 			isIconPickerOpen = false;
 			isSlashMenuOpen = false;
+			isTableHovered = false;
+			activeTableNode = null;
+			activeCellNode = null;
+			isColMenuOpen = false;
+			isRowMenuOpen = false;
 		}
 	});
 
@@ -1903,7 +1908,7 @@
 		<div bind:this={editorElement} class="tiptap-editor-element"></div>
 
 		<!-- Table controls (Notion-style column/row adders) -->
-		{#if isTableHovered && activeTableNode}
+		{#if !isLocked && isTableHovered && activeTableNode}
 			<!-- Column Adder (vertical bar on the right) -->
 			<div 
 				class="table-column-adder"
@@ -1914,6 +1919,7 @@
 					class="table-adder-btn"
 					title="Click to add a new column"
 					onclick={() => {
+						if (isLocked) return;
 						editor?.chain().focus().addColumnAfter().run();
 						setTimeout(updateTablePositions, 20);
 					}}
@@ -1932,6 +1938,7 @@
 					class="table-adder-btn"
 					title="Click to add a new row"
 					onclick={() => {
+						if (isLocked) return;
 						editor?.chain().focus().addRowAfter().run();
 						setTimeout(updateTablePositions, 20);
 					}}
@@ -1959,7 +1966,7 @@
 		{/if}
 
 		<!-- Column Options Dropdown -->
-		{#if isColMenuOpen}
+		{#if !isLocked && isColMenuOpen}
 			<div 
 				class="table-handle-menu"
 				style="top: {colMenuPosition.top}px; left: {colMenuPosition.left}px;"
@@ -1968,6 +1975,7 @@
 					type="button" 
 					class="menu-item-action"
 					onclick={() => {
+						if (isLocked) return;
 						editor?.chain().focus().deleteColumn().run();
 						isColMenuOpen = false;
 						isTableHovered = false;
@@ -1980,6 +1988,7 @@
 					type="button" 
 					class="menu-item-action"
 					onclick={() => {
+						if (isLocked) return;
 						editor?.chain().focus().addColumnBefore().run();
 						isColMenuOpen = false;
 						setTimeout(updateTablePositions, 20);
@@ -1992,6 +2001,7 @@
 					type="button" 
 					class="menu-item-action"
 					onclick={() => {
+						if (isLocked) return;
 						editor?.chain().focus().addColumnAfter().run();
 						isColMenuOpen = false;
 						setTimeout(updateTablePositions, 20);
@@ -2004,7 +2014,7 @@
 		{/if}
 
 		<!-- Row Options Dropdown -->
-		{#if isRowMenuOpen}
+		{#if !isLocked && isRowMenuOpen}
 			<div 
 				class="table-handle-menu"
 				style="top: {rowMenuPosition.top}px; left: {rowMenuPosition.left}px;"
@@ -2013,6 +2023,7 @@
 					type="button" 
 					class="menu-item-action"
 					onclick={() => {
+						if (isLocked) return;
 						editor?.chain().focus().deleteRow().run();
 						isRowMenuOpen = false;
 						isTableHovered = false;
@@ -2025,6 +2036,7 @@
 					type="button" 
 					class="menu-item-action"
 					onclick={() => {
+						if (isLocked) return;
 						editor?.chain().focus().addRowBefore().run();
 						isRowMenuOpen = false;
 						setTimeout(updateTablePositions, 20);
@@ -2037,6 +2049,7 @@
 					type="button" 
 					class="menu-item-action"
 					onclick={() => {
+						if (isLocked) return;
 						editor?.chain().focus().addRowAfter().run();
 						isRowMenuOpen = false;
 						setTimeout(updateTablePositions, 20);
