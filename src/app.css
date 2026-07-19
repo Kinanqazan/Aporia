@@ -1,139 +1,145 @@
 :root {
-  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  
-  /* Light Mode (Notion Aesthetic) */
-  --bg-canvas: #ffffff;
-  --bg-sidebar: #f7f7f5;
-  --text-main: #37352f;
-  --text-muted: #7c7b77;
-  --border-color: #efefe8;
-  --hover-sidebar: #efeee9;
-  --hover-icon: #efefe8;
-  --active-sidebar: #e8e8e3;
-  --accent-color: #2383e2;
-  --selection-bg: rgba(35, 131, 226, 0.15);
-  --error-color: #eb5757;
-  
-  --sidebar-width: 240px;
-  --transition-speed: 0.2s;
-  --header-height: 45px;
+	--font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 
-  /* Notion Text Colors (Light Mode) */
-  --color-gray: #787774;
-  --color-brown: #976d57;
-  --color-orange: #cc5d2c;
-  --color-yellow: #a97e13;
-  --color-green: #37835b;
-  --color-blue: #1c73a6;
-  --color-purple: #8f48ca;
-  --color-pink: #c7247a;
-  --color-red: #cc3e39;
+	/* Light Mode (Notion Aesthetic) */
+	--bg-canvas: #ffffff;
+	--bg-sidebar: #f7f7f5;
+	--text-main: #37352f;
+	--text-muted: #7c7b77;
+	--border-color: #efefe8;
+	--hover-sidebar: #efeee9;
+	--hover-icon: #efefe8;
+	--active-sidebar: #e8e8e3;
+	--accent-color: #2383e2;
+	--selection-bg: rgba(35, 131, 226, 0.15);
+	--error-color: #eb5757;
 
-  /* Notion Highlights (Light Mode) */
-  --bg-gray: #f1f1ef;
-  --bg-brown: #f4eeee;
-  --bg-orange: #fbefe8;
-  --bg-yellow: #fbf3db;
-  --bg-green: #edf3ec;
-  --bg-blue: #e8f4fc;
-  --bg-purple: #f5f0fa;
-  --bg-pink: #f9f0f4;
-  --bg-red: #fdebec;
+	--sidebar-width: 240px;
+	--transition-speed: 0.2s;
+	--header-height: 45px;
+
+	/* Notion Text Colors (Light Mode) */
+	--color-gray: #787774;
+	--color-brown: #976d57;
+	--color-orange: #cc5d2c;
+	--color-yellow: #a97e13;
+	--color-green: #37835b;
+	--color-blue: #1c73a6;
+	--color-purple: #8f48ca;
+	--color-pink: #c7247a;
+	--color-red: #cc3e39;
+
+	/* Notion Highlights (Light Mode) */
+	--bg-gray: #f1f1ef;
+	--bg-brown: #f4eeee;
+	--bg-orange: #fbefe8;
+	--bg-yellow: #fbf3db;
+	--bg-green: #edf3ec;
+	--bg-blue: #e8f4fc;
+	--bg-purple: #f5f0fa;
+	--bg-pink: #f9f0f4;
+	--bg-red: #fdebec;
 }
 
 :root.dark {
-  /* Dark Mode (Notion Aesthetic) */
-  --bg-canvas: #191919;
-  --bg-sidebar: #202020;
-  --text-main: #e3e3e3;
-  --text-muted: #8f8f8f;
-  --border-color: #2d2d2d;
-  --hover-sidebar: #2d2d2d;
-  --hover-icon: #353535;
-  --active-sidebar: #373737;
-  --accent-color: #2f81f7;
-  --selection-bg: rgba(47, 129, 247, 0.25);
+	/* Dark Mode (Notion Aesthetic) */
+	--bg-canvas: #191919;
+	--bg-sidebar: #202020;
+	--text-main: #e3e3e3;
+	--text-muted: #8f8f8f;
+	--border-color: #2d2d2d;
+	--hover-sidebar: #2d2d2d;
+	--hover-icon: #353535;
+	--active-sidebar: #373737;
+	--accent-color: #2f81f7;
+	--selection-bg: rgba(47, 129, 247, 0.25);
 
-  /* Notion Text Colors (Dark Mode) */
-  --color-gray: #9b9a97;
-  --color-brown: #ba8c74;
-  --color-orange: #e07f54;
-  --color-yellow: #cda846;
-  --color-green: #529e72;
-  --color-blue: #5fa9d9;
-  --color-purple: #a873d9;
-  --color-pink: #d15694;
-  --color-red: #df6b66;
+	/* Notion Text Colors (Dark Mode) */
+	--color-gray: #9b9a97;
+	--color-brown: #ba8c74;
+	--color-orange: #e07f54;
+	--color-yellow: #cda846;
+	--color-green: #529e72;
+	--color-blue: #5fa9d9;
+	--color-purple: #a873d9;
+	--color-pink: #d15694;
+	--color-red: #df6b66;
 
-  /* Notion Highlights (Dark Mode) */
-  --bg-gray: #2d2d2d;
-  --bg-brown: #3f322b;
-  --bg-orange: #5a3525;
-  --bg-yellow: #56461a;
-  --bg-green: #243d30;
-  --bg-blue: #143d52;
-  --bg-purple: #3f224f;
-  --bg-pink: #4f2237;
-  --bg-red: #522525;
+	/* Notion Highlights (Dark Mode) */
+	--bg-gray: #2d2d2d;
+	--bg-brown: #3f322b;
+	--bg-orange: #5a3525;
+	--bg-yellow: #56461a;
+	--bg-green: #243d30;
+	--bg-blue: #143d52;
+	--bg-purple: #3f224f;
+	--bg-pink: #4f2237;
+	--bg-red: #522525;
 }
 
 * {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+	-webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+	background-color: var(--selection-bg);
 }
 
 body {
-  font-family: var(--font-sans);
-  background-color: var(--bg-canvas);
-  color: var(--text-main);
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+	font-family: var(--font-sans);
+	background-color: var(--bg-canvas);
+	color: var(--text-main);
+	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
 }
 
 button {
-  font-family: inherit;
-  color: inherit;
-  border: none;
-  background: none;
-  cursor: pointer;
-  outline: none;
+	font-family: inherit;
+	color: inherit;
+	border: none;
+	background: none;
+	cursor: pointer;
+	outline: none;
 }
 
-input, textarea {
-  font-family: inherit;
-  color: inherit;
-  border: none;
-  background: none;
-  outline: none;
+input,
+textarea {
+	font-family: inherit;
+	color: inherit;
+	border: none;
+	background: none;
+	outline: none;
 }
 
 /* Scrollbar styling matching Notion */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+	width: 8px;
+	height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+	background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(15, 15, 15, 0.1);
-  border-radius: 20px;
+	background: rgba(15, 15, 15, 0.1);
+	border-radius: 20px;
 }
 
 :root.dark ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+	background: rgba(255, 255, 255, 0.1);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(15, 15, 15, 0.2);
+	background: rgba(15, 15, 15, 0.2);
 }
 
 :root.dark ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+	background: rgba(255, 255, 255, 0.2);
 }
 
 /* ==========================================================================
@@ -152,7 +158,9 @@ input, textarea {
 .sidebar {
 	width: var(--sidebar-width);
 	height: 100%;
-	background-color: var(--bg-sidebar);
+	background-color: color-mix(in srgb, var(--bg-sidebar) 40%, transparent);
+	backdrop-filter: blur(15px);
+	-webkit-backdrop-filter: blur(10px);
 	border-right: 1px solid var(--border-color);
 	display: flex;
 	flex-direction: column;
@@ -254,7 +262,8 @@ input, textarea {
 	border-bottom: 1px solid var(--border-color);
 }
 
-.action-item, .footer-item {
+.action-item,
+.footer-item {
 	display: flex;
 	align-items: center;
 	gap: 10px;
@@ -267,13 +276,15 @@ input, textarea {
 	text-align: left;
 }
 
-.action-item:hover, .footer-item:hover {
+.action-item:hover,
+.footer-item:hover {
 	background-color: var(--hover-sidebar);
 }
 
 .action-item {
 	color: var(--text-muted);
 }
+
 .action-item:hover {
 	color: var(--text-main);
 }
@@ -460,7 +471,6 @@ input, textarea {
 .page-children {
 	margin-left: 8px;
 	padding-left: 4px;
-	border-left: 1px solid var(--border-color);
 	display: flex;
 	flex-direction: column;
 	gap: 2px;
@@ -481,6 +491,7 @@ input, textarea {
 .footer-item {
 	color: var(--text-muted);
 }
+
 .footer-item:hover {
 	color: var(--text-main);
 }
@@ -615,6 +626,15 @@ input, textarea {
 	padding-top: 16px;
 }
 
+.mobile .page-item-link {
+	font-size: 16px;
+}
+
+.mobile .page-symbol-slot {
+	width: 26px;
+	height: 26px;
+}
+
 /* ==========================================================================
    TIPTAP WYSIWYG EDITOR CANVAS STYLES
    ========================================================================== */
@@ -663,7 +683,7 @@ input, textarea {
 	margin: 0.6em 0;
 }
 
-.ProseMirror [data-type='details'] > button {
+.ProseMirror [data-type='details']>button {
 	position: absolute;
 	top: 5px;
 	left: -2px;
@@ -679,7 +699,7 @@ input, textarea {
 	justify-content: center;
 }
 
-.ProseMirror [data-type='details'] > button::before {
+.ProseMirror [data-type='details']>button::before {
 	content: '';
 	display: block;
 	width: 0;
@@ -689,11 +709,11 @@ input, textarea {
 	border-left: 7.5px solid var(--text-muted);
 }
 
-.ProseMirror [data-type='details'].is-open > button {
+.ProseMirror [data-type='details'].is-open>button {
 	transform: rotate(90deg);
 }
 
-.ProseMirror [data-type='details'] > button:hover {
+.ProseMirror [data-type='details']>button:hover {
 	background: var(--hover-sidebar);
 }
 
@@ -716,7 +736,7 @@ input, textarea {
 	line-height: 1.35;
 }
 
-.ProseMirror [data-type='details'][data-heading-level='1'] > button {
+.ProseMirror [data-type='details'][data-heading-level='1']>button {
 	top: calc((2.43em - 20px) / 2 + 2.5px);
 }
 
@@ -726,7 +746,7 @@ input, textarea {
 	line-height: 1.4;
 }
 
-.ProseMirror [data-type='details'][data-heading-level='2'] > button {
+.ProseMirror [data-type='details'][data-heading-level='2']>button {
 	top: calc((1.96em - 20px) / 2 + 1.5px);
 }
 
@@ -736,7 +756,7 @@ input, textarea {
 	line-height: 1.5;
 }
 
-.ProseMirror [data-type='details'][data-heading-level='3'] > button {
+.ProseMirror [data-type='details'][data-heading-level='3']>button {
 	top: calc((1.8em - 20px) / 2 + 1px);
 }
 
@@ -747,13 +767,14 @@ input, textarea {
 
 /* Keep a quote's rule close to the heading, while its text aligns with the
    other indented toggle content. */
-.ProseMirror [data-type='detailsContent'] > blockquote {
+.ProseMirror [data-type='detailsContent']>blockquote {
 	margin-left: 0;
 	padding-left: 14px;
 }
 
 /* Lists */
-.ProseMirror ul, .ProseMirror ol {
+.ProseMirror ul,
+.ProseMirror ol {
 	padding-left: 24px;
 	margin-bottom: 0.6em;
 }
@@ -802,7 +823,7 @@ input, textarea {
 	color: inherit;
 }
 
-.ProseMirror > * {
+.ProseMirror>* {
 	position: relative;
 }
 
@@ -818,7 +839,7 @@ input, textarea {
 	align-items: flex-start;
 }
 
-.column-layout > .column {
+.column-layout>.column {
 	flex: 1 1 0%;
 	min-width: 0;
 	padding: 4px 8px;
@@ -826,7 +847,7 @@ input, textarea {
 	transition: background-color var(--transition-speed);
 }
 
-.column-layout > .column:hover {
+.column-layout>.column:hover {
 	background-color: rgba(255, 255, 255, 0.02);
 }
 
@@ -836,7 +857,7 @@ input, textarea {
 		flex-direction: column;
 	}
 
-	.column-layout > .column {
+	.column-layout>.column {
 		width: 100% !important;
 	}
 }
@@ -899,7 +920,7 @@ input, textarea {
 	transform: scale(1);
 }
 
-.ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
+.ProseMirror ul[data-type="taskList"] li[data-checked="true"]>div {
 	text-decoration: line-through;
 	color: var(--text-muted);
 }
@@ -915,7 +936,8 @@ input, textarea {
 	overflow: hidden;
 }
 
-.ProseMirror td, .ProseMirror th {
+.ProseMirror td,
+.ProseMirror th {
 	min-width: 1em;
 	border: 1px solid var(--border-color);
 	padding: 8px 12px;
@@ -934,7 +956,10 @@ input, textarea {
 	z-index: 2;
 	position: absolute;
 	content: "";
-	left: 0; right: 0; top: 0; bottom: 0;
+	left: 0;
+	right: 0;
+	top: 0;
+	bottom: 0;
 	background: rgba(35, 131, 226, 0.08);
 	pointer-events: none;
 }

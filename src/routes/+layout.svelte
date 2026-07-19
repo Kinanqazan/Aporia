@@ -19,9 +19,10 @@
 		Trash,
 		RotateCcw,
 		Edit3,
-		Lock,
 		Unlock,
-		FileDown
+		Lock,
+		FileDown,
+		MoreHorizontal
 	} from 'lucide-svelte';
 	import type { PageNode } from '$lib/server/pages';
 
@@ -57,6 +58,9 @@
 	// Section Title States
 	let sectionTitle = $state(data.sectionTitle ?? 'Private');
 	let isEditingSectionTitle = $state(false);
+	
+	// Dropdown menu state
+	let openMenuPageId = $state<string | null>(null);
 
 	// Active page tracking from route params
 	let currentPageId = $derived($page.params.id || null);
@@ -122,6 +126,9 @@
 		const handleClickOutside = (e: MouseEvent) => {
 			if (isSearchOpen && searchContainerEl && !searchContainerEl.contains(e.target as Node)) {
 				isSearchOpen = false;
+			}
+			if (openMenuPageId) {
+				openMenuPageId = null;
 			}
 		};
 		window.addEventListener('click', handleClickOutside);
@@ -364,9 +371,55 @@
 			clearDragState();
 		}
 	}
+
+	// Touch swipe gesture handlers for mobile sidebar opening/closing
+	let touchStartX = 0;
+	let touchStartY = 0;
+	let touchEndX = 0;
+	let touchEndY = 0;
+
+	function handleTouchStart(e: TouchEvent) {
+		touchStartX = e.touches[0].clientX;
+		touchStartY = e.touches[0].clientY;
+		touchEndX = touchStartX;
+		touchEndY = touchStartY;
+	}
+
+	function handleTouchMove(e: TouchEvent) {
+		touchEndX = e.touches[0].clientX;
+		touchEndY = e.touches[0].clientY;
+	}
+
+	function handleTouchEnd() {
+		const diffX = touchEndX - touchStartX;
+		const diffY = touchEndY - touchStartY;
+
+		// Ensure swipe is horizontal and exceeds threshold
+		if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 60) {
+			if (isMobile) {
+				if (diffX > 0 && !isSidebarOpen && touchStartX < 60) {
+					isSidebarOpen = true;
+				} else if (diffX < 0 && isSidebarOpen) {
+					isSidebarOpen = false;
+				}
+			}
+		}
+	}
 </script>
 
-<div class="app-container" class:sidebar-closed={!isSidebarOpen} class:mobile={isMobile} style="--sidebar-width: {sidebarWidth}px;">
+<svelte:head>
+	<meta name="theme-color" content={isDarkMode ? '#191919' : '#ffffff'} />
+</svelte:head>
+
+<div 
+	class="app-container" 
+	class:sidebar-closed={!isSidebarOpen} 
+	class:mobile={isMobile} 
+	style="--sidebar-width: {sidebarWidth}px;"
+	ontouchstart={handleTouchStart}
+	ontouchmove={handleTouchMove}
+	ontouchend={handleTouchEnd}
+>
 	<!-- Sidebar -->
 	<aside class="sidebar">
 		<div class="sidebar-header">
@@ -383,7 +436,7 @@
 		<div class="sidebar-actions">
 			<div class="sidebar-search-container" bind:this={searchContainerEl}>
 				<div class="sidebar-search-input-wrapper">
-					<Search size={14} class="sidebar-search-icon" />
+					<Search size={16} class="sidebar-search-icon" />
 					<input
 						bind:this={sidebarSearchInputEl}
 						type="text"
@@ -733,23 +786,33 @@
 			{/if}
 
 			<!-- Gutter Actions (Hover states) -->
-			<div class="page-actions-gutter">
-				<form method="POST" action="/?/create" use:enhance>
-					<input type="hidden" name="parentId" value={node.id} />
-					<input type="hidden" name="title" value="Untitled" />
-					<button type="submit" class="gutter-action-btn" title="Add child page" onclick={(e) => e.stopPropagation()}>
-						<Plus size={12} />
-					</button>
-				</form>
-				<button class="gutter-action-btn" title="Rename inline" onclick={(e) => startEditingTitle(node.id, node.title, e)}>
-					<Edit3 size={12} />
+			<div class="page-actions-gutter" class:menu-open={openMenuPageId === node.id}>
+				<button class="gutter-action-btn" title="Options" onclick={(e) => { e.stopPropagation(); openMenuPageId = openMenuPageId === node.id ? null : node.id; }}>
+					<MoreHorizontal size={14} />
 				</button>
-				<form method="POST" action="/?/trash" use:enhance>
-					<input type="hidden" name="id" value={node.id} />
-					<button type="submit" class="gutter-action-btn hover-trash" title="Move to trash">
-						<Trash size={12} />
-					</button>
-				</form>
+				
+				{#if openMenuPageId === node.id}
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div class="page-options-dropdown" onclick={(e) => e.stopPropagation()}>
+						<form method="POST" action="/?/create" use:enhance={() => { openMenuPageId = null; }}>
+							<input type="hidden" name="parentId" value={node.id} />
+							<input type="hidden" name="title" value="Untitled" />
+							<button type="submit" class="dropdown-action-btn" title="Add child page">
+								<Plus size={14} /> <span>Add subpage</span>
+							</button>
+						</form>
+						<button class="dropdown-action-btn" title="Rename inline" onclick={(e) => { openMenuPageId = null; startEditingTitle(node.id, node.title, e); }}>
+							<Edit3 size={14} /> <span>Rename</span>
+						</button>
+						<form method="POST" action="/?/trash" use:enhance={() => { openMenuPageId = null; }}>
+							<input type="hidden" name="id" value={node.id} />
+							<button type="submit" class="dropdown-action-btn hover-trash" title="Move to trash">
+								<Trash size={14} /> <span>Delete</span>
+							</button>
+						</form>
+					</div>
+				{/if}
 			</div>
 		</div>
 
@@ -814,9 +877,11 @@
 		opacity: 0;
 		transition: opacity var(--transition-speed);
 		z-index: 2;
+		position: relative;
 	}
 
-	.page-item-row:hover .page-actions-gutter {
+	.page-item-row:hover .page-actions-gutter,
+	.page-actions-gutter.menu-open {
 		opacity: 1;
 	}
 
@@ -873,6 +938,48 @@
 		color: var(--error-color);
 	}
 
+	/* Page Options Dropdown */
+	.page-options-dropdown {
+		position: absolute;
+		right: 28px;
+		top: 0;
+		background-color: var(--bg-canvas);
+		border: 1px solid var(--border-color);
+		border-radius: 6px;
+		padding: 4px;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+		z-index: 50;
+		min-width: 140px;
+	}
+	
+	.dropdown-action-btn {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		width: 100%;
+		padding: 6px 8px;
+		border: none;
+		background: transparent;
+		color: var(--text-main);
+		font-size: 13px;
+		border-radius: 4px;
+		cursor: pointer;
+		text-align: left;
+		transition: background var(--transition-speed), color var(--transition-speed);
+	}
+	
+	.dropdown-action-btn:hover {
+		background-color: var(--hover-sidebar);
+	}
+	
+	.dropdown-action-btn.hover-trash:hover {
+		background-color: var(--bg-red);
+		color: var(--error-color);
+	}
+
 	/* Inline rename formatting */
 	.inline-rename-form {
 		flex: 1;
@@ -898,7 +1005,9 @@
 		left: 0;
 		width: 100%;
 		max-height: 240px;
-		background: var(--bg-sidebar);
+		background: color-mix(in srgb, var(--bg-sidebar) 85%, transparent);
+		backdrop-filter: blur(20px);
+		-webkit-backdrop-filter: blur(20px);
 		border-top: 1px solid var(--border-color);
 		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
 		display: flex;
@@ -1013,7 +1122,7 @@
 		background-color: var(--hover-sidebar);
 		border: 1px solid var(--border-color);
 		border-radius: 6px;
-		padding: 5px 8px;
+		padding: 6px 10px;
 		gap: 8px;
 		width: 100%;
 	}
@@ -1023,7 +1132,7 @@
 		background: transparent;
 		border: none;
 		outline: none;
-		font-size: 13px;
+		font-size: 14px;
 		color: var(--text-main);
 		font-family: inherit;
 		min-width: 0;
@@ -1058,7 +1167,9 @@
 		left: 0;
 		right: 0;
 		margin-top: 4px;
-		background-color: var(--bg-sidebar);
+		background-color: color-mix(in srgb, var(--bg-sidebar) 85%, transparent);
+		backdrop-filter: blur(20px);
+		-webkit-backdrop-filter: blur(20px);
 		border: 1px solid var(--border-color);
 		border-radius: 6px;
 		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
@@ -1076,7 +1187,7 @@
 		padding: 6px 10px;
 		border-radius: 4px;
 		gap: 8px;
-		font-size: 13px;
+		font-size: 14px;
 		color: var(--text-main);
 		text-decoration: none;
 		transition: background var(--transition-speed);
