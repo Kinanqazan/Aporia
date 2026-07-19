@@ -230,6 +230,16 @@ textarea {
 	width: 28px;
 	height: 28px;
 	object-fit: contain;
+	content: url('/logo-light.svg');
+}
+
+.login-logo {
+	content: url('/logo-light.svg');
+}
+
+:root.dark .workspace-logo,
+:root.dark .login-logo {
+	content: url('/logo.svg');
 }
 
 .workspace-name {
