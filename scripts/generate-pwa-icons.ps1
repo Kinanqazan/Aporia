@@ -35,7 +35,14 @@ function New-PwaIcon {
 	$graphics.DrawImage($source, $destination)
 
 	$outputPath = Join-Path $staticDirectory $OutputName
-	$canvas.Save($outputPath, [System.Drawing.Imaging.ImageFormat]::Png)
+	$fileStream = [System.IO.File]::Open(
+		$outputPath,
+		[System.IO.FileMode]::Create,
+		[System.IO.FileAccess]::Write,
+		[System.IO.FileShare]::None
+	)
+	$canvas.Save($fileStream, [System.Drawing.Imaging.ImageFormat]::Png)
+	$fileStream.Dispose()
 	$graphics.Dispose()
 	$canvas.Dispose()
 }
@@ -46,8 +53,8 @@ try {
 	New-PwaIcon -Size 512 -ArtworkScale 0.78 -UseLauncherBackground $false -OutputName 'aporia-icon-512.png'
 
 	# Maskable icons need an opaque full canvas and a smaller, circular safe zone.
-	New-PwaIcon -Size 192 -ArtworkScale 0.50 -UseLauncherBackground $true -OutputName 'aporia-icon-maskable-192.png'
-	New-PwaIcon -Size 512 -ArtworkScale 0.50 -UseLauncherBackground $true -OutputName 'aporia-icon-maskable-512.png'
+	New-PwaIcon -Size 192 -ArtworkScale 0.58 -UseLauncherBackground $true -OutputName 'aporia-icon-maskable-192.png'
+	New-PwaIcon -Size 512 -ArtworkScale 0.58 -UseLauncherBackground $true -OutputName 'aporia-icon-maskable-512.png'
 
 	# Safari ignores the manifest icon list, so it receives the regular padded icon directly.
 	New-PwaIcon -Size 180 -ArtworkScale 0.78 -UseLauncherBackground $false -OutputName 'aporia-icon-apple-touch.png'
