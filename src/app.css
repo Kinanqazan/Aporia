@@ -94,6 +94,20 @@ body {
 	overflow: hidden;
 }
 
+/*
+ * The safe-area outside the app surface is painted by the document root. Keep
+ * it on the same theme surface as the app so a theme toggle cannot expose a
+ * stale one-pixel strip near the device notch while the PWA is repainting.
+ */
+html {
+	background-color: var(--bg-canvas);
+	color-scheme: light;
+}
+
+html.dark {
+	color-scheme: dark;
+}
+
 ::selection {
 	background-color: var(--selection-bg);
 }
@@ -102,6 +116,7 @@ body {
 	font-family: var(--font-sans);
 	background-color: var(--bg-canvas);
 	color: var(--text-main);
+	min-height: 100%;
 	line-height: 1.5;
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
@@ -730,6 +745,12 @@ textarea {
 	margin-bottom: 0.6em;
 }
 
+/* Keep Arabic blocks right-to-left without changing mixed-language pages. */
+.ProseMirror .arabic-text-block {
+	direction: rtl;
+	text-align: right;
+}
+
 /* Headings */
 .ProseMirror h1 {
 	font-size: 1.8em;
@@ -868,6 +889,13 @@ textarea {
 	color: var(--text-main);
 	font-style: italic;
 	margin: 1em 0;
+}
+
+.ProseMirror blockquote.arabic-quote {
+	border-left: 0;
+	border-right: 3px solid var(--border-color);
+	padding-left: 0;
+	padding-right: 14px;
 }
 
 /* Inline Code styling */

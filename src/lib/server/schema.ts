@@ -18,3 +18,12 @@ export const pages: any = sqliteTable('pages', {
 	updatedAt: text('updated_at').notNull(),
 	trashAt: text('trash_at')
 });
+
+export const assets = sqliteTable('assets', {
+	id: text('id').primaryKey(),
+	storageKey: text('storage_key').notNull().unique(),
+	originalFilename: text('original_filename').notNull(),
+	mimeType: text('mime_type').notNull(),
+	byteSize: integer('byte_size').notNull(),
+	createdAt: text('created_at').notNull()
+});

@@ -10,5 +10,6 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       DATABASE_URL: /app/data/app.db
+      UPLOAD_DIR: /app/data/uploads
     volumes:
       - ./config/aporia:/app/data

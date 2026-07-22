@@ -3,8 +3,10 @@
 	import { page } from '$app/stores';
 	import { onMount, onDestroy } from 'svelte';
 	import { Editor, Extension } from '@tiptap/core';
-	import { Selection, Plugin } from '@tiptap/pm/state';
+	import { Selection, Plugin, TextSelection } from '@tiptap/pm/state';
 	import { DOMSerializer } from '@tiptap/pm/model';
+	import { Decoration, DecorationSet } from '@tiptap/pm/view';
+	import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 	import StarterKit from '@tiptap/starter-kit';
 	import { ColumnLayout } from '$lib/editor/extensions/ColumnLayout';
 	import { Column } from '$lib/editor/extensions/Column';
@@ -13,6 +15,7 @@
 	import { TextStyle } from '@tiptap/extension-text-style';
 	import { Color } from '@tiptap/extension-color';
 	import { Highlight } from '@tiptap/extension-highlight';
+	import TiptapImage from '@tiptap/extension-image';
 	import Details, { DetailsContent, DetailsSummary } from '@tiptap/extension-details';
 	import { BubbleMenu } from '@tiptap/extension-bubble-menu';
 	import { Link as TiptapLink } from '@tiptap/extension-link';
@@ -27,7 +30,7 @@
 		Heading1, Heading2, Heading3, Type, Quote, Code, 
 		List, ListOrdered, Bold, Italic, Link as LinkIcon, Palette,
 		CheckSquare, Minus, Table as TableIcon, ChevronRight, Lock,
-		Database
+		ChevronDown, Database, Image as ImageIcon
 	} from 'lucide-svelte';
 
 	import { CURATED_ICONS } from '$lib/icons';
@@ -42,9 +45,21 @@
 	);
 	
 	// Local state bound to input elements for title and icon
-	let title = $state(data.pageRecord.title);
-	let isLocked = $state(data.pageRecord.isLocked === 1);
-	let icon = $state(data.pageRecord.icon || '📄');
+	function initialPageTitle() {
+		return data.pageRecord.title;
+	}
+
+	function initialPageLockState() {
+		return data.pageRecord.isLocked === 1;
+	}
+
+	function initialPageIcon() {
+		return data.pageRecord.icon || '📄';
+	}
+
+	let title = $state(initialPageTitle());
+	let isLocked = $state(initialPageLockState());
+	let icon = $state(initialPageIcon());
 	
 	let isIconPickerOpen = $state(false);
 	let iconInputText = $state('');
@@ -65,6 +80,8 @@
 	let autosaveStatus = $state<'saved' | 'saving' | 'error'>('saved');
 	let autosaveTimeout: any;
 	let saveInFlight: Promise<void> | null = null;
+	let toggleCount = $state(0);
+	let openToggleCount = $state(0);
 
 	// Bubble Menu elements and states
 	let bubbleMenuElement = $state<HTMLDivElement>();
@@ -137,6 +154,13 @@
 	let slashQuery = $state('');
 	let slashSelectedIndex = $state(0);
 	let slashCommandCallback = $state<((props: any) => void) | null>(null);
+
+	let imageFileInput = $state<HTMLInputElement>();
+	let isImagePickerOpen = $state(false);
+	let isImageUploading = $state(false);
+	let imageUrl = $state('');
+	let imageError = $state('');
+	let imageInsertRange = $state<{ from: number; to: number } | null>(null);
 
 	const colors = [
 		{ name: 'Default', value: 'var(--text-main)' },
@@ -245,6 +269,42 @@
 		}
 	});
 
+	const ArabicTextDirection = Extension.create({
+		name: 'arabicTextDirection',
+		addProseMirrorPlugins() {
+			return [
+				new Plugin({
+					props: {
+						decorations: (state) => {
+							const decorations: Decoration[] = [];
+
+							state.doc.descendants((node, position) => {
+								if (node.isTextblock && containsArabic(node.textContent)) {
+									decorations.push(
+										Decoration.node(position, position + node.nodeSize, {
+											dir: 'rtl',
+											class: 'arabic-text-block'
+										})
+									);
+								}
+
+								if (node.type.name === 'blockquote' && containsArabic(node.textContent)) {
+									decorations.push(
+										Decoration.node(position, position + node.nodeSize, {
+											class: 'arabic-quote'
+										})
+									);
+								}
+							});
+
+							return DecorationSet.create(state.doc, decorations);
+						}
+					}
+				})
+			];
+		}
+	});
+
 	function setToggleHeading(editor: Editor, range: { from: number; to: number }, level: 1 | 2 | 3) {
 		editor
 			.chain()
@@ -253,6 +313,112 @@
 			.setDetails()
 			.updateAttributes('details', { level })
 			.run();
+	}
+
+	function updateToggleCount(document: ProseMirrorNode) {
+		let count = 0;
+		let openCount = 0;
+		document.descendants((node) => {
+			if (node.type.name === 'details') {
+				count += 1;
+				if (node.attrs.open) openCount += 1;
+			}
+		});
+		toggleCount = count;
+		openToggleCount = openCount;
+	}
+
+	function setAllToggles(open: boolean) {
+		if (!editor || isLocked) return;
+
+		let transaction = editor.state.tr;
+		let changed = false;
+		editor.state.doc.descendants((node, position) => {
+			if (node.type.name !== 'details' || node.attrs.open === open) return;
+			transaction = transaction.setNodeMarkup(position, undefined, { ...node.attrs, open });
+			changed = true;
+		});
+
+		if (changed) editor.view.dispatch(transaction);
+	}
+
+	function openImagePicker(range?: { from: number; to: number }) {
+		if (isLocked) return;
+		imageInsertRange = range ?? null;
+		imageUrl = '';
+		imageError = '';
+		isImagePickerOpen = true;
+	}
+
+	function closeImagePicker() {
+		if (isImageUploading) return;
+		isImagePickerOpen = false;
+		imageInsertRange = null;
+		imageError = '';
+	}
+
+	function insertImage(image: Record<string, unknown>, position?: number) {
+		if (!editor) return;
+		const chain = editor.chain().focus();
+		if (imageInsertRange) {
+			chain.deleteRange(imageInsertRange).insertContent({ type: 'image', attrs: image }).run();
+		} else if (position !== undefined) {
+			chain.insertContentAt(position, { type: 'image', attrs: image }).run();
+		} else {
+			chain.insertContent({ type: 'image', attrs: image }).run();
+		}
+		imageInsertRange = null;
+	}
+
+	async function uploadImage(file: File, position?: number) {
+		if (isLocked || !editor) return;
+		isImageUploading = true;
+		imageError = '';
+		try {
+			const formData = new FormData();
+			formData.set('pageId', data.pageRecord.id);
+			formData.set('file', file);
+			const response = await fetch('/api/assets', { method: 'POST', body: formData });
+			const result = await response.json();
+			if (!response.ok || !result.success) throw new Error(result.error || 'Unable to upload image');
+			insertImage(result.image, position);
+			isImagePickerOpen = false;
+		} catch (error) {
+			imageError = error instanceof Error ? error.message : 'Unable to upload image';
+		} finally {
+			isImageUploading = false;
+		}
+	}
+
+	function selectLocalImage() {
+		imageError = '';
+		imageFileInput?.click();
+	}
+
+	function handleImageFileInput(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (file) void uploadImage(file);
+	}
+
+	function insertRemoteImage() {
+		const value = imageUrl.trim();
+		try {
+			const parsed = new URL(value);
+			if (parsed.protocol !== 'https:') throw new Error('Image links must use HTTPS');
+			insertImage({ src: parsed.href, source: 'remote', assetId: null, alt: '', title: '' });
+			isImagePickerOpen = false;
+			imageUrl = '';
+			imageError = '';
+		} catch (error) {
+			imageError = error instanceof Error ? error.message : 'Enter a valid HTTPS image URL';
+		}
+	}
+
+	function imageFileFrom(files: FileList | null | undefined): File | null {
+		if (!files) return null;
+		return Array.from(files).find((file) => file.type.startsWith('image/')) ?? null;
 	}
 
 	const slashItems = [
@@ -312,6 +478,13 @@
 			searchTerms: ['toggle', 'collapsible', 'details', 'h3'],
 			icon: ChevronRight,
 			action: (editor: Editor, range: any) => setToggleHeading(editor, range, 3)
+		},
+		{
+			title: 'Image',
+			description: 'Upload an image or embed it from a link.',
+			searchTerms: ['image', 'photo', 'picture', 'upload', 'embed', 'media'],
+			icon: ImageIcon,
+			action: (_editor: Editor, range: any) => openImagePicker(range)
 		},
 		{
 			title: 'Bullet List',
@@ -490,16 +663,15 @@
 	let dropLineVertical = $state<{ top: number; left: number; height: number } | null>(null);
 	let dropMode = $state<'vertical' | 'horizontal'>('vertical');
 
-	/** Structured path to a block: top-level index, and optionally column + child index */
-	type BlockPath = {
-		topIndex: number;
-		columnIndex?: number;
-		childIndex?: number;
-		detailsChildIndex?: number;
-	};
+	/** JSON path to a block. Each entry is an index into the current node's content. */
+	type BlockPath = { nodePath: number[] };
 	let draggedBlockPath = $state<BlockPath | null>(null);
 
 	let isMobile = $state(false);
+
+	function containsArabic(text: string) {
+		return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(text);
+	}
 
 	function handleResize() {
 		isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
@@ -628,10 +800,26 @@
 						levels: [1, 2, 3]
 					}
 				}),
+				ImageBlock.configure({
+					inline: false,
+					allowBase64: false,
+					resize: {
+						enabled: true,
+						directions: ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
+						minWidth: 100,
+						minHeight: 75,
+						alwaysPreserveAspectRatio: true
+					},
+					HTMLAttributes: {
+						class: 'editor-image',
+						referrerpolicy: 'no-referrer'
+					}
+				}),
 				ToggleHeading.configure({
 					persist: true
 				}),
 				PreserveDetailsLevel,
+				ArabicTextDirection,
 				DetailsSummary,
 				DetailsContent,
 				ColumnLayout,
@@ -648,7 +836,40 @@
 				}),
 				TaskList,
 				TaskItem.configure({
-					nested: true
+					nested: true,
+					onReadOnlyChecked: (node: ProseMirrorNode, checked: boolean) => {
+						if (!editor) return false;
+
+						let position: number | null = null;
+						let equivalentPosition: number | null = null;
+						let equivalentMatches = 0;
+						editor.state.doc.descendants((candidate, candidatePosition) => {
+							if (candidate === node) {
+								position = candidatePosition;
+								return false;
+							}
+							if (candidate.type === node.type && candidate.eq(node)) {
+								equivalentPosition = candidatePosition;
+								equivalentMatches += 1;
+							}
+							return true;
+						});
+
+						if (position === null && equivalentMatches === 1) position = equivalentPosition;
+						if (position === null) return false;
+
+						const currentNode = editor.state.doc.nodeAt(position);
+						if (!currentNode || currentNode.type.name !== 'taskItem') return false;
+
+						editor.view.dispatch(editor.state.tr.setNodeMarkup(position, undefined, {
+							...currentNode.attrs,
+							checked
+						}));
+						triggerAutosave(JSON.stringify(editor.getJSON()), { allowWhenLocked: true });
+						void flushPendingSave();
+
+						return true;
+					}
 				}),
 				TiptapTable.configure({
 					resizable: true
@@ -658,6 +879,7 @@
 				TableCell,
 				BubbleMenu.configure({
 					element: bubbleMenuElement,
+					shouldShow: ({ state }) => state.selection instanceof TextSelection && !state.selection.empty,
 					// Do not debounce the first selection: its rect is the anchor for this menu.
 					updateDelay: 0,
 					resizeDelay: 0,
@@ -736,11 +958,28 @@
 				})
 			],
 			content: initialContent,
-			editorProps: {
-				attributes: {
-					class: 'tiptap-content-canvas'
-				},
-				handleKeyDown: (view, event) => {
+				editorProps: {
+					attributes: {
+						class: 'tiptap-content-canvas'
+					},
+					handlePaste: (view, event) => {
+						if (isLocked) return false;
+						const file = imageFileFrom(event.clipboardData?.files);
+						if (!file) return false;
+						event.preventDefault();
+						void uploadImage(file, view.state.selection.from);
+						return true;
+					},
+					handleDrop: (view, event, _slice, moved) => {
+						if (isLocked || moved) return false;
+						const file = imageFileFrom(event.dataTransfer?.files);
+						if (!file) return false;
+						event.preventDefault();
+						const position = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ?? view.state.selection.from;
+						void uploadImage(file, position);
+						return true;
+					},
+					handleKeyDown: (view, event) => {
 					if (event.key === 'Enter' && !event.shiftKey) {
 						const { state } = view;
 						const { selection } = state;
@@ -766,9 +1005,11 @@
 			onUpdate: ({ editor }) => {
 				const jsonContent = editor.getJSON();
 				const jsonStr = JSON.stringify(jsonContent);
+				updateToggleCount(editor.state.doc);
 				triggerAutosave(jsonStr);
 			}
 		});
+		updateToggleCount(editor.state.doc);
 
 		// Override the clipboard serializer so copy/cut uses the schema's
 		// toDOM (renderHTML) instead of the node views. The DetailsContent node
@@ -793,6 +1034,24 @@
 			activeCellNode = null;
 			isColMenuOpen = false;
 			isRowMenuOpen = false;
+		}
+	});
+
+	const ImageBlock = TiptapImage.extend({
+		addAttributes() {
+			return {
+				...(this.parent?.() ?? {}),
+				source: {
+					default: 'remote',
+					parseHTML: (element) => element.getAttribute('data-source') || 'remote',
+					renderHTML: (attributes) => ({ 'data-source': attributes.source })
+				},
+				assetId: {
+					default: null,
+					parseHTML: (element) => element.getAttribute('data-asset-id'),
+					renderHTML: (attributes) => attributes.assetId ? ({ 'data-asset-id': attributes.assetId }) : ({})
+				}
+			};
 		}
 	});
 
@@ -935,10 +1194,10 @@
 		// Filter out column-layout and column wrapper divs BEFORE find(),
 		// otherwise the wrapper's bounding rect matches first and steals the hit.
 		const allBlocks = Array.from(editorElement.querySelectorAll(
-			'.ProseMirror > *, .ProseMirror > .column-layout > .column > *, .ProseMirror > [data-type="details"] > div > [data-type="detailsContent"] > *'
+			'.ProseMirror > *, .ProseMirror [data-type="detailsContent"] > *, .ProseMirror [data-type="column"] > *'
 		)).filter(node => {
 			const el = node as HTMLElement;
-			return !el.classList.contains('column-layout') && !el.classList.contains('column');
+			return !el.matches('[data-type="columnLayout"], [data-type="column"], [data-type="detailsContent"], [data-type="detailsSummary"]');
 		});
 		const blocksAtY = allBlocks.filter(node => {
 			const rect = node.getBoundingClientRect();
@@ -1035,11 +1294,10 @@
 		}
 	}
 
-	function triggerAutosave(contentJson: string) {
-		// Read-only pages must never queue or send content updates. This also
-		// prevents a stale editor transaction from turning the status back to
-		// "Saving..." immediately after a page is locked.
-		if (isLocked) {
+	function triggerAutosave(contentJson: string, options: { allowWhenLocked?: boolean } = {}) {
+		// Prevent normal editor transactions from queueing content updates while
+		// locked. The task checkbox handler opts in explicitly above.
+		if (isLocked && !options.allowWhenLocked) {
 			return;
 		}
 		autosaveStatus = 'saving';
@@ -1079,86 +1337,58 @@
 		return -1;
 	}
 
-	/** Get a structured path to the active block (supports column nesting) */
-	function getActiveBlockPath(): BlockPath | null {
-		if (!editor || !activeBlockNode || !editorElement) return null;
-		const topNodes = Array.from(editorElement.querySelector('.ProseMirror')?.children || []);
-
-		// Check if it's a top-level block
-		const topIndex = topNodes.indexOf(activeBlockNode);
-		if (topIndex !== -1) return { topIndex };
-
-		// Blocks directly inside a toggle's DetailsContent are a separate JSON
-		// container and need their own child index for drag reordering.
-		const detailsContentEl = activeBlockNode.parentElement?.matches('[data-type="detailsContent"]')
-			? activeBlockNode.parentElement
-			: null;
-		const detailsEl = detailsContentEl?.closest<HTMLElement>('[data-type="details"]');
-		if (detailsContentEl && detailsEl) {
-			const detailsTopIndex = topNodes.indexOf(detailsEl);
-			const detailsChildIndex = Array.from(detailsContentEl.children).indexOf(activeBlockNode);
-			if (detailsTopIndex !== -1 && detailsChildIndex !== -1) {
-				return { topIndex: detailsTopIndex, detailsChildIndex };
+	function getBlockPathForElement(block: HTMLElement): BlockPath | null {
+		if (!editor) return null;
+		let position: number | null = null;
+		editor.state.doc.descendants((node, pos) => {
+			if (editor?.view.nodeDOM(pos) === block) {
+				position = pos;
+				return false;
 			}
+			return true;
+		});
+		if (position === null) return null;
+		const resolved = editor.state.doc.resolve(position);
+		const nodePath: number[] = [];
+		for (let depth = 0; depth <= resolved.depth; depth += 1) {
+			nodePath.push(resolved.index(depth));
 		}
-
-		// Check if it's inside a column
-		const columnEl = activeBlockNode.closest('[data-type="column"]');
-		const layoutEl = columnEl?.closest('[data-type="columnLayout"]');
-		if (!columnEl || !layoutEl) return null;
-
-		const layoutTopIndex = topNodes.indexOf(layoutEl);
-		if (layoutTopIndex === -1) return null;
-
-		const columns = Array.from(layoutEl.children);
-		const columnIndex = columns.indexOf(columnEl);
-		const children = Array.from(columnEl.children);
-		const childIndex = children.indexOf(activeBlockNode);
-
-		return { topIndex: layoutTopIndex, columnIndex, childIndex };
+		return { nodePath };
 	}
 
-	function getBlockPathForElement(block: HTMLElement): BlockPath | null {
-		if (!editorElement) return null;
-		const topNodes = Array.from(editorElement.querySelector('.ProseMirror')?.children || []);
-		const topIndex = topNodes.indexOf(block);
-		if (topIndex !== -1) return { topIndex };
-
-		const detailsContentEl = block.parentElement?.matches('[data-type="detailsContent"]')
-			? block.parentElement
-			: null;
-		const detailsEl = detailsContentEl?.closest<HTMLElement>('[data-type="details"]');
-		if (detailsContentEl && detailsEl) {
-			const detailsTopIndex = topNodes.indexOf(detailsEl);
-			const detailsChildIndex = Array.from(detailsContentEl.children).indexOf(block);
-			if (detailsTopIndex !== -1 && detailsChildIndex !== -1) {
-				return { topIndex: detailsTopIndex, detailsChildIndex };
-			}
-		}
-
-		const columnEl = block.closest('[data-type="column"]');
-		const layoutEl = columnEl?.closest('[data-type="columnLayout"]');
-		if (!columnEl || !layoutEl) return null;
-		const layoutTopIndex = topNodes.indexOf(layoutEl);
-		const columnIndex = Array.from(layoutEl.children).indexOf(columnEl);
-		const childIndex = Array.from(columnEl.children).indexOf(block);
-		return layoutTopIndex !== -1 && columnIndex !== -1 && childIndex !== -1
-			? { topIndex: layoutTopIndex, columnIndex, childIndex }
-			: null;
+	function getActiveBlockPath(): BlockPath | null {
+		return activeBlockNode ? getBlockPathForElement(activeBlockNode) : null;
 	}
 
 	function sameBlockPath(a: BlockPath, b: BlockPath): boolean {
-		return a.topIndex === b.topIndex &&
-			a.columnIndex === b.columnIndex &&
-			a.childIndex === b.childIndex &&
-			a.detailsChildIndex === b.detailsChildIndex;
+		return a.nodePath.length === b.nodePath.length &&
+			a.nodePath.every((index, i) => index === b.nodePath[i]);
+	}
+
+	function getJsonLocation(root: any[], path: BlockPath) {
+		let container = root;
+		for (let i = 0; i < path.nodePath.length - 1; i += 1) {
+			container = container?.[path.nodePath[i]]?.content;
+		}
+		const index = path.nodePath[path.nodePath.length - 1];
+		return Array.isArray(container) ? { container, index } : null;
+	}
+
+	function getContainingColumnLayoutPath(root: any[], path: BlockPath): BlockPath | null {
+		if (path.nodePath.length < 3) return null;
+		const layoutPath = { nodePath: path.nodePath.slice(0, -2) };
+		const layout = getJsonLocation(root, layoutPath);
+		return layout?.container[layout.index]?.type === 'columnLayout' ? layoutPath : null;
 	}
 
 	function getDragTargetBlock(e: DragEvent): HTMLElement | null {
 		if (!editorElement) return null;
 		const candidates = Array.from(editorElement.querySelectorAll(
-			'.ProseMirror > *, .ProseMirror > [data-type="details"] > div > [data-type="detailsContent"] > *'
-		)).filter((node): node is HTMLElement => node instanceof HTMLElement);
+			'.ProseMirror > *, .ProseMirror [data-type="detailsContent"] > *, .ProseMirror [data-type="column"] > *'
+		)).filter((node): node is HTMLElement => {
+			if (!(node instanceof HTMLElement)) return false;
+			return !node.matches('[data-type="columnLayout"], [data-type="column"], [data-type="detailsContent"], [data-type="detailsSummary"]');
+		});
 		const atPointer = candidates.filter(node => {
 			const rect = node.getBoundingClientRect();
 			return e.clientY >= rect.top && e.clientY <= rect.bottom &&
@@ -1214,22 +1444,9 @@
 		if (!path) return;
 
 		const docJson: any = JSON.parse(JSON.stringify(editor.getJSON()));
-		let container: any[] | undefined;
-		let index = -1;
-
-		if (path.detailsChildIndex !== undefined) {
-			const detailsContent = docJson.content?.[path.topIndex]?.content?.find(
-				(node: any) => node.type === 'detailsContent'
-			);
-			container = detailsContent?.content;
-			index = path.detailsChildIndex;
-		} else if (path.columnIndex !== undefined && path.childIndex !== undefined) {
-			container = docJson.content?.[path.topIndex]?.content?.[path.columnIndex]?.content;
-			index = path.childIndex;
-		} else {
-			container = docJson.content;
-			index = path.topIndex;
-		}
+		const location = getJsonLocation(docJson.content, path);
+		const container = location?.container;
+		const index = location?.index ?? -1;
 
 		if (container?.[index]) {
 			container.splice(index + 1, 0, JSON.parse(JSON.stringify(container[index])));
@@ -1374,7 +1591,7 @@
 		if (!path) return;
 
 		// For compatibility with existing vertical drop, also store top-level index
-		draggedBlockIndex = path.topIndex;
+		draggedBlockIndex = path.nodePath[0];
 		draggedBlockPath = path;
 		
 		activeBlockNode.classList.add('block-dragging');
@@ -1442,8 +1659,6 @@
 			dropLineVertical = null;
 			return;
 		}
-		const targetIndex = targetPath.topIndex;
-
 		const rect = targetBlock.getBoundingClientRect();
 		const relativeX = e.clientX - rect.left;
 		const relativeY = e.clientY - rect.top;
@@ -1452,12 +1667,15 @@
 		const isNearLeftEdge = relativeX < COLUMN_EDGE_THRESHOLD;
 		const isNearRightEdge = relativeX > (rect.width - COLUMN_EDGE_THRESHOLD);
 
-		if ((isNearLeftEdge || isNearRightEdge) &&
-			draggedBlockPath.detailsChildIndex === undefined && targetPath.detailsChildIndex === undefined) {
+		if (isNearLeftEdge || isNearRightEdge) {
 			// Check column count limit: if target is already a columnLayout, count existing columns
 			const docJson = editor?.getJSON();
-			const targetNode = docJson?.content?.[targetIndex];
-			if (targetNode?.type === 'columnLayout' && (targetNode.content?.length || 0) >= MAX_COLUMNS) {
+			const layoutPath = docJson?.content && getContainingColumnLayoutPath(docJson.content, targetPath);
+			const layoutLocation = layoutPath && docJson?.content
+				? getJsonLocation(docJson.content, layoutPath)
+				: null;
+			const targetLayout = layoutLocation?.container[layoutLocation.index];
+			if (targetLayout?.type === 'columnLayout' && (targetLayout.content?.length || 0) >= MAX_COLUMNS) {
 				// Already at max columns, fall through to vertical mode
 			} else {
 				// Show vertical drop indicator
@@ -1485,48 +1703,37 @@
 		}
 	}
 
-	/**
-	 * Extract a block from the doc using a BlockPath.
-	 * Handles both top-level blocks and blocks nested inside columnLayout > column.
-	 * Returns the extracted block JSON. Mutates docContent in-place.
-	 * Also cleans up empty columns and single-column layouts.
-	 */
+	/** Remove empty columns and unwrap layouts that no longer need a row. */
+	function normalizeColumnLayouts(nodes: any[]): any[] {
+		const normalized: any[] = [];
+		for (const node of nodes) {
+			if (node.content) node.content = normalizeColumnLayouts(node.content);
+			if (node.type !== 'columnLayout') {
+				normalized.push(node);
+				continue;
+			}
+			node.content = (node.content || []).filter((column: any) => column.content?.length);
+			if (node.content.length === 0) continue;
+			if (node.content.length === 1) normalized.push(...(node.content[0].content || []));
+			else normalized.push(node);
+		}
+		return normalized;
+	}
+
 	function extractBlockByPath(docContent: any[], path: BlockPath): any {
-		if (path.detailsChildIndex !== undefined) {
-			const details = docContent[path.topIndex];
-			const detailsContent = details?.content?.find((node: any) => node.type === 'detailsContent');
-			if (!detailsContent?.content) return undefined;
-			return detailsContent.content.splice(path.detailsChildIndex, 1)[0];
-		}
-		if (path.columnIndex !== undefined && path.childIndex !== undefined) {
-			// Block is inside a column
-			const layout = docContent[path.topIndex];
-			if (!layout || layout.type !== 'columnLayout') {
-				// Fallback: treat as top-level
-				return docContent.splice(path.topIndex, 1)[0];
-			}
-			const column = layout.content[path.columnIndex];
-			if (!column || !column.content) {
-				return docContent.splice(path.topIndex, 1)[0];
-			}
-			const [block] = column.content.splice(path.childIndex, 1);
+		const location = getJsonLocation(docContent, path);
+		return location ? location.container.splice(location.index, 1)[0] : undefined;
+	}
 
-			// Clean up: remove empty columns
-			layout.content = layout.content.filter((col: any) => col.content && col.content.length > 0);
-
-			// If only 1 column left, unwrap it back to top-level blocks
-			if (layout.content.length === 1) {
-				const remaining = layout.content[0].content || [];
-				docContent.splice(path.topIndex, 1, ...remaining);
-			} else if (layout.content.length === 0) {
-				docContent.splice(path.topIndex, 1);
-			}
-
-			return block;
-		} else {
-			// Top-level block
-			return docContent.splice(path.topIndex, 1)[0];
-		}
+	function adjustPathAfterRemoval(path: BlockPath, removed: BlockPath): BlockPath {
+		const removedParent = removed.nodePath.slice(0, -1);
+		if (path.nodePath.length <= removedParent.length ||
+			!removedParent.every((index, i) => index === path.nodePath[i])) return path;
+		const nodePath = [...path.nodePath];
+		const removedIndex = removed.nodePath.at(-1)!;
+		const targetIndex = nodePath[removedParent.length];
+		if (removedIndex < targetIndex) nodePath[removedParent.length] -= 1;
+		return { nodePath };
 	}
 
 	function handleDrop(e: DragEvent) {
@@ -1539,66 +1746,9 @@
 		if (!targetBlock) { handleDragEnd(); return; }
 		const targetPath = getBlockPathForElement(targetBlock);
 		if (!targetPath || sameBlockPath(targetPath, draggedBlockPath)) { handleDragEnd(); return; }
-		const targetIndex = targetPath.topIndex;
-
-		// Reorder direct children of the same toggle without extracting them into
-		// the top-level document. Toggle content remains inside DetailsContent.
-		if (draggedBlockPath.detailsChildIndex !== undefined &&
-			targetPath.detailsChildIndex !== undefined &&
-			draggedBlockPath.topIndex === targetPath.topIndex) {
-			const docJson: any = editor.getJSON();
-			const detailsContent = docJson.content?.[draggedBlockPath.topIndex]?.content?.find((node: any) => node.type === 'detailsContent');
-			if (!detailsContent?.content) { handleDragEnd(); return; }
-
-			const rect = targetBlock.getBoundingClientRect();
-			const insertBefore = e.clientY - rect.top < rect.height / 2;
-			const [draggedBlock] = detailsContent.content.splice(draggedBlockPath.detailsChildIndex, 1);
-			let insertIndex = targetPath.detailsChildIndex;
-			if (draggedBlockPath.detailsChildIndex < targetPath.detailsChildIndex) insertIndex -= 1;
-			if (!insertBefore) insertIndex += 1;
-			detailsContent.content.splice(insertIndex, 0, draggedBlock);
-			editor.commands.setContent(docJson, { emitUpdate: true });
-			handleDragEnd();
-			return;
-		}
-
-		// Drop from anywhere into a details content block (toggle heading children)
-		if (targetPath.detailsChildIndex !== undefined) {
-			const docJson: any = editor.getJSON();
-			if (!docJson.content) { handleDragEnd(); return; }
-
-			// Extract the dragged block from its source path
-			const draggedBlock = extractBlockByPath(docJson.content, draggedBlockPath);
-			if (!draggedBlock) { handleDragEnd(); return; }
-
-			// Recalculate target's topIndex since extraction might have shifted the top-level array indices
-			let actualTargetTopIndex = targetPath.topIndex;
-			if (draggedBlockPath.detailsChildIndex === undefined && draggedBlockPath.columnIndex === undefined) {
-				if (draggedBlockPath.topIndex < targetPath.topIndex) {
-					actualTargetTopIndex -= 1;
-				}
-			}
-
-			const details = docJson.content[actualTargetTopIndex];
-			const detailsContent = details?.content?.find((node: any) => node.type === 'detailsContent');
-			if (!detailsContent?.content) { handleDragEnd(); return; }
-
-			const rect = targetBlock.getBoundingClientRect();
-			const insertBefore = e.clientY - rect.top < rect.height / 2;
-
-			let insertIndex = targetPath.detailsChildIndex;
-			if (!insertBefore) {
-				insertIndex += 1;
-			}
-
-			detailsContent.content.splice(insertIndex, 0, draggedBlock);
-			editor.commands.setContent(docJson, { emitUpdate: true });
-			handleDragEnd();
-			return;
-		}
-
-		// Don't drop on itself (for top-level blocks)
-		if (draggedBlockPath.columnIndex === undefined && draggedBlockPath.detailsChildIndex === undefined && targetIndex === draggedBlockPath.topIndex) {
+		// A block cannot be dropped into one of its own descendants.
+		if (targetPath.nodePath.length > draggedBlockPath.nodePath.length &&
+			draggedBlockPath.nodePath.every((index, i) => index === targetPath.nodePath[i])) {
 			handleDragEnd();
 			return;
 		}
@@ -1606,9 +1756,10 @@
 		const docJson: any = editor.getJSON();
 		if (!docJson.content) { handleDragEnd(); return; }
 
-		// Extract the dragged block using its path (handles nested column blocks)
+		// Extract first, then adjust the target path if both blocks shared a container.
 		const draggedBlock = extractBlockByPath(docJson.content, draggedBlockPath);
 		if (!draggedBlock) { handleDragEnd(); return; }
+		const adjustedTargetPath = adjustPathAfterRemoval(targetPath, draggedBlockPath);
 
 		if (dropMode === 'horizontal') {
 			// === COLUMN DROP: Place blocks side-by-side ===
@@ -1616,38 +1767,33 @@
 			const relativeX = e.clientX - rect.left;
 			const isLeftSide = relativeX < COLUMN_EDGE_THRESHOLD;
 
-			// Find the target node in the (now possibly shifted) content array
-			let actualTargetIndex = targetIndex;
-			if (draggedBlockPath.columnIndex === undefined && draggedBlockPath.detailsChildIndex === undefined) {
-				if (draggedBlockPath.topIndex < targetIndex) {
-					actualTargetIndex = targetIndex - 1;
-				}
-			}
+			const targetLocation = getJsonLocation(docJson.content, adjustedTargetPath);
+			if (!targetLocation) { handleDragEnd(); return; }
+			const targetNode = targetLocation.container[targetLocation.index];
+			const layoutPath = getContainingColumnLayoutPath(docJson.content, adjustedTargetPath);
+			const layoutLocation = layoutPath ? getJsonLocation(docJson.content, layoutPath) : null;
+			const containingLayout = layoutLocation?.container[layoutLocation.index];
 
-			const targetNode = docJson.content[actualTargetIndex];
-			if (!targetNode) { handleDragEnd(); return; }
-
-			if (targetNode.type === 'columnLayout') {
-				// Target is already a columnLayout → add a new column
-				if ((targetNode.content?.length || 0) < MAX_COLUMNS) {
+			if (containingLayout) {
+				if ((containingLayout.content?.length || 0) < MAX_COLUMNS) {
 					const newCol = { type: 'column', content: [draggedBlock] };
 					if (isLeftSide) {
-						targetNode.content!.unshift(newCol);
+						containingLayout.content!.unshift(newCol);
 					} else {
-						targetNode.content!.push(newCol);
+						containingLayout.content!.push(newCol);
 					}
 				}
 			} else {
-				// Target is a normal block → wrap both into a new columnLayout
 				const colA = { type: 'column', content: [targetNode] };
 				const colB = { type: 'column', content: [draggedBlock] };
 				const layout = {
 					type: 'columnLayout',
 					content: isLeftSide ? [colB, colA] : [colA, colB]
 				};
-				docJson.content[actualTargetIndex] = layout;
+				targetLocation.container[targetLocation.index] = layout;
 			}
 
+			docJson.content = normalizeColumnLayouts(docJson.content);
 			editor.commands.setContent(docJson, { emitUpdate: true });
 		} else {
 			// === VERTICAL DROP: Standard above/below reorder ===
@@ -1655,29 +1801,15 @@
 			const relativeY = e.clientY - rect.top;
 			const isInsertBefore = relativeY < rect.height / 2;
 
-			// Calculate insert index (content may have shifted after extraction)
-			let insertIndex = Math.min(targetIndex, docJson.content.length);
-			if (draggedBlockPath.columnIndex === undefined && draggedBlockPath.detailsChildIndex === undefined) {
-				// Top-level drag: standard index adjustment
-				if (draggedBlockPath.topIndex < targetIndex) {
-					insertIndex = targetIndex - 1;
-				} else {
-					insertIndex = targetIndex;
-				}
-			}
+			const targetLocation = getJsonLocation(docJson.content, adjustedTargetPath);
+			if (!targetLocation) { handleDragEnd(); return; }
+			let insertIndex = targetLocation.index;
 			if (!isInsertBefore) {
-				insertIndex = Math.min(insertIndex + 1, docJson.content.length);
+				insertIndex += 1;
 			}
 
-			docJson.content.splice(insertIndex, 0, draggedBlock);
-
-			// Final cleanup: unwrap any columnLayout that now has only 1 column
-			docJson.content = docJson.content.map((node: any) => {
-				if (node.type === 'columnLayout' && node.content?.length === 1) {
-					return node.content[0].content || [];
-				}
-				return node;
-			}).flat();
+			targetLocation.container.splice(insertIndex, 0, draggedBlock);
+			docJson.content = normalizeColumnLayouts(docJson.content);
 
 			editor.commands.setContent(docJson, { emitUpdate: true });
 		}
@@ -1782,11 +1914,31 @@
 				onblur={handleTitleBlur}
 				onkeydown={handleTitleKeyDown}
 				class="page-title-input"
+				dir={containsArabic(title) ? 'rtl' : 'ltr'}
+				class:arabic-text-input={containsArabic(title)}
 				placeholder="Untitled"
 				spellcheck="false"
 				disabled={isLocked}
 			/>
 		</form>
+		{#if !isLocked && toggleCount > 0}
+			<div class="toggle-page-actions" aria-label="Toggle controls">
+				<button
+					type="button"
+					class="toggle-page-action"
+					onclick={() => setAllToggles(openToggleCount !== toggleCount)}
+					title={openToggleCount === toggleCount ? 'Collapse all toggles' : 'Expand all toggles'}
+				>
+					{#if openToggleCount === toggleCount}
+						<ChevronRight size={15} />
+						<span>Collapse all</span>
+					{:else}
+						<ChevronDown size={15} />
+						<span>Expand all</span>
+					{/if}
+				</button>
+			</div>
+		{/if}
 	</div>
 	
 	<!-- Subpages nested within this page -->
@@ -1797,7 +1949,11 @@
 							<span class="subpages-icon-wrapper">
 								<PageIcon icon={subPage.icon || '📄'} size={24} />
 					</span>
-					<span class="subpages-item-text">{subPage.title || 'Untitled'}</span>
+					<span
+						class="subpages-item-text"
+						dir={containsArabic(subPage.title || '') ? 'rtl' : 'ltr'}
+						class:arabic-text-input={containsArabic(subPage.title || '')}
+					>{subPage.title || 'Untitled'}</span>
 				</a>
 			{/each}
 		</div>
@@ -2193,6 +2349,42 @@
 			</div>
 		{/if}
 	</div>
+
+	<input
+		bind:this={imageFileInput}
+		type="file"
+		accept="image/png,image/jpeg,image/gif,image/webp"
+		class="image-file-input"
+		onchange={handleImageFileInput}
+	/>
+
+	{#if isImagePickerOpen}
+		<div class="image-picker-backdrop" role="presentation" onclick={closeImagePicker}></div>
+		<div class="image-picker" role="dialog" aria-modal="true" aria-label="Add image">
+			<div class="image-picker-header">
+				<div>
+					<h2>Add an image</h2>
+					<p>Upload a file or embed an HTTPS image link.</p>
+				</div>
+				<button type="button" class="image-picker-close" onclick={closeImagePicker} aria-label="Close image picker">×</button>
+			</div>
+
+			<button type="button" class="image-upload-button" disabled={isImageUploading} onclick={selectLocalImage}>
+				<ImageIcon size={18} />
+				<span>{isImageUploading ? 'Uploading image…' : 'Upload image'}</span>
+			</button>
+
+			<div class="image-picker-separator"><span>or</span></div>
+			<label class="image-url-label" for="image-url">Embed link</label>
+			<div class="image-url-row">
+				<input id="image-url" bind:value={imageUrl} placeholder="https://example.com/image.png" onkeydown={(event) => event.key === 'Enter' && insertRemoteImage()} />
+				<button type="button" disabled={!imageUrl.trim()} onclick={insertRemoteImage}>Embed</button>
+			</div>
+			{#if imageError}
+				<p class="image-picker-error">{imageError}</p>
+			{/if}
+		</div>
+	{/if}
 </article>
 
 <style>
@@ -2529,6 +2721,30 @@
 		min-width: 0;
 	}
 
+	.toggle-page-actions {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		flex-shrink: 0;
+	}
+
+	.toggle-page-action {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		padding: 5px 7px;
+		border-radius: 5px;
+		font-size: 12px;
+		color: var(--text-muted);
+		white-space: nowrap;
+	}
+
+	.toggle-page-action:hover:not(:disabled) {
+		background: var(--hover-sidebar);
+		color: var(--text-main);
+	}
+
+
 	.page-title-input {
 		width: 100%;
 		font-size: 40px;
@@ -2541,6 +2757,12 @@
 		padding: 4px 0 8px;
 	}
 
+	.page-title-input.arabic-text-input,
+	.subpages-item-text.arabic-text-input {
+		direction: rtl;
+		text-align: right;
+	}
+
 	/* Editor Canvas Styling */
 	.editor-canvas-container {
 		width: 100%;
@@ -2551,6 +2773,179 @@
 	.tiptap-editor-element {
 		width: 100%;
 		outline: none;
+	}
+
+	:global(.tiptap-content-canvas img.editor-image) {
+		display: block;
+		max-width: 100%;
+		height: auto;
+		border-radius: 6px;
+		margin: 10px 0;
+		cursor: pointer;
+	}
+
+	:global(.tiptap-content-canvas img.editor-image.ProseMirror-selectednode) {
+		outline: 2px solid var(--accent-color);
+		outline-offset: 2px;
+	}
+
+	:global([data-resize-container][data-node='image']) {
+		margin: 10px 0;
+		max-width: 100%;
+	}
+
+	:global([data-resize-container][data-node='image'] img.editor-image) {
+		margin: 0;
+	}
+
+	:global([data-resize-container][data-node='image'] [data-resize-handle]) {
+		width: 12px;
+		height: 12px;
+		margin: -6px;
+		border: 2px solid var(--bg-canvas);
+		border-radius: 50%;
+		background: var(--accent-color);
+		z-index: 2;
+		opacity: 0;
+		pointer-events: none;
+		transition: opacity 120ms ease;
+	}
+
+	:global([data-resize-container][data-node='image'].ProseMirror-selectednode [data-resize-handle]),
+	:global([data-resize-container][data-node='image'][data-resize-state='true'] [data-resize-handle]) {
+		opacity: 1;
+		pointer-events: auto;
+	}
+
+	:global([data-resize-handle='top-left']),
+	:global([data-resize-handle='bottom-right']) {
+		cursor: nwse-resize;
+	}
+
+	:global([data-resize-handle='top-right']),
+	:global([data-resize-handle='bottom-left']) {
+		cursor: nesw-resize;
+	}
+
+	.image-file-input {
+		display: none;
+	}
+
+	.image-picker-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.28);
+		z-index: 500;
+	}
+
+	.image-picker {
+		position: fixed;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		width: min(420px, calc(100vw - 32px));
+		background: var(--bg-sidebar);
+		border: 1px solid var(--border-color);
+		border-radius: 10px;
+		box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+		padding: 18px;
+		z-index: 501;
+	}
+
+	.image-picker-header {
+		display: flex;
+		justify-content: space-between;
+		gap: 16px;
+		margin-bottom: 18px;
+	}
+
+	.image-picker-header h2 {
+		font-size: 16px;
+		margin: 0 0 4px;
+	}
+
+	.image-picker-header p {
+		font-size: 13px;
+		color: var(--text-muted);
+		margin: 0;
+	}
+
+	.image-picker-close {
+		font-size: 24px;
+		line-height: 1;
+		color: var(--text-muted);
+		padding: 0 4px;
+	}
+
+	.image-upload-button {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		padding: 11px;
+		border-radius: 6px;
+		background: var(--accent-color);
+		color: white;
+		font-weight: 600;
+	}
+
+	.image-upload-button:disabled,
+	.image-url-row button:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.image-picker-separator {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin: 16px 0;
+		color: var(--text-muted);
+		font-size: 12px;
+	}
+
+	.image-picker-separator::before,
+	.image-picker-separator::after {
+		content: '';
+		flex: 1;
+		border-top: 1px solid var(--border-color);
+	}
+
+	.image-url-label {
+		display: block;
+		font-size: 12px;
+		font-weight: 600;
+		margin-bottom: 6px;
+	}
+
+	.image-url-row {
+		display: flex;
+		gap: 8px;
+	}
+
+	.image-url-row input {
+		min-width: 0;
+		flex: 1;
+		border: 1px solid var(--border-color);
+		background: var(--bg-canvas);
+		color: var(--text-main);
+		border-radius: 5px;
+		padding: 8px 9px;
+	}
+
+	.image-url-row button {
+		padding: 8px 12px;
+		border-radius: 5px;
+		background: var(--active-sidebar);
+		color: var(--text-main);
+		font-weight: 600;
+	}
+
+	.image-picker-error {
+		margin: 10px 0 0;
+		font-size: 12px;
+		color: var(--error-color);
 	}
 
 	/* Blue drop target line indicator (Notion-style) — horizontal */

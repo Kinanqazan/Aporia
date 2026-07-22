@@ -71,6 +71,12 @@ function convertNode(node: any, indentLevel = 0): string {
 		case 'horizontalRule':
 			return '---';
 
+		case 'image': {
+			const alt = String(node.attrs?.alt || '').replace(/[\[\]]/g, '');
+			const src = String(node.attrs?.src || '');
+			return src ? `![${alt}](${src})` : '';
+		}
+
 		case 'details': {
 			const summaryNode = node.content?.find((c: any) => c.type === 'detailsSummary');
 			const contentNode = node.content?.find((c: any) => c.type === 'detailsContent');

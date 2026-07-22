@@ -14,7 +14,7 @@ export default defineConfig({
 	],
 	server: {
 		watch: {
-			ignored: ['**/data/**', '**/data/app.db*']
+			ignored: ['**/data/**', '**/data/app.db*', '**/*.~tmp', '**/*.tmp']
 		}
 	}
 });

@@ -80,15 +80,19 @@ export const actions: Actions = {
 	trash: async ({ request }) => {
 		const data = await request.formData();
 		const id = data.get('id') as string;
+		const returnToWorkspace = data.get('returnToWorkspace') === 'true';
 
 		if (!id) return fail(400, { message: 'Invalid page ID' });
 
+		let trashed: boolean;
 		try {
-			await sendToTrash(id);
-			return { success: true };
+			trashed = await sendToTrash(id);
 		} catch (err: any) {
 			return fail(500, { message: err.message });
 		}
+		if (!trashed) return fail(404, { message: 'Page not found' });
+		if (returnToWorkspace) throw redirect(303, '/');
+		return { success: true };
 	},
 	restore: async ({ request }) => {
 		const data = await request.formData();

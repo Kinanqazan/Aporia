@@ -22,7 +22,9 @@
 		Unlock,
 		Lock,
 		FileDown,
-		MoreHorizontal
+		MoreHorizontal,
+		Settings,
+		FileUp
 	} from 'lucide-svelte';
 	import type { PageNode } from '$lib/server/pages';
 
@@ -34,7 +36,24 @@
 	let isDarkMode = $state(false);
 	let isMobile = $state(false);
 	let isTrashOpen = $state(false);
-	let sidebarWidth = $state(data.sidebarWidth ?? 240);
+	let isSettingsOpen = $state(false);
+	let isCleanupInProgress = $state(false);
+	let cleanupMessage = $state('');
+	let notionImportInput = $state<HTMLInputElement | null>(null);
+	let notionImportFile = $state<File | null>(null);
+	let notionImportPreview = $state<{ pageCount: number; imageCount: number; warnings: string[] } | null>(null);
+	let isNotionPreviewInProgress = $state(false);
+	let isNotionImportInProgress = $state(false);
+	let notionImportMessage = $state('');
+	function initialSidebarWidth() {
+		return data.sidebarWidth ?? 240;
+	}
+
+	function initialSectionTitle() {
+		return data.sectionTitle ?? 'Private';
+	}
+
+	let sidebarWidth = $state(initialSidebarWidth());
 	let isResizing = $state(false);
 	
 	// Track expanded nodes in the page tree sidebar
@@ -57,7 +76,7 @@
 	let isLockRequestInFlight = $state(false);
 	
 	// Section Title States
-	let sectionTitle = $state(data.sectionTitle ?? 'Private');
+	let sectionTitle = $state(initialSectionTitle());
 	let isEditingSectionTitle = $state(false);
 	
 	// Dropdown menu state
@@ -297,6 +316,92 @@
 		localStorage.setItem(expandedNodesStorageKey, JSON.stringify([...next]));
 	}
 
+	function isCurrentPageInSubtree(rootId: string): boolean {
+		let candidateId = currentPageId;
+		const pagesById = new Map((data.activePages || []).map((page) => [page.id, page]));
+		while (candidateId) {
+			if (candidateId === rootId) return true;
+			candidateId = pagesById.get(candidateId)?.parentId ?? null;
+		}
+		return false;
+	}
+
+	function formatBytes(bytes: number): string {
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	}
+
+	async function cleanUnusedUploads() {
+		if (isCleanupInProgress) return;
+		if (!window.confirm('Delete uploads that are not used by any page? This cannot be undone.')) return;
+
+		isCleanupInProgress = true;
+		cleanupMessage = '';
+		try {
+			const response = await fetch('/api/assets/cleanup', { method: 'POST' });
+			const result = await response.json();
+			if (!response.ok || !result.success) throw new Error(result.error || 'Unable to clean uploads');
+			cleanupMessage = result.removed === 0
+				? 'No unused uploads found.'
+				: `Removed ${result.removed} upload${result.removed === 1 ? '' : 's'} (${formatBytes(result.bytesFreed)}).`;
+		} catch (error) {
+			cleanupMessage = error instanceof Error ? error.message : 'Unable to clean uploads';
+		} finally {
+			isCleanupInProgress = false;
+		}
+	}
+
+	async function previewNotionImport(file: File) {
+		isNotionPreviewInProgress = true;
+		notionImportPreview = null;
+		notionImportMessage = '';
+		try {
+			const formData = new FormData();
+			formData.set('archive', file);
+			const response = await fetch('/api/import/notion/preview', { method: 'POST', body: formData });
+			const result = await response.json();
+			if (!response.ok || !result.success) throw new Error(result.error || 'Unable to read the Notion export');
+			notionImportPreview = result.preview;
+		} catch (error) {
+			notionImportFile = null;
+			notionImportMessage = error instanceof Error ? error.message : 'Unable to read the Notion export';
+		} finally {
+			isNotionPreviewInProgress = false;
+		}
+	}
+
+	function selectNotionImport(event: Event) {
+		const file = (event.currentTarget as HTMLInputElement).files?.[0];
+		if (!file) return;
+		notionImportFile = file;
+		void previewNotionImport(file);
+	}
+
+	async function applyNotionImport() {
+		if (!notionImportFile || !notionImportPreview || isNotionImportInProgress) return;
+		if (!window.confirm(`Import ${notionImportPreview.pageCount} page${notionImportPreview.pageCount === 1 ? '' : 's'} from this Notion export?`)) return;
+
+		isNotionImportInProgress = true;
+		notionImportMessage = '';
+		try {
+			const formData = new FormData();
+			formData.set('archive', notionImportFile);
+			const response = await fetch('/api/import/notion/apply', { method: 'POST', body: formData });
+			const result = await response.json();
+			if (!response.ok || !result.success) throw new Error(result.error || 'Unable to import the Notion export');
+			notionImportMessage = `Imported ${result.result.pageCount} page${result.result.pageCount === 1 ? '' : 's'} into “${result.result.rootTitle}”.`;
+			notionImportFile = null;
+			notionImportPreview = null;
+			if (notionImportInput) notionImportInput.value = '';
+			await invalidateAll();
+		} catch (error) {
+			notionImportMessage = error instanceof Error ? error.message : 'Unable to import the Notion export';
+		} finally {
+			isNotionImportInProgress = false;
+		}
+	}
+
 	function startEditingTitle(id: string, currentTitle: string, e: MouseEvent) {
 		e.stopPropagation();
 		editingPageId = id;
@@ -434,14 +539,17 @@
 	<meta name="theme-color" content={isDarkMode ? '#191919' : '#ffffff'} />
 </svelte:head>
 
-<div 
+	<svelte:window
+		ontouchstart={handleTouchStart}
+		ontouchmove={handleTouchMove}
+		ontouchend={handleTouchEnd}
+	/>
+
+	<div
 	class="app-container" 
 	class:sidebar-closed={!isSidebarOpen} 
 	class:mobile={isMobile} 
 	style="--sidebar-width: {sidebarWidth}px;"
-	ontouchstart={handleTouchStart}
-	ontouchmove={handleTouchMove}
-	ontouchend={handleTouchEnd}
 >
 	<!-- Sidebar -->
 	<aside class="sidebar">
@@ -607,29 +715,111 @@
 		<!-- Trash & Export -->
 		<div class="sidebar-footer">
 			<div class="footer-row">
-				<button class="footer-icon-btn" onclick={() => isTrashOpen = !isTrashOpen} title="Trash Bin">
+				<button
+					class="footer-icon-btn"
+					onclick={() => {
+						isTrashOpen = !isTrashOpen;
+						isSettingsOpen = false;
+					}}
+					title="Trash Bin"
+				>
 					<Trash2 size={18} />
 					{#if data.trashPages && data.trashPages.length > 0}
 						<span class="trash-badge-bubble">{data.trashPages.length}</span>
 					{/if}
 				</button>
-				<a href="/api/export?all=true" download class="footer-icon-btn" title="Export all pages to Markdown">
-					<Download size={18} />
-				</a>
-				{#if currentPageId}
-					<a href="/api/export?id={currentPageId}" download class="footer-icon-btn" title="Export current page to Markdown">
-						<FileDown size={18} />
-					</a>
-				{/if}
-				<button class="footer-icon-btn" onclick={toggleTheme} title="Toggle dark/light theme">
-					{#if isDarkMode}
-						<Sun size={18} />
-					{:else}
-						<Moon size={18} />
-					{/if}
+				<button
+					class="footer-icon-btn"
+					onclick={() => {
+						isSettingsOpen = !isSettingsOpen;
+						isTrashOpen = false;
+					}}
+					title="Settings"
+					aria-label="Open settings"
+				>
+					<Settings size={18} />
 				</button>
 			</div>
 		</div>
+
+		{#if isSettingsOpen}
+			<div class="settings-panel" aria-label="Settings">
+				<div class="settings-panel-header">
+					<span>Settings</span>
+					<button type="button" class="close-settings-btn" onclick={() => isSettingsOpen = false} aria-label="Close settings">×</button>
+				</div>
+
+				<div class="settings-section">
+					<span class="settings-section-title">Appearance</span>
+					<button class="settings-action" onclick={toggleTheme}>
+						{#if isDarkMode}
+							<Sun size={16} />
+							<span>Use light mode</span>
+						{:else}
+							<Moon size={16} />
+							<span>Use dark mode</span>
+						{/if}
+					</button>
+				</div>
+
+				<div class="settings-section">
+					<span class="settings-section-title">Export</span>
+					{#if currentPageId}
+						<a href="/api/export?id={currentPageId}" download class="settings-action" onclick={() => isSettingsOpen = false}>
+							<FileDown size={16} />
+							<span>Export current page</span>
+						</a>
+					{/if}
+					<a href="/api/export?all=true" download class="settings-action" onclick={() => isSettingsOpen = false}>
+						<Download size={16} />
+						<span>Export workspace</span>
+					</a>
+				</div>
+
+				<div class="settings-section">
+					<span class="settings-section-title">Storage</span>
+					<button class="settings-action" disabled={isCleanupInProgress} onclick={cleanUnusedUploads}>
+						<Trash2 size={16} />
+						<span>{isCleanupInProgress ? 'Cleaning unused uploads…' : 'Clean unused uploads'}</span>
+					</button>
+					<p class="settings-help">Deletes local uploads not used by any active or trashed page.</p>
+					{#if cleanupMessage}
+						<p class="settings-cleanup-message">{cleanupMessage}</p>
+					{/if}
+				</div>
+
+				<div class="settings-section">
+					<span class="settings-section-title">Import</span>
+					<input
+						bind:this={notionImportInput}
+						class="notion-import-input"
+						type="file"
+						accept=".zip,application/zip,application/x-zip-compressed"
+						onchange={selectNotionImport}
+					/>
+					<button class="settings-action" disabled={isNotionPreviewInProgress || isNotionImportInProgress} onclick={() => notionImportInput?.click()}>
+						<FileUp size={16} />
+						<span>{isNotionPreviewInProgress ? 'Reading Notion export…' : 'Import from Notion'}</span>
+					</button>
+					<p class="settings-help">Choose a Notion HTML export ZIP. CSV databases are not imported yet.</p>
+					{#if notionImportPreview}
+						<div class="notion-import-preview">
+							<span>{notionImportPreview.pageCount} page{notionImportPreview.pageCount === 1 ? '' : 's'} · {notionImportPreview.imageCount} image{notionImportPreview.imageCount === 1 ? '' : 's'}</span>
+							{#each notionImportPreview.warnings as warning}
+								<span class="notion-import-warning">{warning}</span>
+							{/each}
+							<button class="settings-action notion-import-confirm" disabled={isNotionImportInProgress} onclick={applyNotionImport}>
+								<FileUp size={16} />
+								<span>{isNotionImportInProgress ? 'Importing…' : 'Import pages'}</span>
+							</button>
+						</div>
+					{/if}
+					{#if notionImportMessage}
+						<p class="settings-cleanup-message">{notionImportMessage}</p>
+					{/if}
+				</div>
+			</div>
+		{/if}
 
 		<!-- Resizer handle -->
 		{#if !isMobile}
@@ -831,6 +1021,9 @@
 						</button>
 						<form method="POST" action="/?/trash" use:enhance={() => { openMenuPageId = null; }}>
 							<input type="hidden" name="id" value={node.id} />
+							{#if isCurrentPageInSubtree(node.id)}
+								<input type="hidden" name="returnToWorkspace" value="true" />
+							{/if}
 							<button type="submit" class="dropdown-action-btn hover-trash" title="Move to trash">
 								<Trash size={isMobile ? 18 : 14} /> <span>Delete</span>
 							</button>
@@ -962,10 +1155,6 @@
 		color: var(--text-main);
 	}
 
-	.gutter-action-btn.hover-trash:hover {
-		color: var(--error-color);
-	}
-
 	:global(.mobile) .gutter-action-btn {
 		width: 32px;
 		height: 32px;
@@ -1060,6 +1249,115 @@
 		display: flex;
 		flex-direction: column;
 		z-index: 20;
+	}
+
+	.settings-panel {
+		position: absolute;
+		bottom: var(--header-height);
+		left: 0;
+		width: 100%;
+		background: color-mix(in srgb, var(--bg-sidebar) 92%, transparent);
+		backdrop-filter: blur(20px);
+		-webkit-backdrop-filter: blur(20px);
+		border-top: 1px solid var(--border-color);
+		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
+		padding: 8px;
+		z-index: 20;
+	}
+
+	.settings-panel-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 4px 4px 8px;
+		font-size: 12px;
+		font-weight: 600;
+		text-transform: uppercase;
+		color: var(--text-muted);
+	}
+
+	.close-settings-btn {
+		font-size: 20px;
+		line-height: 1;
+		padding: 0 4px;
+		color: var(--text-muted);
+	}
+
+	.settings-section + .settings-section {
+		border-top: 1px solid var(--border-color);
+		margin-top: 8px;
+		padding-top: 8px;
+	}
+
+	.settings-section-title {
+		display: block;
+		padding: 0 6px 4px;
+		font-size: 10px;
+		font-weight: 600;
+		letter-spacing: 0.5px;
+		text-transform: uppercase;
+		color: var(--text-muted);
+	}
+
+	.settings-action {
+		display: flex;
+		align-items: center;
+		gap: 9px;
+		width: 100%;
+		padding: 8px 6px;
+		border-radius: 5px;
+		color: var(--text-main);
+		font-size: 13px;
+		text-align: left;
+		text-decoration: none;
+		transition: background var(--transition-speed);
+	}
+
+	.settings-action:hover {
+		background: var(--hover-sidebar);
+	}
+
+	.settings-action:disabled {
+		opacity: 0.6;
+		cursor: wait;
+	}
+
+	.settings-action :global(svg) {
+		color: var(--text-muted);
+	}
+
+	.settings-help,
+	.settings-cleanup-message {
+		margin: 3px 6px 0;
+		font-size: 11px;
+		line-height: 1.35;
+		color: var(--text-muted);
+	}
+
+	.settings-cleanup-message {
+		color: var(--text-main);
+	}
+
+	.notion-import-input {
+		display: none;
+	}
+
+	.notion-import-preview {
+		display: grid;
+		gap: 5px;
+		margin: 5px 6px 0;
+		font-size: 11px;
+		line-height: 1.35;
+		color: var(--text-main);
+	}
+
+	.notion-import-warning {
+		color: var(--text-muted);
+	}
+
+	.notion-import-confirm {
+		margin-top: 2px;
+		color: var(--accent-color);
 	}
 
 	.trash-panel-header {
