@@ -6,7 +6,7 @@ export interface CommandsOptions {
 }
 
 export const Commands = Extension.create<CommandsOptions>({
-	name: 'commands',
+	name: 'slashCommands',
 
 	addOptions() {
 		return {

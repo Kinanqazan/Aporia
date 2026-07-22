@@ -1,15 +1,13 @@
-import { env } from '$env/dynamic/private';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
+import { createSession, hasValidSession, isPasswordConfigured, verifyCredentials } from '$lib/server/auth';
 
 export const load: PageServerLoad = async ({ cookies }) => {
-	const password = env.APP_PASSWORD;
-	if (!password) {
-		throw redirect(307, '/');
+	if (!isPasswordConfigured()) {
+		throw redirect(307, '/setup');
 	}
 
-	const session = cookies.get('aporia_session');
-	if (session === password) {
+	if (hasValidSession(cookies.get('aporia_session'))) {
 		throw redirect(307, '/');
 	}
 };
@@ -17,15 +15,19 @@ export const load: PageServerLoad = async ({ cookies }) => {
 export const actions: Actions = {
 	default: async ({ request, cookies }) => {
 		const data = await request.formData();
+		const enteredUsername = data.get('username');
 		const enteredPassword = data.get('password');
-		const password = env.APP_PASSWORD;
 
-		if (!password) {
-			throw redirect(307, '/');
+		if (!isPasswordConfigured()) {
+			throw redirect(307, '/setup');
 		}
 
-		if (enteredPassword === password) {
-			cookies.set('aporia_session', password, {
+		if (
+			typeof enteredUsername === 'string' &&
+			typeof enteredPassword === 'string' &&
+			await verifyCredentials(enteredUsername, enteredPassword)
+		) {
+			cookies.set('aporia_session', createSession(), {
 				path: '/',
 				httpOnly: true,
 				sameSite: 'strict',

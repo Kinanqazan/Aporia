@@ -81,6 +81,12 @@ docker compose ps aporia
 docker compose logs -f aporia
 ```
 
+On the first visit, Aporia shows a setup screen. Create the username and
+password there; registration closes after setup. Later visits use the login
+screen. No password or user configuration is required in Compose.
+If the service will be publicly reachable, complete this first setup while it
+is restricted to your local network or VPN.
+
 ## 6. Optional: use Caddy
 
 For an HTTPS hostname, add a site to the Caddyfile:

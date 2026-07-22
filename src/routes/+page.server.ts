@@ -67,11 +67,12 @@ export const actions: Actions = {
 		const data = await request.formData();
 		const id = data.get('id') as string;
 		const icon = data.get('icon') as string | null;
+		const iconColor = data.get('iconColor') as string | null;
 
 		if (!id) return fail(400, { message: 'Invalid page ID' });
 
 		try {
-			const page = await updatePage(id, { icon });
+			const page = await updatePage(id, { icon, iconColor });
 			return { success: true, page };
 		} catch (err: any) {
 			return fail(500, { message: err.message });

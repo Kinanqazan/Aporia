@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { Lock, ArrowRight } from 'lucide-svelte';
+	import { Lock, UserRound, ArrowRight } from 'lucide-svelte';
 
 	let { form } = $props();
 	let loading = $state(false);
@@ -30,6 +30,17 @@
 			}}
 			class="login-form"
 		>
+			<div class="input-wrapper">
+				<UserRound size={16} class="input-icon" />
+				<input
+					type="text"
+					name="username"
+					placeholder="Username..."
+					required
+					disabled={loading}
+					autocomplete="username"
+				/>
+			</div>
 			<div class="input-wrapper" class:has-error={form?.incorrect}>
 				<Lock size={16} class="input-icon" />
 				<input 

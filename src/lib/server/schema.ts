@@ -8,6 +8,7 @@ export const pages: any = sqliteTable('pages', {
 	position: integer('position').notNull().default(0),
 	title: text('title').notNull().default('Untitled'),
 	icon: text('icon'),
+	iconColor: text('icon_color'),
 	contentJson: text('content_json').notNull().default('{"type":"doc","content":[]}'),
 	contentText: text('content_text').notNull().default(''),
 	schemaVersion: integer('schema_version').notNull().default(1),

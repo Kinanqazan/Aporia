@@ -24,7 +24,8 @@
 		FileDown,
 		MoreHorizontal,
 		Settings,
-		FileUp
+		FileUp,
+		LogOut
 	} from 'lucide-svelte';
 	import type { PageNode } from '$lib/server/pages';
 
@@ -34,9 +35,11 @@
 	// App Layout States
 	let isSidebarOpen = $state(true);
 	let isDarkMode = $state(false);
+	let editorTextSize = $state(16);
 	let isMobile = $state(false);
 	let isTrashOpen = $state(false);
 	let isSettingsOpen = $state(false);
+	let isEditorTextSizeOpen = $state(false);
 	let isCleanupInProgress = $state(false);
 	let cleanupMessage = $state('');
 	let notionImportInput = $state<HTMLInputElement | null>(null);
@@ -59,6 +62,13 @@
 	// Track expanded nodes in the page tree sidebar
 	let expandedNodes = $state(new Set<string>());
 	const expandedNodesStorageKey = 'aporia-expanded-sidebar-pages';
+	const editorTextSizeStorageKey = 'aporia-editor-text-size';
+	const editorTextSizeOptions = [
+		{ value: 14, label: 'Small' },
+		{ value: 16, label: 'Default' },
+		{ value: 18, label: 'Large' },
+		{ value: 20, label: 'Largest' }
+	] as const;
 
 	// Search States
 	let isSearchOpen = $state(false);
@@ -67,6 +77,7 @@
 	let searchFocusedIndex = $state(0);
 	let sidebarSearchInputEl = $state<HTMLInputElement | null>(null);
 	let searchContainerEl = $state<HTMLDivElement | null>(null);
+	let editorTextSizeMenuEl = $state<HTMLDivElement | null>(null);
 
 	// Inline editing title states
 	let editingPageId = $state<string | null>(null);
@@ -84,6 +95,29 @@
 
 	// Active page tracking from route params
 	let currentPageId = $derived($page.params.id || null);
+	let isAuthRoute = $derived($page.url.pathname === '/login' || $page.url.pathname === '/setup' || $page.url.pathname === '/change-password');
+
+	function editorTextSizeStorageKeyForPage(pageId: string) {
+		return `${editorTextSizeStorageKey}:${pageId}`;
+	}
+
+	$effect(() => {
+		const pageId = currentPageId;
+		if (typeof window === 'undefined') return;
+
+		if (!pageId) {
+			editorTextSize = 16;
+			return;
+		}
+
+		const serverEditorTextSize = data.editorTextSizes?.[pageId];
+		const localEditorTextSize = Number(localStorage.getItem(editorTextSizeStorageKeyForPage(pageId)));
+		editorTextSize = editorTextSizeOptions.some((option) => option.value === serverEditorTextSize)
+			? serverEditorTextSize
+			: editorTextSizeOptions.some((option) => option.value === localEditorTextSize)
+				? localEditorTextSize
+				: 16;
+	});
 
 	// Breadcrumb path tracking
 	let breadcrumbs = $derived.by(() => {
@@ -153,6 +187,9 @@
 		const handleClickOutside = (e: MouseEvent) => {
 			if (isSearchOpen && searchContainerEl && !searchContainerEl.contains(e.target as Node)) {
 				isSearchOpen = false;
+			}
+			if (isEditorTextSizeOpen && editorTextSizeMenuEl && !editorTextSizeMenuEl.contains(e.target as Node)) {
+				isEditorTextSizeOpen = false;
 			}
 			if (openMenuPageId) {
 				openMenuPageId = null;
@@ -314,6 +351,22 @@
 		}
 		expandedNodes = next;
 		localStorage.setItem(expandedNodesStorageKey, JSON.stringify([...next]));
+	}
+
+	function setEditorTextSize(size: number) {
+		if (!currentPageId || !editorTextSizeOptions.some((option) => option.value === size)) return;
+		editorTextSize = size;
+		const pageId = currentPageId;
+		localStorage.setItem(editorTextSizeStorageKeyForPage(pageId), String(size));
+		void fetch('/api/settings', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ key: editorTextSizeStorageKeyForPage(pageId), value: String(size) })
+		}).then((response) => {
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+		}).catch((error) => {
+			console.error('Failed to save editor text size:', error);
+		});
 	}
 
 	function isCurrentPageInSubtree(rootId: string): boolean {
@@ -545,11 +598,17 @@
 		ontouchend={handleTouchEnd}
 	/>
 
+	{#if isAuthRoute}
+		<div class="auth-route-shell">
+			{@render children()}
+		</div>
+	{:else}
+
 	<div
 	class="app-container" 
 	class:sidebar-closed={!isSidebarOpen} 
 	class:mobile={isMobile} 
-	style="--sidebar-width: {sidebarWidth}px;"
+	style="--sidebar-width: {sidebarWidth}px; --editor-font-size: {editorTextSize}px;"
 >
 	<!-- Sidebar -->
 	<aside class="sidebar">
@@ -593,7 +652,7 @@
 								onclick={() => { isSearchOpen = false; }}
 							>
 								<span class="sidebar-result-icon">
-									<PageIcon icon={result.icon} size={14} />
+									<PageIcon icon={result.icon} color={result.iconColor} size={14} />
 								</span>
 								<div class="sidebar-result-body">
 									<span class="sidebar-result-title">{result.title}</span>
@@ -687,7 +746,7 @@
 					{#each data.trashPages || [] as trashPage}
 						<div class="trash-item">
 							<span class="trash-item-emoji">
-								<PageIcon icon={trashPage.icon} size={14} />
+								<PageIcon icon={trashPage.icon} color={trashPage.iconColor} size={14} />
 							</span>
 							<span class="trash-item-title" title={trashPage.title}>{trashPage.title}</span>
 							<div class="trash-item-actions">
@@ -709,6 +768,16 @@
 						<div class="empty-trash-message">Trash is empty</div>
 					{/each}
 				</div>
+				<div class="trash-panel-footer">
+					<button class="trash-cleanup-btn" disabled={isCleanupInProgress} onclick={cleanUnusedUploads}>
+						<Trash2 size={14} />
+						<span>{isCleanupInProgress ? 'Cleaning unused uploads…' : 'Clean unused uploads'}</span>
+					</button>
+					<p class="trash-cleanup-help">Deletes uploads not used by any active or trashed page.</p>
+					{#if cleanupMessage}
+						<p class="trash-cleanup-message">{cleanupMessage}</p>
+					{/if}
+				</div>
 			</div>
 		{/if}
 
@@ -728,38 +797,76 @@
 						<span class="trash-badge-bubble">{data.trashPages.length}</span>
 					{/if}
 				</button>
-				<button
-					class="footer-icon-btn"
-					onclick={() => {
-						isSettingsOpen = !isSettingsOpen;
-						isTrashOpen = false;
-					}}
-					title="Settings"
-					aria-label="Open settings"
-				>
-					<Settings size={18} />
-				</button>
+				<div class="footer-right-actions">
+					<button
+						class="footer-icon-btn"
+						onclick={toggleTheme}
+						title={isDarkMode ? 'Use light mode' : 'Use dark mode'}
+						aria-label={isDarkMode ? 'Use light mode' : 'Use dark mode'}
+					>
+						{#if isDarkMode}
+							<Sun size={18} />
+						{:else}
+							<Moon size={18} />
+						{/if}
+					</button>
+					<div class="editor-text-size-menu" bind:this={editorTextSizeMenuEl}>
+						<button
+							class="footer-icon-btn text-size-trigger"
+							class:active={isEditorTextSizeOpen}
+							disabled={!currentPageId}
+							onclick={() => {
+								isEditorTextSizeOpen = !isEditorTextSizeOpen;
+								isSettingsOpen = false;
+								isTrashOpen = false;
+							}}
+							title={currentPageId ? 'Editor text size' : 'Open a page to change editor text size'}
+							aria-label="Editor text size"
+						>
+							<span class="text-size-letter">A</span>
+						</button>
+						{#if isEditorTextSizeOpen && currentPageId}
+							<div class="text-size-popover" role="group" aria-label="Editor text size">
+								<span class="text-size-popover-title">Text size</span>
+								{#each editorTextSizeOptions as option}
+									<button
+										type="button"
+										class="text-size-option"
+										class:active={editorTextSize === option.value}
+										aria-pressed={editorTextSize === option.value}
+										onclick={() => { setEditorTextSize(option.value); isEditorTextSizeOpen = false; }}
+									>
+										<span style="font-size: {Math.max(13, option.value - 1)}px;">A</span>
+										<span>{option.label}</span>
+									</button>
+								{/each}
+							</div>
+						{/if}
+					</div>
+					<button
+						class="footer-icon-btn"
+						onclick={() => {
+							isSettingsOpen = !isSettingsOpen;
+							isEditorTextSizeOpen = false;
+							isTrashOpen = false;
+						}}
+						title="Settings"
+						aria-label="Open settings"
+					>
+						<Settings size={18} />
+					</button>
+				</div>
 			</div>
 		</div>
 
 		{#if isSettingsOpen}
 			<div class="settings-panel" aria-label="Settings">
 				<div class="settings-panel-header">
-					<span>Settings</span>
+					<div class="settings-panel-heading">
+						<span class="settings-panel-title">Settings</span>
+						<span class="settings-panel-subtitle">Workspace controls</span>
+					</div>
 					<button type="button" class="close-settings-btn" onclick={() => isSettingsOpen = false} aria-label="Close settings">×</button>
-				</div>
-
-				<div class="settings-section">
-					<span class="settings-section-title">Appearance</span>
-					<button class="settings-action" onclick={toggleTheme}>
-						{#if isDarkMode}
-							<Sun size={16} />
-							<span>Use light mode</span>
-						{:else}
-							<Moon size={16} />
-							<span>Use dark mode</span>
-						{/if}
-					</button>
 				</div>
 
 				<div class="settings-section">
@@ -774,18 +881,6 @@
 						<Download size={16} />
 						<span>Export workspace</span>
 					</a>
-				</div>
-
-				<div class="settings-section">
-					<span class="settings-section-title">Storage</span>
-					<button class="settings-action" disabled={isCleanupInProgress} onclick={cleanUnusedUploads}>
-						<Trash2 size={16} />
-						<span>{isCleanupInProgress ? 'Cleaning unused uploads…' : 'Clean unused uploads'}</span>
-					</button>
-					<p class="settings-help">Deletes local uploads not used by any active or trashed page.</p>
-					{#if cleanupMessage}
-						<p class="settings-cleanup-message">{cleanupMessage}</p>
-					{/if}
 				</div>
 
 				<div class="settings-section">
@@ -815,8 +910,22 @@
 						</div>
 					{/if}
 					{#if notionImportMessage}
-						<p class="settings-cleanup-message">{notionImportMessage}</p>
+						<p class="settings-feedback-message">{notionImportMessage}</p>
 					{/if}
+				</div>
+
+				<div class="settings-section settings-account-section">
+					<span class="settings-section-title">Account</span>
+					<a href="/change-password" class="settings-action" onclick={() => isSettingsOpen = false}>
+						<Lock size={16} />
+						<span>Change password</span>
+					</a>
+					<form method="POST" action="/logout">
+						<button type="submit" class="settings-action">
+							<LogOut size={16} />
+							<span>Log out</span>
+						</button>
+					</form>
 				</div>
 			</div>
 		{/if}
@@ -874,7 +983,7 @@
 								{#if i === breadcrumbs.length - 1}
 									<span class="breadcrumb-item active">
 										<span style="display: inline-flex; align-items: center; margin-right: 6px; vertical-align: middle;">
-											<PageIcon icon={crumb.icon} size={14} />
+											<PageIcon icon={crumb.icon} color={crumb.iconColor} size={14} />
 										</span>
 										<span>{crumb.title || 'Untitled'}</span>
 										<button
@@ -891,7 +1000,7 @@
 								{:else}
 									<a href="/{crumb.id}" class="breadcrumb-item link">
 										<span style="display: inline-flex; align-items: center; margin-right: 4px; vertical-align: middle;">
-											<PageIcon icon={crumb.icon} size={12} />
+												<PageIcon icon={crumb.icon} color={crumb.iconColor} size={12} />
 										</span>
 										<span>{crumb.title || 'Untitled'}</span>
 									</a>
@@ -914,8 +1023,9 @@
 				{@render children()}
 			</div>
 		</div>
-	</main>
+</main>
 </div>
+{/if}
 
 
 
@@ -954,11 +1064,11 @@
 						{/if}
 					</button>
 					<span class="page-emoji">
-						<PageIcon icon={node.icon} size={16} />
+						<PageIcon icon={node.icon} color={node.iconColor} size={16} />
 					</span>
 				{:else}
 					<span class="page-emoji">
-						<PageIcon icon={node.icon} size={16} />
+						<PageIcon icon={node.icon} color={node.iconColor} size={16} />
 					</span>
 				{/if}
 			</div>
@@ -1041,7 +1151,7 @@
 				{/each}
 			</div>
 		{/if}
-	</div>
+		</div>
 {/snippet}
 
 <script module>
@@ -1053,6 +1163,10 @@
 </script>
 
 <style>
+	.auth-route-shell {
+		min-height: 100vh;
+		width: 100%;
+	}
 	.breadcrumb-lock-btn {
 		display: inline-flex;
 		align-items: center;
@@ -1253,45 +1367,79 @@
 
 	.settings-panel {
 		position: absolute;
-		bottom: var(--header-height);
+		bottom: calc(var(--header-height) + 16px);
 		left: 0;
 		width: 100%;
+		max-height: min(72vh, 560px);
+		overflow-y: auto;
 		background: color-mix(in srgb, var(--bg-sidebar) 92%, transparent);
 		backdrop-filter: blur(20px);
 		-webkit-backdrop-filter: blur(20px);
-		border-top: 1px solid var(--border-color);
+		border: 1px solid var(--border-color);
+		border-left: 0;
+		border-right: 0;
+		border-radius: 10px 10px 0 0;
 		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
-		padding: 8px;
+		padding: 10px;
 		z-index: 20;
+		scrollbar-width: thin;
 	}
 
 	.settings-panel-header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 4px 4px 8px;
-		font-size: 12px;
-		font-weight: 600;
-		text-transform: uppercase;
+		padding: 2px 4px 10px;
+		margin-bottom: 2px;
+	}
+
+	.settings-panel-heading {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.settings-panel-title {
+		font-size: 14px;
+		font-weight: 650;
+		color: var(--text-main);
+	}
+
+	.settings-panel-subtitle {
+		font-size: 10px;
 		color: var(--text-muted);
 	}
 
 	.close-settings-btn {
-		font-size: 20px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		border-radius: 6px;
+		font-size: 18px;
 		line-height: 1;
-		padding: 0 4px;
 		color: var(--text-muted);
 	}
 
+	.close-settings-btn:hover {
+		background: var(--hover-sidebar);
+		color: var(--text-main);
+	}
+
+	.settings-section {
+		padding: 8px;
+		border-radius: 8px;
+		background: color-mix(in srgb, var(--bg-sidebar) 78%, transparent);
+	}
+
 	.settings-section + .settings-section {
-		border-top: 1px solid var(--border-color);
 		margin-top: 8px;
-		padding-top: 8px;
 	}
 
 	.settings-section-title {
 		display: block;
-		padding: 0 6px 4px;
+		padding: 0 4px 5px;
 		font-size: 10px;
 		font-weight: 600;
 		letter-spacing: 0.5px;
@@ -1304,8 +1452,10 @@
 		align-items: center;
 		gap: 9px;
 		width: 100%;
-		padding: 8px 6px;
-		border-radius: 5px;
+		min-height: 34px;
+		padding: 7px 8px;
+		border: 1px solid transparent;
+		border-radius: 6px;
 		color: var(--text-main);
 		font-size: 13px;
 		text-align: left;
@@ -1315,6 +1465,7 @@
 
 	.settings-action:hover {
 		background: var(--hover-sidebar);
+		border-color: var(--border-color);
 	}
 
 	.settings-action:disabled {
@@ -1322,19 +1473,25 @@
 		cursor: wait;
 	}
 
+	.settings-account-section {
+		padding: 10px 0 0;
+		border-radius: 0;
+		background: transparent;
+	}
+
 	.settings-action :global(svg) {
 		color: var(--text-muted);
 	}
 
 	.settings-help,
-	.settings-cleanup-message {
+	.settings-feedback-message {
 		margin: 3px 6px 0;
 		font-size: 11px;
 		line-height: 1.35;
 		color: var(--text-muted);
 	}
 
-	.settings-cleanup-message {
+	.settings-feedback-message {
 		color: var(--text-main);
 	}
 
@@ -1398,6 +1555,52 @@
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
+	}
+
+	.trash-panel-footer {
+		padding: 7px 8px 8px;
+		border-top: 1px solid var(--border-color);
+	}
+
+	.trash-cleanup-btn {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		width: 100%;
+		min-height: 30px;
+		padding: 6px 7px;
+		border: 1px solid transparent;
+		border-radius: 5px;
+		color: var(--text-main);
+		font-size: 12px;
+		text-align: left;
+		transition: background var(--transition-speed), border-color var(--transition-speed);
+	}
+
+	.trash-cleanup-btn:hover:not(:disabled) {
+		background: var(--hover-sidebar);
+		border-color: var(--border-color);
+	}
+
+	.trash-cleanup-btn :global(svg) {
+		color: var(--text-muted);
+	}
+
+	.trash-cleanup-btn:disabled {
+		opacity: 0.6;
+		cursor: wait;
+	}
+
+	.trash-cleanup-help,
+	.trash-cleanup-message {
+		margin: 3px 5px 0;
+		font-size: 10px;
+		line-height: 1.35;
+		color: var(--text-muted);
+	}
+
+	.trash-cleanup-message {
+		color: var(--text-main);
 	}
 
 	.trash-item {
@@ -1603,6 +1806,83 @@
 		justify-content: space-between;
 		width: 100%;
 		padding: 4px 8px;
+	}
+
+	.footer-right-actions {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+	}
+
+	.editor-text-size-menu {
+		position: relative;
+	}
+
+	.text-size-trigger {
+		font-family: Georgia, serif;
+		font-size: 18px;
+		font-weight: 600;
+		font-style: italic;
+	}
+
+	.text-size-trigger.active,
+	.text-size-trigger:not(:disabled):hover {
+		background-color: var(--hover-sidebar);
+		color: var(--text-main);
+	}
+
+	.text-size-trigger:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+
+	.text-size-letter {
+		line-height: 1;
+	}
+
+	.text-size-popover {
+		position: absolute;
+		right: 0;
+		bottom: calc(100% + 6px);
+		width: 148px;
+		padding: 6px;
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+		background: color-mix(in srgb, var(--bg-sidebar) 96%, transparent);
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+		z-index: 25;
+	}
+
+	.text-size-popover-title {
+		display: block;
+		padding: 4px 6px 6px;
+		font-size: 10px;
+		font-weight: 600;
+		letter-spacing: 0.5px;
+		text-transform: uppercase;
+		color: var(--text-muted);
+	}
+
+	.text-size-option {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		width: 100%;
+		padding: 6px;
+		border-radius: 5px;
+		color: var(--text-muted);
+		font-size: 12px;
+		text-align: left;
+	}
+
+	.text-size-option:hover,
+	.text-size-option.active {
+		background: var(--hover-sidebar);
+		color: var(--text-main);
+	}
+
+	.text-size-option.active {
+		color: var(--accent-color);
 	}
 
 	.footer-icon-btn {

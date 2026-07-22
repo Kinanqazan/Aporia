@@ -63,7 +63,7 @@ To build **Aporia** efficiently and ensure high quality, we will build the appli
 ### Milestone 8: Authentication, Search, and Markdown Export
 *   **Goal**: Finalize the core feature set.
 *   **Tasks**:
-    *   Configure single-user password protection via the `APP_PASSWORD` environment variable in SvelteKit server hooks.
+    *   Configure single-user password protection with first-run username/password setup, a salted password hash, and a random session cookie.
     *   Integrate SQLite FTS5 for instant title and content search.
     *   Add a "Markdown Export" button to compile and download pages or the entire workspace as standard Markdown.
 *   **Verification**: Test authentication flows, search by text snippet, and export a workspace to confirm it imports cleanly into Obsidian.
@@ -73,7 +73,7 @@ To build **Aporia** efficiently and ensure high quality, we will build the appli
 *   **Tasks**:
     *   Write a multi-stage `Dockerfile` and `docker-compose.yml` with a persistent SQLite `/data` mount.
     *   Test manual backup execution using `sqlite3 app.db ".backup backup.db"`.
-*   **Verification**: Build and deploy the Docker container on local port, access it, configure `APP_PASSWORD`, test a backup run, and perform a full data restore test.
+*   **Verification**: Build and deploy the Docker container on local port, complete first-run username/password setup, test login/logout, test a backup run, and perform a full data restore test.
 
 ---
 

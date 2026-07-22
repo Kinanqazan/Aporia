@@ -39,11 +39,12 @@ export const actions: Actions = {
 
 		const data = await request.formData();
 		const icon = data.get('icon') as string | null;
+		const iconColor = data.get('iconColor') as string | null;
 		const page = await getPageById(id);
 		if (page?.isLocked) return fail(423, { message: 'This page is locked' });
 
 		try {
-			const pageRecord = await updatePage(id, { icon });
+			const pageRecord = await updatePage(id, { icon, iconColor });
 			return { success: true, pageRecord };
 		} catch (err: any) {
 			return fail(500, { message: err.message });

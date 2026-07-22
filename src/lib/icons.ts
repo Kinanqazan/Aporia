@@ -6,7 +6,7 @@ import {
   BarChart2, CheckSquare, Coffee, Globe, Image, Music, 
   Film, Gift, Sun, Moon, Cloud, Umbrella, ShoppingCart, 
   Tag, Key, Scroll, Atom, Footprints, Dna, Brain,
-  Book, Feather, Utensils, Shirt
+  Book, Feather, Utensils, Shirt, Archive, Rocket, UsersRound, CircleCheck, Flag
 } from 'lucide-svelte';
 
 export const CURATED_ICONS = [
@@ -58,7 +58,12 @@ export const CURATED_ICONS = [
   { name: 'umbrella', component: Umbrella, label: 'Weather' },
   { name: 'shopping-cart', component: ShoppingCart, label: 'Cart' },
   { name: 'tag', component: Tag, label: 'Tag' },
-  { name: 'key', component: Key, label: 'Key' }
+  { name: 'key', component: Key, label: 'Key' },
+  { name: 'archive', component: Archive, label: 'Archive' },
+  { name: 'rocket', component: Rocket, label: 'Launch' },
+  { name: 'users-round', component: UsersRound, label: 'People' },
+  { name: 'circle-check', component: CircleCheck, label: 'Completed' },
+  { name: 'flag', component: Flag, label: 'Important' }
 ];
 
 export const iconMap: Record<string, any> = Object.fromEntries(

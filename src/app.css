@@ -735,7 +735,7 @@ textarea {
 .ProseMirror {
 	outline: none;
 	min-height: 300px;
-	font-size: 16px;
+	font-size: var(--editor-font-size, 16px);
 	color: var(--text-main);
 	line-height: 1.6;
 }
@@ -925,7 +925,7 @@ textarea {
 	background: transparent;
 	padding: 0;
 	border-radius: 0;
-	font-size: 13px;
+	font-size: 0.8125em;
 	color: inherit;
 }
 
@@ -1034,11 +1034,18 @@ textarea {
 /* ==========================================================================
    TABLE SYSTEM STYLING
    ========================================================================== */
+.ProseMirror .tableWrapper {
+	width: 100%;
+	max-width: 100%;
+	overflow-x: auto;
+	margin: 16px 0;
+}
+
 .ProseMirror table {
 	border-collapse: collapse;
 	table-layout: fixed;
 	width: 100%;
-	margin: 16px 0;
+	margin: 0;
 	overflow: hidden;
 }
 
@@ -1046,10 +1053,16 @@ textarea {
 .ProseMirror th {
 	min-width: 1em;
 	border: 1px solid var(--border-color);
-	padding: 8px 12px;
+	padding: 3px 12px;
 	vertical-align: top;
 	box-sizing: border-box;
 	position: relative;
+	line-height: 1.35;
+}
+
+.ProseMirror td p,
+.ProseMirror th p {
+	margin-bottom: 0;
 }
 
 .ProseMirror th {
@@ -1072,14 +1085,21 @@ textarea {
 
 .ProseMirror .column-resize-handle {
 	position: absolute;
-	right: -2px;
+	right: -4px;
 	top: 0;
-	bottom: -2px;
-	width: 4px;
-	background-color: var(--accent-color);
+	bottom: 0;
+	width: 8px;
+	z-index: 20;
+	/* Keep a forgiving hit area while drawing only a 2px visual guide. */
+	background: linear-gradient(
+		to right,
+		transparent 3px,
+		var(--accent-color) 3px,
+		var(--accent-color) 5px,
+		transparent 5px
+	);
 	pointer-events: none;
 	opacity: 0;
-	transition: opacity var(--transition-speed);
 }
 
 .ProseMirror th:hover .column-resize-handle,
@@ -1087,6 +1107,11 @@ textarea {
 	opacity: 0.5;
 }
 
-.tableWrapper {
-	overflow-x: auto;
+.ProseMirror.resize-cursor,
+.ProseMirror .column-resize-dragging {
+	cursor: col-resize;
+}
+
+.ProseMirror.resize-cursor .column-resize-handle {
+	opacity: 1;
 }

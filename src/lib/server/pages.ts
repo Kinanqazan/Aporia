@@ -2,6 +2,7 @@ import { db, sqlite } from './database';
 import { pages } from './schema';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
+import { normalizeIconColor } from '$lib/icon-colors';
 
 export function generateId(length: number = 10): string {
 	const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -19,6 +20,7 @@ export interface PageNode {
 	position: number;
 	title: string;
 	icon: string | null;
+	iconColor: string | null;
 	contentJson: string;
 	contentText: string;
 	schemaVersion: number;
@@ -34,6 +36,7 @@ export interface SearchResult {
 	id: string;
 	title: string;
 	icon: string | null;
+	iconColor: string | null;
 	parentId: string | null;
 	/** HTML escaped; only generated <b> tags are preserved for match highlighting. */
 	snippet: string;
@@ -102,7 +105,7 @@ export async function createPage(parentId: string | null = null, title: string =
 // Update page attributes (metadata, content, etc.)
 export async function updatePage(
 	id: string, 
-	updates: Partial<Pick<PageNode, 'title' | 'icon' | 'contentJson' | 'contentText' | 'isLocked'>>
+	updates: Partial<Pick<PageNode, 'title' | 'icon' | 'iconColor' | 'contentJson' | 'contentText' | 'isLocked'>>
 ): Promise<PageNode | null> {
 	const now = new Date().toISOString();
 	const page = await getPageById(id);
@@ -110,6 +113,9 @@ export async function updatePage(
 
 	if (updates.contentJson !== undefined) {
 		updates.contentText = extractTextFromJson(updates.contentJson);
+	}
+	if (updates.iconColor !== undefined) {
+		updates.iconColor = normalizeIconColor(updates.iconColor);
 	}
 
 	const newRevision = updates.contentJson && updates.contentJson !== page.contentJson 
@@ -313,7 +319,7 @@ export function searchPages(query: string): SearchResult[] {
 
 	try {
 		const results = sqlite.prepare(`
-			SELECT p.id, p.title, p.icon, p.parent_id as parentId,
+			SELECT p.id, p.title, p.icon, p.icon_color as iconColor, p.parent_id as parentId,
 			       snippet(pages_fts, -1, '\u0001', '\u0002', '...', 16) as snippet
 			FROM pages_fts fts
 			JOIN pages p ON p.id = fts.id
@@ -325,6 +331,7 @@ export function searchPages(query: string): SearchResult[] {
 			id: String(row.id),
 			title: String(row.title),
 			icon: row.icon ? String(row.icon) : null,
+			iconColor: row.iconColor ? String(row.iconColor) : null,
 			parentId: row.parentId ? String(row.parentId) : null,
 			snippet: row.snippet ? toSafeHighlightedSnippet(String(row.snippet)) : ''
 		}));

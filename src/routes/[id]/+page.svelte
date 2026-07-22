@@ -30,10 +30,11 @@
 		Heading1, Heading2, Heading3, Type, Quote, Code, 
 		List, ListOrdered, Bold, Italic, Link as LinkIcon, Palette,
 		CheckSquare, Minus, Table as TableIcon, ChevronRight, Lock,
-		ChevronDown, Database, Image as ImageIcon
+		ChevronDown, Database, Image as ImageIcon, X, ZoomIn, ZoomOut, RotateCcw
 	} from 'lucide-svelte';
 
 	import { CURATED_ICONS } from '$lib/icons';
+	import { ICON_COLORS } from '$lib/icon-colors';
 	import PageIcon from '$lib/components/PageIcon.svelte';
 
 	let { data } = $props();
@@ -57,9 +58,14 @@
 		return data.pageRecord.icon || '📄';
 	}
 
+	function initialPageIconColor() {
+		return data.pageRecord.iconColor || null;
+	}
+
 	let title = $state(initialPageTitle());
 	let isLocked = $state(initialPageLockState());
 	let icon = $state(initialPageIcon());
+	let iconColor = $state<string | null>(initialPageIconColor());
 	
 	let isIconPickerOpen = $state(false);
 	let iconInputText = $state('');
@@ -67,12 +73,23 @@
 	function selectIcon(newIcon: string) {
 		if (isLocked) return;
 		icon = newIcon.trim();
+		if (icon === '📄') iconColor = null;
 		isIconPickerOpen = false;
+		submitIconChange();
+	}
+
+	function selectIconColor(newColor: string | null) {
+		if (isLocked) return;
+		iconColor = newColor;
+		submitIconChange();
+	}
+
+	function submitIconChange() {
 		setTimeout(() => {
 			iconForm?.requestSubmit();
 		}, 0);
 	}
-	
+
 	// Tiptap states
 	let editorElement = $state<HTMLDivElement>();
 	let editor = $state<Editor>();
@@ -90,20 +107,6 @@
 	// Table interaction states
 	let isTableHovered = $state(false);
 	let activeTableNode = $state<HTMLTableElement | null>(null);
-	let tableHoverPosition = $state({ top: 0, left: 0, width: 0, height: 0 });
-
-	function updateTablePositions() {
-		if (activeTableNode && editorElement) {
-			const tableRect = activeTableNode.getBoundingClientRect();
-			const editorRect = editorElement.getBoundingClientRect();
-			tableHoverPosition = {
-				top: tableRect.top - editorRect.top,
-				left: tableRect.left - editorRect.left,
-				width: tableRect.width,
-				height: tableRect.height
-			};
-		}
-	}
 
 	// Column/Row Handles states
 	let activeCellNode = $state<HTMLElement | null>(null);
@@ -161,6 +164,120 @@
 	let imageUrl = $state('');
 	let imageError = $state('');
 	let imageInsertRange = $state<{ from: number; to: number } | null>(null);
+
+	// Image viewer state. The editor keeps the image's original size; zooming and
+	// panning only affect this temporary preview layer.
+	type ImageViewerImage = { src: string; alt: string; title: string };
+	let imageViewer = $state<ImageViewerImage | null>(null);
+	let imageViewerZoom = $state(1);
+	let imageViewerPan = $state({ x: 0, y: 0 });
+	let isImageViewerPanning = $state(false);
+	let imageViewerGestureMoved = false;
+	let imageViewerDragStart = { x: 0, y: 0 };
+	let imageViewerPanStart = { x: 0, y: 0 };
+	const IMAGE_VIEWER_MIN_ZOOM = 0.5;
+	const IMAGE_VIEWER_MAX_ZOOM = 4;
+
+	function openImageViewer(image: HTMLImageElement) {
+		const src = image.currentSrc || image.src;
+		if (!src) return;
+
+		imageViewer = {
+			src,
+			alt: image.alt || 'Image preview',
+			title: image.title || image.alt || ''
+		};
+		imageViewerZoom = 1;
+		imageViewerPan = { x: 0, y: 0 };
+		document.body.classList.add('image-viewer-open');
+	}
+
+	function closeImageViewer() {
+		imageViewer = null;
+		isImageViewerPanning = false;
+		document.body.classList.remove('image-viewer-open');
+	}
+
+	function setImageViewerZoom(nextZoom: number) {
+		imageViewerZoom = Math.min(IMAGE_VIEWER_MAX_ZOOM, Math.max(IMAGE_VIEWER_MIN_ZOOM, nextZoom));
+		if (imageViewerZoom <= 1) imageViewerPan = { x: 0, y: 0 };
+	}
+
+	function zoomImageViewerIn() {
+		setImageViewerZoom(imageViewerZoom + 0.5);
+	}
+
+	function zoomImageViewerOut() {
+		setImageViewerZoom(imageViewerZoom - 0.5);
+	}
+
+	function resetImageViewer() {
+		imageViewerZoom = 1;
+		imageViewerPan = { x: 0, y: 0 };
+	}
+
+	function handleImageViewerKeydown(event: KeyboardEvent) {
+		if (!imageViewer) return;
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			closeImageViewer();
+		} else if (event.key === '+' || event.key === '=') {
+			event.preventDefault();
+			zoomImageViewerIn();
+		} else if (event.key === '-') {
+			event.preventDefault();
+			zoomImageViewerOut();
+		} else if (event.key === '0') {
+			event.preventDefault();
+			resetImageViewer();
+		}
+	}
+
+	function handleImageViewerPointerDown(event: PointerEvent) {
+		if (imageViewerZoom <= 1) return;
+		const target = event.target as HTMLElement;
+		if (!target.closest('.image-viewer-image')) return;
+
+		isImageViewerPanning = true;
+		imageViewerGestureMoved = false;
+		imageViewerDragStart = { x: event.clientX, y: event.clientY };
+		imageViewerPanStart = { ...imageViewerPan };
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		event.preventDefault();
+	}
+
+	function handleImageViewerPointerMove(event: PointerEvent) {
+		if (!isImageViewerPanning) return;
+		if (Math.abs(event.clientX - imageViewerDragStart.x) > 4 || Math.abs(event.clientY - imageViewerDragStart.y) > 4) {
+			imageViewerGestureMoved = true;
+		}
+		imageViewerPan = {
+			x: imageViewerPanStart.x + event.clientX - imageViewerDragStart.x,
+			y: imageViewerPanStart.y + event.clientY - imageViewerDragStart.y
+		};
+	}
+
+	function handleImageViewerPointerUp(event: PointerEvent) {
+		isImageViewerPanning = false;
+		const target = event.currentTarget as HTMLElement;
+		if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId);
+	}
+
+	function handleImageViewerStageClick(event: MouseEvent) {
+		// A drag can synthesize a click after pointer capture is released. Never
+		// treat that gesture, or any click on the image itself, as a close action.
+		if (imageViewerGestureMoved) {
+			imageViewerGestureMoved = false;
+			return;
+		}
+		if (event.target instanceof Element && event.target.closest('.image-viewer-image')) return;
+		if (event.target === event.currentTarget) closeImageViewer();
+	}
+
+	function handleImageViewerWheel(event: WheelEvent) {
+		event.preventDefault();
+		setImageViewerZoom(imageViewerZoom + (event.deltaY > 0 ? -0.15 : 0.15));
+	}
 
 	const colors = [
 		{ name: 'Default', value: 'var(--text-main)' },
@@ -680,6 +797,7 @@
 	// Reset inputs when navigating between pages
 	$effect(() => {
 		title = data.pageRecord.title;
+		iconColor = data.pageRecord.iconColor || null;
 		icon = data.pageRecord.icon || '📄';
 		isGutterVisible = false;
 		isActionMenuOpen = false;
@@ -796,6 +914,7 @@
 			editable: !data.pageRecord.isLocked,
 			extensions: [
 				StarterKit.configure({
+					link: false,
 					heading: {
 						levels: [1, 2, 3]
 					}
@@ -872,7 +991,11 @@
 					}
 				}),
 				TiptapTable.configure({
-					resizable: true
+					resizable: true,
+					// Keep the resize affordance easy to grab without allowing columns
+					// to collapse into unusable slivers.
+					handleWidth: 8,
+					cellMinWidth: 72
 				}),
 				TableRow,
 				TableHeader,
@@ -1068,6 +1191,8 @@
 		window.addEventListener('drop', handleDrop, { capture: true });
 		
 		handleResize();
+		editorElement?.addEventListener('dblclick', handleEditorImageClick);
+		window.addEventListener('keydown', handleImageViewerKeydown);
 		window.addEventListener('resize', handleResize);
 		window.addEventListener('pagehide', handlePageHide);
 
@@ -1087,7 +1212,10 @@
 			window.removeEventListener('click', handleGlobalClick);
 			window.removeEventListener('dragover', handleDragOver, { capture: true });
 			window.removeEventListener('drop', handleDrop, { capture: true });
+			editorElement?.removeEventListener('dblclick', handleEditorImageClick);
+			window.removeEventListener('keydown', handleImageViewerKeydown);
 			window.removeEventListener('resize', handleResize);
+			document.body.classList.remove('image-viewer-open');
 		}
 	});
 
@@ -1100,24 +1228,16 @@
 		// If we are already hovering a table, check if mouse is still near it
 		if (activeTableNode && isTableHovered) {
 			const rect = activeTableNode.getBoundingClientRect();
-			// Allow a slop of 40px to the right and bottom for the adder tracks/buttons,
-			// and 30px to the top and left for handles, to make interaction smooth.
+			// Keep the handles alive while the pointer crosses the small gap around
+			// the table, to make the menu easy to reach.
 			const isNearTable = 
 				e.clientX >= rect.left - 30 &&
-				e.clientX <= rect.right + 45 &&
+				e.clientX <= rect.right + 30 &&
 				e.clientY >= rect.top - 30 &&
-				e.clientY <= rect.bottom + 45;
+				e.clientY <= rect.bottom + 30;
 			
 			if (isNearTable) {
 				isGutterVisible = false;
-				// Update table positions in case it resized
-				tableHoverPosition = {
-					top: rect.top - editorRect.top,
-					left: rect.left - editorRect.left,
-					width: rect.width,
-					height: rect.height
-				};
-
 				// Update handles to currently hovered cell inside table
 				const cell = target.closest('td, th') as HTMLElement | null;
 				if (cell) {
@@ -1145,13 +1265,6 @@
 			activeCellNode = cell;
 			const tableRect = table.getBoundingClientRect();
 			const cellRect = cell.getBoundingClientRect();
-			
-			tableHoverPosition = {
-				top: tableRect.top - editorRect.top,
-				left: tableRect.left - editorRect.left,
-				width: tableRect.width,
-				height: tableRect.height
-			};
 			
 			// Position column handle centered above the cell
 			columnHandlePosition = {
@@ -1250,6 +1363,17 @@
 			isColMenuOpen = false;
 			isRowMenuOpen = false;
 		}
+	}
+
+	function handleEditorImageClick(event: MouseEvent) {
+		const target = event.target;
+		if (!(target instanceof HTMLImageElement)) return;
+		const image = target.closest<HTMLImageElement>('img.editor-image');
+		if (!image) return;
+
+		// Keep the image selectable in the editor while opening a full-size preview
+		// from the same click, like Notion.
+		openImageViewer(image);
 	}
 
 	// Holds the content and page ID for any pending unsaved edit.
@@ -1846,7 +1970,7 @@
 			onclick={() => isIconPickerOpen = !isIconPickerOpen}
 			title="Change page icon"
 		>
-			<PageIcon icon={icon} size={78} className="main-page-icon" />
+			<PageIcon icon={icon} color={iconColor} size={78} className="main-page-icon" />
 		</button>
 
 		<form 
@@ -1857,6 +1981,7 @@
 			class="icon-form"
 		>
 			<input type="hidden" name="icon" value={icon} />
+			<input type="hidden" name="iconColor" value={iconColor || ''} />
 		</form>
 
 		{#if isIconPickerOpen}
@@ -1887,12 +2012,27 @@
 							onclick={() => selectIcon('lucide:' + curated.name)}
 							title={curated.label}
 						>
-							<curated.component size={18} strokeWidth={1.5} />
+							<curated.component size={18} color={iconColor || 'currentColor'} strokeWidth={1.5} />
 						</button>
 					{/each}
 				</div>
-				<div class="icon-picker-footer">
-					<button type="button" class="reset-icon-btn" onclick={() => selectIcon('📄')}>Reset to default</button>
+				<div class="icon-color-section">
+					<span class="icon-color-label">Icon color</span>
+					<div class="icon-color-palette" role="group" aria-label="Icon color">
+						{#each ICON_COLORS as color}
+							<button
+								type="button"
+								class="icon-color-item"
+								class:active={iconColor === color.value}
+								aria-label={color.label}
+								aria-pressed={iconColor === color.value}
+								title={color.label}
+								onclick={() => selectIconColor(color.value)}
+							>
+								<span class="icon-color-swatch" style:background={color.value || 'var(--text-main)'}></span>
+							</button>
+						{/each}
+					</div>
 				</div>
 			</div>
 		{/if}
@@ -1947,7 +2087,7 @@
 			{#each subPages as subPage}
 				<a href="/{subPage.id}" class="subpages-item">
 							<span class="subpages-icon-wrapper">
-								<PageIcon icon={subPage.icon || '📄'} size={24} />
+								<PageIcon icon={subPage.icon || '📄'} color={subPage.iconColor} size={24} />
 					</span>
 					<span
 						class="subpages-item-text"
@@ -2063,45 +2203,8 @@
 
 		<div bind:this={editorElement} class="tiptap-editor-element"></div>
 
-		<!-- Table controls (Notion-style column/row adders) -->
+		<!-- Table controls: column/row handles open the insert/delete menus. -->
 		{#if !isLocked && isTableHovered && activeTableNode}
-			<!-- Column Adder (vertical bar on the right) -->
-			<div 
-				class="table-column-adder"
-				style="top: {tableHoverPosition.top}px; left: {tableHoverPosition.left + tableHoverPosition.width}px; height: {tableHoverPosition.height}px;"
-			>
-				<button 
-					type="button" 
-					class="table-adder-btn"
-					title="Click to add a new column"
-					onclick={() => {
-						if (isLocked) return;
-						editor?.chain().focus().addColumnAfter().run();
-						setTimeout(updateTablePositions, 20);
-					}}
-				>
-					<Plus size={12} />
-				</button>
-			</div>
-
-			<!-- Row Adder (horizontal bar at the bottom) -->
-			<div 
-				class="table-row-adder"
-				style="top: {tableHoverPosition.top + tableHoverPosition.height}px; left: {tableHoverPosition.left}px; width: {tableHoverPosition.width}px;"
-			>
-				<button 
-					type="button" 
-					class="table-adder-btn"
-					title="Click to add a new row"
-					onclick={() => {
-						if (isLocked) return;
-						editor?.chain().focus().addRowAfter().run();
-						setTimeout(updateTablePositions, 20);
-					}}
-				>
-					<Plus size={12} />
-				</button>
-			</div>
 			<!-- Column Handle (above cell) -->
 			<button 
 				type="button"
@@ -2147,7 +2250,6 @@
 						if (isLocked) return;
 						editor?.chain().focus().addColumnBefore().run();
 						isColMenuOpen = false;
-						setTimeout(updateTablePositions, 20);
 					}}
 				>
 					<Plus size={13} class="menu-icon" />
@@ -2160,7 +2262,6 @@
 						if (isLocked) return;
 						editor?.chain().focus().addColumnAfter().run();
 						isColMenuOpen = false;
-						setTimeout(updateTablePositions, 20);
 					}}
 				>
 					<Plus size={13} class="menu-icon" />
@@ -2195,7 +2296,6 @@
 						if (isLocked) return;
 						editor?.chain().focus().addRowBefore().run();
 						isRowMenuOpen = false;
-						setTimeout(updateTablePositions, 20);
 					}}
 				>
 					<Plus size={13} class="menu-icon" />
@@ -2208,7 +2308,6 @@
 						if (isLocked) return;
 						editor?.chain().focus().addRowAfter().run();
 						isRowMenuOpen = false;
-						setTimeout(updateTablePositions, 20);
 					}}
 				>
 					<Plus size={13} class="menu-icon" />
@@ -2382,6 +2481,53 @@
 			</div>
 			{#if imageError}
 				<p class="image-picker-error">{imageError}</p>
+			{/if}
+		</div>
+	{/if}
+
+	{#if imageViewer}
+		<div class="image-viewer" role="dialog" aria-modal="true" aria-label="Image preview" tabindex="-1">
+			<div class="image-viewer-toolbar">
+				<div class="image-viewer-controls" aria-label="Image zoom controls">
+					<button type="button" class="image-viewer-control" onclick={zoomImageViewerOut} disabled={imageViewerZoom <= IMAGE_VIEWER_MIN_ZOOM} aria-label="Zoom out" title="Zoom out">
+						<ZoomOut size={17} />
+					</button>
+					<span class="image-viewer-zoom" aria-live="polite">{Math.round(imageViewerZoom * 100)}%</span>
+					<button type="button" class="image-viewer-control" onclick={zoomImageViewerIn} disabled={imageViewerZoom >= IMAGE_VIEWER_MAX_ZOOM} aria-label="Zoom in" title="Zoom in">
+						<ZoomIn size={17} />
+					</button>
+					<button type="button" class="image-viewer-control" onclick={resetImageViewer} aria-label="Reset zoom" title="Reset zoom">
+						<RotateCcw size={16} />
+					</button>
+				</div>
+				<button type="button" class="image-viewer-close" onclick={closeImageViewer} aria-label="Close image preview" title="Close">
+					<X size={20} />
+				</button>
+			</div>
+
+			<button
+				type="button"
+				class="image-viewer-stage"
+				class:panning={isImageViewerPanning}
+				onclick={handleImageViewerStageClick}
+				onpointerdown={handleImageViewerPointerDown}
+				onpointermove={handleImageViewerPointerMove}
+				onpointerup={handleImageViewerPointerUp}
+				onpointercancel={handleImageViewerPointerUp}
+				onwheel={handleImageViewerWheel}
+				aria-label="Close image preview"
+			>
+				<img
+					class="image-viewer-image"
+					src={imageViewer.src}
+					alt={imageViewer.alt}
+					draggable="false"
+					style={`transform: translate(${imageViewerPan.x}px, ${imageViewerPan.y}px) scale(${imageViewerZoom});`}
+				/>
+			</button>
+
+			{#if imageViewer.title}
+				<p class="image-viewer-caption">{imageViewer.title}</p>
 			{/if}
 		</div>
 	{/if}
@@ -2620,6 +2766,50 @@
 		padding-right: 4px;
 	}
 
+	.icon-color-section {
+		border-top: 1px solid var(--border-color);
+		padding-top: 8px;
+	}
+
+	.icon-color-label {
+		display: block;
+		margin-bottom: 6px;
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--text-muted);
+	}
+
+	.icon-color-palette {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		flex-wrap: wrap;
+	}
+
+	.icon-color-item {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 22px;
+		height: 22px;
+		border: 1px solid transparent;
+		border-radius: 50%;
+		transition: transform var(--transition-speed), border-color var(--transition-speed);
+	}
+
+	.icon-color-item:hover,
+	.icon-color-item.active {
+		border-color: var(--text-main);
+		transform: scale(1.1);
+	}
+
+	.icon-color-swatch {
+		width: 13px;
+		height: 13px;
+		border-radius: 50%;
+		box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.14);
+	}
+
 	.icon-picker-item {
 		display: flex;
 		align-items: center;
@@ -2638,23 +2828,6 @@
 	.icon-picker-item.active {
 		background-color: var(--active-sidebar);
 		color: var(--accent-color);
-	}
-
-	.icon-picker-footer {
-		border-top: 1px solid var(--border-color);
-		padding-top: 6px;
-		display: flex;
-		justify-content: flex-end;
-	}
-
-	.reset-icon-btn {
-		font-size: 11px;
-		color: var(--text-muted);
-		transition: color var(--transition-speed);
-	}
-
-	.reset-icon-btn:hover {
-		color: var(--text-main);
 	}
 
 	/* Subpages nested list styling */
@@ -2825,6 +2998,139 @@
 	:global([data-resize-handle='top-right']),
 	:global([data-resize-handle='bottom-left']) {
 		cursor: nesw-resize;
+	}
+
+	:global(body.image-viewer-open) {
+		overflow: hidden;
+	}
+
+	.image-viewer {
+		position: fixed;
+		inset: 0;
+		z-index: 1000;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		background: rgba(15, 15, 18, 0.9);
+		backdrop-filter: blur(3px);
+		color: white;
+	}
+
+	.image-viewer-toolbar {
+		position: absolute;
+		top: 16px;
+		left: 20px;
+		right: 20px;
+		z-index: 2;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		pointer-events: none;
+	}
+
+	.image-viewer-controls,
+	.image-viewer-close {
+		pointer-events: auto;
+		border: 1px solid rgba(255, 255, 255, 0.18);
+		background: rgba(30, 30, 34, 0.82);
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+		color: white;
+	}
+
+	.image-viewer-controls {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		padding: 4px;
+		border-radius: 8px;
+	}
+
+	.image-viewer-control,
+	.image-viewer-close {
+		display: grid;
+		place-items: center;
+		border-radius: 5px;
+		padding: 7px;
+	}
+
+	.image-viewer-control:hover:not(:disabled),
+	.image-viewer-close:hover {
+		background: rgba(255, 255, 255, 0.12);
+	}
+
+	.image-viewer-control:disabled {
+		cursor: not-allowed;
+		opacity: 0.35;
+	}
+
+	.image-viewer-zoom {
+		min-width: 46px;
+		padding: 0 4px;
+		font-size: 12px;
+		font-variant-numeric: tabular-nums;
+		text-align: center;
+		color: rgba(255, 255, 255, 0.8);
+	}
+
+	.image-viewer-close {
+		border-radius: 50%;
+	}
+
+	.image-viewer-stage {
+		width: 100%;
+		min-height: 0;
+		flex: 1;
+		display: grid;
+		place-items: center;
+		padding: 70px 28px 48px;
+		border: 0;
+		outline: 0;
+		background: transparent;
+		overflow: hidden;
+		cursor: zoom-out;
+		touch-action: none;
+	}
+
+	.image-viewer-stage:focus-visible {
+		box-shadow: inset 0 0 0 2px var(--accent-color);
+	}
+
+	.image-viewer-image {
+		display: block;
+		max-width: min(92vw, 1400px);
+		max-height: calc(100vh - 120px);
+		width: auto;
+		height: auto;
+		object-fit: contain;
+		border-radius: 4px;
+		box-shadow: 0 18px 70px rgba(0, 0, 0, 0.42);
+		user-select: none;
+		-webkit-user-drag: none;
+		cursor: grab;
+		transform-origin: center;
+		transition: transform 160ms ease;
+	}
+
+	.image-viewer-stage.panning,
+	.image-viewer-stage.panning .image-viewer-image {
+		cursor: grabbing;
+	}
+
+	.image-viewer-stage.panning .image-viewer-image {
+		transition: none;
+	}
+
+	.image-viewer-caption {
+		position: absolute;
+		bottom: 16px;
+		max-width: min(80vw, 700px);
+		margin: 0;
+		font-size: 12px;
+		text-align: center;
+		color: rgba(255, 255, 255, 0.75);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.image-file-input {
@@ -3140,69 +3446,6 @@
 		font-size: 11px;
 		color: var(--text-muted);
 		margin-top: 1px;
-	}
-
-	/* Notion-style table adders */
-	.table-column-adder, .table-row-adder {
-		position: absolute;
-		z-index: 90;
-		pointer-events: auto;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		transition: background-color var(--transition-speed);
-	}
-
-	/* Vertical column adder track */
-	.table-column-adder {
-		width: 24px;
-		margin-left: 2px;
-	}
-
-	.table-column-adder:hover {
-		background-color: rgba(255, 255, 255, 0.02);
-	}
-
-	:root:not(.dark) .table-column-adder:hover {
-		background-color: rgba(0, 0, 0, 0.02);
-	}
-
-	/* Horizontal row adder track */
-	.table-row-adder {
-		height: 24px;
-		margin-top: 2px;
-	}
-
-	.table-row-adder:hover {
-		background-color: rgba(255, 255, 255, 0.02);
-	}
-
-	:root:not(.dark) .table-row-adder:hover {
-		background-color: rgba(0, 0, 0, 0.02);
-	}
-
-	.table-adder-btn {
-		width: 18px;
-		height: 18px;
-		background-color: var(--bg-sidebar);
-		border: 1px solid var(--border-color);
-		border-radius: 4px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		color: var(--text-muted);
-		cursor: pointer;
-		opacity: 0.3;
-		transition: opacity var(--transition-speed), color var(--transition-speed), transform var(--transition-speed);
-		box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-	}
-
-	.table-column-adder:hover .table-adder-btn,
-	.table-row-adder:hover .table-adder-btn,
-	.table-adder-btn:hover {
-		opacity: 1;
-		color: var(--text-main);
-		transform: scale(1.05);
 	}
 
 	/* Row and Column selection handles */

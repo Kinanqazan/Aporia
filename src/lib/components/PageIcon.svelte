@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { iconMap } from '$lib/icons';
 
-	let { icon, size = 16, className = '' } = $props();
+	let { icon, color = null, size = 16, className = '' } = $props();
 
 	// Default to lucide:file-text if no icon is set
 	const activeIcon = $derived(icon || 'lucide:file-text');
@@ -14,10 +14,10 @@
 
 {#if IconComponent}
 	<span class="svelte-page-icon {className}">
-		<IconComponent {size} color="currentColor" strokeWidth={1.5} />
+		<IconComponent {size} color={color || 'currentColor'} strokeWidth={1.5} />
 	</span>
 {:else}
-	<span class="svelte-page-icon {className}">{activeIcon}</span>
+	<span class="svelte-page-icon {className}" style:color={color || undefined}>{activeIcon}</span>
 {/if}
 
 <style>

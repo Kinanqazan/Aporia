@@ -1,19 +1,14 @@
-import { env } from '$env/dynamic/private';
 import { redirect, type Handle } from '@sveltejs/kit';
+import { hasValidSession, isPasswordConfigured } from '$lib/server/auth';
 
 export const handle: Handle = async ({ event, resolve }) => {
-	const password = env.APP_PASSWORD;
-	
-	// If APP_PASSWORD is not configured, bypass authentication entirely
-	if (!password) {
-		return resolve(event);
-	}
-
 	const path = event.url.pathname;
 	
-	// Allow access to static assets, build files, and the login page
+	// Allow public authentication pages and static assets.
 	if (
-		path === '/login' || 
+		path === '/login' ||
+		path === '/setup' ||
+		path === '/logout' ||
 		(path === '/aporia-logo.svg' || path === '/aporia-logo.png') ||
 		path === '/manifest.webmanifest' ||
 		path.startsWith('/aporia-icon-') ||
@@ -23,10 +18,13 @@ export const handle: Handle = async ({ event, resolve }) => {
 		return resolve(event);
 	}
 
+	if (!isPasswordConfigured()) {
+		throw redirect(307, '/setup');
+	}
+
 	const session = event.cookies.get('aporia_session');
 	
-	// If session doesn't match APP_PASSWORD, redirect to login page
-	if (session !== password) {
+	if (!hasValidSession(session)) {
 		throw redirect(307, '/login');
 	}
 
