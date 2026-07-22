@@ -14,10 +14,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 	// Allow access to static assets, build files, and the login page
 	if (
 		path === '/login' || 
-		(path === '/Wolf.svg' || path === '/Wolf.png') ||
+		(path === '/aporia-logo.svg' || path === '/aporia-logo.png') ||
 		path === '/manifest.webmanifest' ||
-		path === '/apple-touch-icon.png' ||
-		path.startsWith('/logo-') ||
+		path.startsWith('/aporia-icon-') ||
 		path.startsWith('/_app') || 
 		path.startsWith('/favicon')
 	) {

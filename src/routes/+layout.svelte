@@ -555,7 +555,7 @@
 	<aside class="sidebar">
 		<div class="sidebar-header">
 			<div class="user-workspace">
-				<img src="/Wolf.svg" alt="Aporia Logo" class="workspace-logo" />
+				<img src="/aporia-logo.svg" alt="Aporia Logo" class="workspace-logo" />
 				<span class="workspace-name">Aporia</span>
 			</div>
 			<button class="icon-btn toggle-sidebar-btn" onclick={toggleSidebar} title="Close sidebar">
