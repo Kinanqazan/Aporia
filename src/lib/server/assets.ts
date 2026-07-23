@@ -18,6 +18,8 @@ const imageTypes = {
 	'webp': { mimeType: 'image/webp', extension: '.webp' }
 } as const;
 
+export type ImageType = (typeof imageTypes)[keyof typeof imageTypes];
+
 export type AssetRecord = typeof assets.$inferSelect;
 
 export class AssetValidationError extends Error {}
@@ -26,7 +28,7 @@ function createAssetId(): string {
 	return randomBytes(18).toString('base64url');
 }
 
-function identifyImage(bytes: Uint8Array): (typeof imageTypes)[keyof typeof imageTypes] | null {
+function identifyImage(bytes: Uint8Array): ImageType | null {
 	if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
 		return imageTypes.jpeg;
 	}
@@ -47,6 +49,17 @@ function identifyImage(bytes: Uint8Array): (typeof imageTypes)[keyof typeof imag
 		return imageTypes.webp;
 	}
 	return null;
+}
+
+export function validateImageBytes(bytes: Uint8Array): ImageType {
+	if (bytes.byteLength === 0) throw new AssetValidationError('Choose an image file to upload');
+	if (bytes.byteLength > MAX_IMAGE_BYTES) throw new AssetValidationError('Images must be 10 MB or smaller');
+
+	const image = identifyImage(bytes);
+	if (!image) {
+		throw new AssetValidationError('Only PNG, JPEG, GIF, and WebP images are supported');
+	}
+	return image;
 }
 
 function safeOriginalFilename(filename: string, extension: string): string {
@@ -74,13 +87,7 @@ export async function storeImage(file: File): Promise<AssetRecord> {
 
 /** Stores validated image bytes from an upload or a trusted server-side importer. */
 export async function storeImageBytes(filename: string, bytes: Uint8Array): Promise<AssetRecord> {
-	if (bytes.byteLength === 0) throw new AssetValidationError('Choose an image file to upload');
-	if (bytes.byteLength > MAX_IMAGE_BYTES) throw new AssetValidationError('Images must be 10 MB or smaller');
-
-	const image = identifyImage(bytes);
-	if (!image) {
-		throw new AssetValidationError('Only PNG, JPEG, GIF, and WebP images are supported');
-	}
+	const image = validateImageBytes(bytes);
 
 	const id = createAssetId();
 	const storageKey = `${id}${image.extension}`;

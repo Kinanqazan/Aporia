@@ -634,6 +634,10 @@ textarea {
 /* Mobile Overlay and Drawer overrides */
 /* Apply the closed drawer state before Svelte hydrates and adds the `.mobile` class. */
 @media (max-width: 767px) {
+	.sidebar {
+		width: min(74vw, 300px);
+	}
+
 	.app-container:not(.mobile) .sidebar {
 		position: absolute;
 		left: 0;

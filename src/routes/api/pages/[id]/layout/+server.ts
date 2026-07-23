@@ -18,10 +18,6 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		if (!existingPage || existingPage.isInTrash) {
 			return json({ success: false, error: 'Page not found' }, { status: 404 });
 		}
-		if (existingPage.isLocked) {
-			return json({ success: false, error: 'Page is locked' }, { status: 423 });
-		}
-
 		const page = await updatePage(id, { isFullWidth: body.isFullWidth ? 1 : 0 });
 		if (!page) {
 			return json({ success: false, error: 'Page not found' }, { status: 404 });

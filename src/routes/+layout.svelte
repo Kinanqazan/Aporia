@@ -45,10 +45,18 @@
 	let cleanupMessage = $state('');
 	let notionImportInput = $state<HTMLInputElement | null>(null);
 	let notionImportFile = $state<File | null>(null);
-	let notionImportPreview = $state<{ pageCount: number; imageCount: number; warnings: string[] } | null>(null);
+	let notionImportPreview = $state<{
+		pageCount: number;
+		imageCount: number;
+		remoteImageCount: number;
+		skippedImageCount: number;
+		warnings: string[];
+	} | null>(null);
 	let isNotionPreviewInProgress = $state(false);
 	let isNotionImportInProgress = $state(false);
 	let notionImportMessage = $state('');
+	let notionImportError = $state('');
+	let notionImportDialogOpen = $state(false);
 	function initialSidebarWidth() {
 		return data.sidebarWidth ?? 240;
 	}
@@ -362,7 +370,7 @@
 	}
 
 	async function toggleFullWidth() {
-		if (!currentPageId || !currentPage || currentPage.isLocked === 1 || isFullWidthRequestInFlight) return;
+		if (!currentPageId || !currentPage || isFullWidthRequestInFlight) return;
 
 		const previousValue = isCurrentPageFullWidth;
 		isCurrentPageFullWidth = !previousValue;
@@ -442,6 +450,7 @@
 		isNotionPreviewInProgress = true;
 		notionImportPreview = null;
 		notionImportMessage = '';
+		notionImportError = '';
 		try {
 			const formData = new FormData();
 			formData.set('archive', file);
@@ -451,7 +460,9 @@
 			notionImportPreview = result.preview;
 		} catch (error) {
 			notionImportFile = null;
+			notionImportError = error instanceof Error ? error.message : 'Unable to read the Notion export';
 			notionImportMessage = error instanceof Error ? error.message : 'Unable to read the Notion export';
+			notionImportDialogOpen = true;
 		} finally {
 			isNotionPreviewInProgress = false;
 		}
@@ -461,15 +472,16 @@
 		const file = (event.currentTarget as HTMLInputElement).files?.[0];
 		if (!file) return;
 		notionImportFile = file;
+		notionImportDialogOpen = true;
 		void previewNotionImport(file);
 	}
 
 	async function applyNotionImport() {
 		if (!notionImportFile || !notionImportPreview || isNotionImportInProgress) return;
-		if (!window.confirm(`Import ${notionImportPreview.pageCount} page${notionImportPreview.pageCount === 1 ? '' : 's'} from this Notion export?`)) return;
 
 		isNotionImportInProgress = true;
 		notionImportMessage = '';
+		notionImportError = '';
 		try {
 			const formData = new FormData();
 			formData.set('archive', notionImportFile);
@@ -479,10 +491,12 @@
 			notionImportMessage = `Imported ${result.result.pageCount} page${result.result.pageCount === 1 ? '' : 's'} into “${result.result.rootTitle}”.`;
 			notionImportFile = null;
 			notionImportPreview = null;
+			notionImportError = '';
+			notionImportDialogOpen = true;
 			if (notionImportInput) notionImportInput.value = '';
 			await invalidateAll();
 		} catch (error) {
-			notionImportMessage = error instanceof Error ? error.message : 'Unable to import the Notion export';
+			notionImportError = error instanceof Error ? error.message : 'Unable to import the Notion export';
 		} finally {
 			isNotionImportInProgress = false;
 		}
@@ -806,7 +820,6 @@
 						<Trash2 size={14} />
 						<span>{isCleanupInProgress ? 'Cleaning unused uploads…' : 'Clean unused uploads'}</span>
 					</button>
-					<p class="trash-cleanup-help">Deletes uploads not used by any active or trashed page.</p>
 					{#if cleanupMessage}
 						<p class="trash-cleanup-message">{cleanupMessage}</p>
 					{/if}
@@ -881,7 +894,7 @@
 							type="button"
 							class="footer-icon-btn full-width-trigger"
 							class:active={isCurrentPageFullWidth}
-							disabled={!currentPageId || currentPage?.isLocked === 1 || isFullWidthRequestInFlight}
+							disabled={!currentPageId || isFullWidthRequestInFlight}
 							aria-pressed={isCurrentPageFullWidth}
 							onclick={toggleFullWidth}
 							title={isCurrentPageFullWidth ? 'Use centered width' : 'Use full width'}
@@ -911,13 +924,12 @@
 				<div class="settings-panel-header">
 					<div class="settings-panel-heading">
 						<span class="settings-panel-title">Settings</span>
-						<span class="settings-panel-subtitle">Workspace controls</span>
 					</div>
 					<button type="button" class="close-settings-btn" onclick={() => isSettingsOpen = false} aria-label="Close settings">×</button>
 				</div>
 
 				<div class="settings-section">
-					<span class="settings-section-title">Export</span>
+					<span class="settings-section-title">Import &amp; Export</span>
 					{#if currentPageId}
 						<a href="/api/export?id={currentPageId}" download class="settings-action" onclick={() => isSettingsOpen = false}>
 							<FileDown size={16} />
@@ -928,37 +940,17 @@
 						<Download size={16} />
 						<span>Export workspace</span>
 					</a>
-				</div>
-
-				<div class="settings-section">
-					<span class="settings-section-title">Import</span>
 					<input
 						bind:this={notionImportInput}
 						class="notion-import-input"
 						type="file"
-						accept=".zip,application/zip,application/x-zip-compressed"
+						accept=".zip,.html,.htm,application/zip,application/x-zip-compressed,text/html"
 						onchange={selectNotionImport}
 					/>
 					<button class="settings-action" disabled={isNotionPreviewInProgress || isNotionImportInProgress} onclick={() => notionImportInput?.click()}>
 						<FileUp size={16} />
 						<span>{isNotionPreviewInProgress ? 'Reading Notion export…' : 'Import from Notion'}</span>
 					</button>
-					<p class="settings-help">Choose a Notion HTML export ZIP. CSV databases are not imported yet.</p>
-					{#if notionImportPreview}
-						<div class="notion-import-preview">
-							<span>{notionImportPreview.pageCount} page{notionImportPreview.pageCount === 1 ? '' : 's'} · {notionImportPreview.imageCount} image{notionImportPreview.imageCount === 1 ? '' : 's'}</span>
-							{#each notionImportPreview.warnings as warning}
-								<span class="notion-import-warning">{warning}</span>
-							{/each}
-							<button class="settings-action notion-import-confirm" disabled={isNotionImportInProgress} onclick={applyNotionImport}>
-								<FileUp size={16} />
-								<span>{isNotionImportInProgress ? 'Importing…' : 'Import pages'}</span>
-							</button>
-						</div>
-					{/if}
-					{#if notionImportMessage}
-						<p class="settings-feedback-message">{notionImportMessage}</p>
-					{/if}
 				</div>
 
 				<div class="settings-section settings-account-section">
@@ -994,6 +986,49 @@
 			></div>
 		{/if}
 	</aside>
+
+	{#if notionImportDialogOpen}
+		<div class="notion-import-modal-backdrop" role="presentation">
+			<div class="notion-import-modal" role="dialog" aria-modal="true" aria-labelledby="notion-import-modal-title">
+				<div class="notion-import-modal-header">
+					<div>
+						<h2 id="notion-import-modal-title">Import from Notion</h2>
+						<p>Choose a Notion HTML export ZIP or standalone HTML file. ZIP files preserve local images; standalone HTML only preserves embedded and external images.</p>
+					</div>
+					<button type="button" class="notion-import-modal-close" onclick={() => notionImportDialogOpen = false} aria-label="Close import dialog">×</button>
+				</div>
+
+				{#if isNotionPreviewInProgress}
+					<p class="notion-import-modal-status">Reading Notion export…</p>
+				{:else if isNotionImportInProgress}
+					<p class="notion-import-modal-status">Importing pages…</p>
+				{:else if notionImportError}
+					<p class="notion-import-modal-error">{notionImportError}</p>
+					{#if notionImportPreview && notionImportFile}
+						<button type="button" class="settings-action notion-import-confirm" onclick={applyNotionImport}>
+							<FileUp size={16} />
+							<span>Retry import</span>
+						</button>
+					{/if}
+				{:else if notionImportMessage}
+					<p class="notion-import-modal-success">{notionImportMessage}</p>
+				{:else if notionImportPreview}
+					<div class="notion-import-modal-preview">
+						<p>{notionImportPreview.pageCount} page{notionImportPreview.pageCount === 1 ? '' : 's'} · {notionImportPreview.imageCount} image{notionImportPreview.imageCount === 1 ? '' : 's'} imported{notionImportPreview.remoteImageCount > 0 ? ` · ${notionImportPreview.remoteImageCount} external` : ''}{notionImportPreview.skippedImageCount > 0 ? ` · ${notionImportPreview.skippedImageCount} skipped` : ''}</p>
+						{#each notionImportPreview.warnings as warning}
+							<span class="notion-import-warning">{warning}</span>
+						{/each}
+						<button type="button" class="settings-action notion-import-confirm" onclick={applyNotionImport}>
+							<FileUp size={16} />
+							<span>Import pages</span>
+						</button>
+					</div>
+				{:else}
+					<p class="notion-import-modal-error">Choose an HTML or ZIP file to begin.</p>
+				{/if}
+			</div>
+		</div>
+	{/if}
 
 	<!-- Mobile Overlay -->
 	{#if isMobile && isSidebarOpen}
@@ -1165,7 +1200,7 @@
 			<!-- Gutter Actions (Hover states) -->
 			<div class="page-actions-gutter" class:menu-open={openMenuPageId === node.id}>
 				<button class="gutter-action-btn" title="Options" onclick={(e) => { e.stopPropagation(); openMenuPageId = openMenuPageId === node.id ? null : node.id; }}>
-					<MoreHorizontal size={isMobile ? 18 : 14} />
+					<MoreHorizontal size={isMobile ? 20 : 18} />
 				</button>
 				
 				{#if openMenuPageId === node.id}
@@ -1307,8 +1342,8 @@
 	}
 
 	.gutter-action-btn {
-		width: 18px;
-		height: 18px;
+		width: 22px;
+		height: 22px;
 		border-radius: 3px;
 		display: flex;
 		align-items: center;
@@ -1379,7 +1414,7 @@
 	:global(.mobile) .dropdown-action-btn {
 		gap: 10px;
 		padding: 10px 12px;
-		font-size: 15px;
+		font-size: 14px;
 		border-radius: 5px;
 	}
 
@@ -1433,7 +1468,7 @@
 		border-right: 0;
 		border-radius: 10px 10px 0 0;
 		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
-		padding: 10px;
+		padding: 8px;
 		z-index: 20;
 		scrollbar-width: thin;
 	}
@@ -1442,7 +1477,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 2px 4px 10px;
+		padding: 2px 4px 6px;
 		margin-bottom: 2px;
 	}
 
@@ -1458,17 +1493,12 @@
 		color: var(--text-main);
 	}
 
-	.settings-panel-subtitle {
-		font-size: 10px;
-		color: var(--text-muted);
-	}
-
 	.close-settings-btn {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 28px;
-		height: 28px;
+		width: 26px;
+		height: 26px;
 		border-radius: 6px;
 		font-size: 18px;
 		line-height: 1;
@@ -1481,18 +1511,18 @@
 	}
 
 	.settings-section {
-		padding: 8px;
+		padding: 6px;
 		border-radius: 8px;
 		background: color-mix(in srgb, var(--bg-sidebar) 78%, transparent);
 	}
 
 	.settings-section + .settings-section {
-		margin-top: 8px;
+		margin-top: 6px;
 	}
 
 	.settings-section-title {
 		display: block;
-		padding: 0 4px 5px;
+		padding: 0 4px 4px;
 		font-size: 10px;
 		font-weight: 600;
 		letter-spacing: 0.5px;
@@ -1503,10 +1533,10 @@
 	.settings-action {
 		display: flex;
 		align-items: center;
-		gap: 9px;
+		gap: 8px;
 		width: 100%;
-		min-height: 34px;
-		padding: 7px 8px;
+		min-height: 30px;
+		padding: 5px 8px;
 		border: 1px solid transparent;
 		border-radius: 6px;
 		color: var(--text-main);
@@ -1535,7 +1565,7 @@
 	}
 
 	.settings-account-section {
-		padding: 10px 0 0;
+		padding: 8px 0 0;
 		border-radius: 0;
 		background: transparent;
 	}
@@ -1544,29 +1574,8 @@
 		color: var(--text-muted);
 	}
 
-	.settings-help,
-	.settings-feedback-message {
-		margin: 3px 6px 0;
-		font-size: 11px;
-		line-height: 1.35;
-		color: var(--text-muted);
-	}
-
-	.settings-feedback-message {
-		color: var(--text-main);
-	}
-
 	.notion-import-input {
 		display: none;
-	}
-
-	.notion-import-preview {
-		display: grid;
-		gap: 5px;
-		margin: 5px 6px 0;
-		font-size: 11px;
-		line-height: 1.35;
-		color: var(--text-main);
 	}
 
 	.notion-import-warning {
@@ -1576,6 +1585,96 @@
 	.notion-import-confirm {
 		margin-top: 2px;
 		color: var(--accent-color);
+	}
+
+	.notion-import-modal-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 200;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 20px;
+		background: rgb(0 0 0 / 42%);
+	}
+
+	.notion-import-modal {
+		width: min(440px, 100%);
+		padding: 20px;
+		border: 1px solid var(--border-color);
+		border-radius: 12px;
+		background: var(--bg-canvas);
+		box-shadow: 0 18px 50px rgba(0, 0, 0, 0.2);
+	}
+
+	.notion-import-modal-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 14px;
+	}
+
+	.notion-import-modal-header h2 {
+		margin: 0;
+		font-size: 17px;
+		font-weight: 650;
+		color: var(--text-main);
+	}
+
+	.notion-import-modal-header p {
+		margin: 8px 0 0;
+		font-size: 12px;
+		line-height: 1.45;
+		color: var(--text-muted);
+	}
+
+	.notion-import-modal-close {
+		flex: 0 0 auto;
+		width: 28px;
+		height: 28px;
+		border: 0;
+		border-radius: 6px;
+		color: var(--text-muted);
+		font-size: 20px;
+		line-height: 1;
+		background: transparent;
+		cursor: pointer;
+	}
+
+	.notion-import-modal-close:hover {
+		background: var(--hover-sidebar);
+		color: var(--text-main);
+	}
+
+	.notion-import-modal-status,
+	.notion-import-modal-success,
+	.notion-import-modal-error,
+	.notion-import-modal-preview {
+		margin: 18px 0 0;
+		font-size: 13px;
+		line-height: 1.45;
+	}
+
+	.notion-import-modal-status {
+		color: var(--text-muted);
+	}
+
+	.notion-import-modal-success {
+		color: var(--success-color, #2f855a);
+	}
+
+	.notion-import-modal-error {
+		color: var(--error-color);
+	}
+
+	.notion-import-modal-preview {
+		display: grid;
+		gap: 7px;
+		color: var(--text-main);
+	}
+
+	.notion-import-modal-preview p {
+		margin: 0;
 	}
 
 	.trash-panel-header {
@@ -1652,7 +1751,6 @@
 		cursor: wait;
 	}
 
-	.trash-cleanup-help,
 	.trash-cleanup-message {
 		margin: 3px 5px 0;
 		font-size: 10px;

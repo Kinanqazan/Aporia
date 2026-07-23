@@ -1004,7 +1004,7 @@
 				TableCell,
 				BubbleMenu.configure({
 					element: bubbleMenuElement,
-					shouldShow: ({ state }) => state.selection instanceof TextSelection && !state.selection.empty,
+					shouldShow: ({ state }) => !isLocked && state.selection instanceof TextSelection && !state.selection.empty,
 					// Do not debounce the first selection: its rect is the anchor for this menu.
 					updateDelay: 0,
 					resizeDelay: 0,
@@ -1153,6 +1153,7 @@
 		editor?.setEditable(!isLocked);
 		if (isLocked) {
 			isIconPickerOpen = false;
+			isColorMenuOpen = false;
 			isSlashMenuOpen = false;
 			isGutterVisible = false;
 			activeBlockNode = null;
@@ -2412,7 +2413,7 @@
 		{/if}
 
 		<!-- Svelte Bubble Menu (Managed by Tiptap BubbleMenu extension) -->
-		<div bind:this={bubbleMenuElement} class="editor-bubble-menu">
+		<div bind:this={bubbleMenuElement} class="editor-bubble-menu" class:locked={isLocked}>
 			{#if editor}
 				<button 
 					type="button"
@@ -2463,58 +2464,60 @@
 				<div class="bubble-divider"></div>
 
 				<!-- Color & Highlight Picker -->
-				<div style="position: relative; display: inline-block;">
-					<button 
-						type="button"
-						class="bubble-btn bubble-color-btn" 
-						onclick={() => isColorMenuOpen = !isColorMenuOpen}
-						title="Text Color & Highlights"
-					>
-						<Palette size={14} />
-					</button>
+				{#if !isLocked}
+					<div style="position: relative; display: inline-block;">
+						<button 
+							type="button"
+							class="bubble-btn bubble-color-btn" 
+							onclick={() => isColorMenuOpen = !isColorMenuOpen}
+							title="Text Color & Highlights"
+						>
+							<Palette size={14} />
+						</button>
 
-					{#if isColorMenuOpen}
-						<div class="color-picker-dropdown">
-							<div class="color-dropdown-section">Text Color</div>
-							{#each colors as color}
-								<button 
-									type="button"
-									class="color-dropdown-item" 
-									onclick={() => {
-										if (color.value === 'var(--text-main)') {
-											editor!.chain().focus().unsetColor().run();
-										} else {
-											editor!.chain().focus().setColor(color.value).run();
-										}
-										isColorMenuOpen = false;
-									}}
-								>
-									<span class="color-swatch" style="color: {color.value};">A</span>
-									<span>{color.name}</span>
-								</button>
-							{/each}
+						{#if isColorMenuOpen}
+							<div class="color-picker-dropdown">
+								<div class="color-dropdown-section">Text Color</div>
+								{#each colors as color}
+									<button 
+										type="button"
+										class="color-dropdown-item" 
+										onclick={() => {
+											if (color.value === 'var(--text-main)') {
+												editor!.chain().focus().unsetColor().run();
+											} else {
+												editor!.chain().focus().setColor(color.value).run();
+											}
+											isColorMenuOpen = false;
+										}}
+									>
+										<span class="color-swatch" style="color: {color.value};">A</span>
+										<span>{color.name}</span>
+									</button>
+								{/each}
 
-							<div class="color-dropdown-section">Highlight</div>
-							{#each highlights as hl}
-								<button 
-									type="button"
-									class="color-dropdown-item" 
-									onclick={() => {
-										if (hl.value === 'transparent') {
-											editor!.chain().focus().unsetHighlight().run();
-										} else {
-											editor!.chain().focus().setHighlight({ color: hl.value }).run();
-										}
-										isColorMenuOpen = false;
-									}}
-								>
-									<span class="color-swatch-highlight" style="background-color: {hl.value === 'transparent' ? 'transparent' : hl.value}; border: {hl.value === 'transparent' ? '1px dashed var(--text-muted)' : 'none'};">A</span>
-									<span>{hl.name}</span>
-								</button>
-							{/each}
-						</div>
-					{/if}
-				</div>
+								<div class="color-dropdown-section">Highlight</div>
+								{#each highlights as hl}
+									<button 
+										type="button"
+										class="color-dropdown-item" 
+										onclick={() => {
+											if (hl.value === 'transparent') {
+												editor!.chain().focus().unsetHighlight().run();
+											} else {
+												editor!.chain().focus().setHighlight({ color: hl.value }).run();
+											}
+											isColorMenuOpen = false;
+										}}
+									>
+										<span class="color-swatch-highlight" style="background-color: {hl.value === 'transparent' ? 'transparent' : hl.value}; border: {hl.value === 'transparent' ? '1px dashed var(--text-muted)' : 'none'};">A</span>
+										<span>{hl.name}</span>
+									</button>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			{/if}
 		</div>
 
@@ -3389,6 +3392,10 @@
 		position: fixed;
 		left: 0;
 		top: 0;
+	}
+
+	.editor-bubble-menu.locked {
+		display: none;
 	}
 
 	.bubble-btn {

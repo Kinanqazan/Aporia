@@ -1,10 +1,12 @@
 import JSZip from 'jszip';
 import * as cheerio from 'cheerio';
+import { Buffer } from 'node:buffer';
 import { basename, dirname, extname, posix } from 'path';
 import { db } from '$lib/server/database';
 import { pages } from '$lib/server/schema';
 import { extractTextFromJson, generateId, getActivePages } from '$lib/server/pages';
-import { publicAssetUrl, removeAsset, storeImageBytes } from '$lib/server/assets';
+import { AssetValidationError, publicAssetUrl, removeAsset, storeImageBytes, validateImageBytes, validateImageReferences } from '$lib/server/assets';
+import { validateTiptapDocument } from './validation';
 
 const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
 const MAX_ARCHIVE_FILES = 1_000;
@@ -34,13 +36,14 @@ type ImportedPage = {
 type PreparedArchive = {
 	pages: ImportedPage[];
 	files: Map<string, Uint8Array>;
-	localImagePaths: Set<string>;
 	warnings: Set<string>;
 };
 
 export type NotionImportPreview = {
 	pageCount: number;
 	imageCount: number;
+	remoteImageCount: number;
+	skippedImageCount: number;
 	warnings: string[];
 };
 
@@ -51,6 +54,17 @@ export type NotionImportResult = NotionImportPreview & {
 
 export class NotionImportError extends Error {}
 
+type ImportStats = {
+	imageCount: number;
+	remoteImageCount: number;
+	skippedImageCount: number;
+};
+
+type EmbeddedImage = {
+	bytes: Uint8Array;
+	filename: string;
+};
+
 /**
  * The external seam for Notion imports. Both methods accept the original ZIP so
  * previewing never leaves server-side state to clean up, and applying is fully
@@ -58,73 +72,86 @@ export class NotionImportError extends Error {}
  */
 export async function previewNotionHtmlImport(archive: File): Promise<NotionImportPreview> {
 	const prepared = await prepareArchive(archive);
-	return previewFrom(prepared);
+	const stats: ImportStats = { imageCount: 0, remoteImageCount: 0, skippedImageCount: 0 };
+	const imageCache = new Map<string, TiptapNode | null>();
+	const resolveImage = createImageResolver(prepared, stats, imageCache, async (filename, bytes, alt) => {
+		validateImageBytes(bytes);
+		return imageNode({
+			src: 'https://preview.invalid/notion-import-image',
+			source: 'remote',
+			assetId: null,
+			alt,
+			title: filename
+		});
+	});
+
+	for (const page of prepared.pages) {
+		const document = await convertHtmlToDocument(page, resolveImage, prepared.warnings);
+		await assertValidImportedDocument(document, page.title);
+	}
+
+	return previewFrom(prepared, stats);
 }
 
 export async function applyNotionHtmlImport(archive: File): Promise<NotionImportResult> {
 	const prepared = await prepareArchive(archive);
 	const createdAssetIds: string[] = [];
 	const imageCache = new Map<string, TiptapNode | null>();
-
-	const resolveImage = async (pagePath: string, src: string, alt: string): Promise<TiptapNode | null> => {
-		if (/^https:\/\//i.test(src)) {
-			return imageNode({ src, source: 'remote', assetId: null, alt, title: alt });
-		}
-
-		const archivePath = resolveArchivePath(pagePath, src);
-		if (!archivePath) {
-			prepared.warnings.add('Skipped an image with an unsafe or unsupported source.');
-			return null;
-		}
-
-		if (imageCache.has(archivePath)) return imageCache.get(archivePath) ?? null;
-		const bytes = prepared.files.get(archivePath);
-		if (!bytes) {
-			prepared.warnings.add(`Could not find an image referenced by “${basename(pagePath)}”.`);
-			imageCache.set(archivePath, null);
-			return null;
-		}
-
-		try {
-			const asset = await storeImageBytes(basename(archivePath), bytes);
-			createdAssetIds.push(asset.id);
-			const node = imageNode({
-				src: publicAssetUrl(asset.id),
-				source: 'upload',
-				assetId: asset.id,
-				alt,
-				title: asset.originalFilename
-			});
-			imageCache.set(archivePath, node);
-			return node;
-		} catch (error) {
-			prepared.warnings.add(`Skipped an unsupported image in “${basename(pagePath)}”.`);
-			imageCache.set(archivePath, null);
-			return null;
-		}
-	};
+	const stats: ImportStats = { imageCount: 0, remoteImageCount: 0, skippedImageCount: 0 };
+	const resolveImage = createImageResolver(prepared, stats, imageCache, async (filename, bytes, alt) => {
+		const asset = await storeImageBytes(filename, bytes);
+		createdAssetIds.push(asset.id);
+		return imageNode({
+			src: publicAssetUrl(asset.id),
+			source: 'upload',
+			assetId: asset.id,
+			alt,
+			title: asset.originalFilename
+		});
+	});
 
 	try {
 		const documents = new Map<string, TiptapNode>();
 		for (const page of prepared.pages) {
-			documents.set(page.path, await convertHtmlToDocument(page, resolveImage, prepared.warnings));
+			const document = await convertHtmlToDocument(page, resolveImage, prepared.warnings);
+			await assertValidImportedDocument(document, page.title);
+			documents.set(page.path, document);
 		}
 
 		const result = await createImportedPages(prepared.pages, documents);
-		return { ...previewFrom(prepared), ...result };
+		return { ...previewFrom(prepared, stats), ...result };
 	} catch (error) {
 		await Promise.allSettled(createdAssetIds.map(removeAsset));
 		throw error;
 	}
 }
 
+async function assertValidImportedDocument(document: TiptapNode, pageTitle: string): Promise<void> {
+	const validationError = validateTiptapDocument(document);
+	if (validationError) throw new NotionImportError(`Could not import “${pageTitle}”: ${validationError}`);
+	const imageReferenceError = await validateImageReferences(document);
+	if (imageReferenceError) throw new NotionImportError(`Could not import “${pageTitle}”: ${imageReferenceError}`);
+}
+
 async function prepareArchive(archive: File): Promise<PreparedArchive> {
-	if (!archive.name.toLowerCase().endsWith('.zip')) {
-		throw new NotionImportError('Choose a Notion HTML export ZIP file');
+	const extension = extname(archive.name).toLowerCase();
+	if (extension !== '.zip' && extension !== '.html' && extension !== '.htm') {
+		throw new NotionImportError('Choose a Notion HTML or ZIP export file');
 	}
-	if (archive.size === 0) throw new NotionImportError('The export ZIP is empty');
+	if (archive.size === 0) throw new NotionImportError('The selected import file is empty');
 	if (archive.size > MAX_ARCHIVE_BYTES) {
-		throw new NotionImportError('Notion export ZIP files must be 50 MB or smaller');
+		throw new NotionImportError('Notion import files must be 50 MB or smaller');
+	}
+
+	if (extension === '.html' || extension === '.htm') {
+		const html = new TextDecoder().decode(new Uint8Array(await archive.arrayBuffer()));
+		if (!html.trim()) throw new NotionImportError('The selected HTML file is empty');
+		const path = normalizeArchivePath(basename(archive.name)) || 'Page.html';
+		return {
+			pages: [{ path, parentPath: null, position: 0, title: titleFromHtml(html, path), html }],
+			files: new Map(),
+			warnings: new Set(['Standalone HTML files do not include neighboring local image files.'])
+		};
 	}
 
 	let files = await readZipFiles(await archive.arrayBuffer(), 'The selected file');
@@ -152,22 +179,11 @@ async function prepareArchive(archive: File): Promise<PreparedArchive> {
 		html: entry.html
 	}));
 
-	const localImagePaths = new Set<string>();
-	for (const page of pages) {
-		const $ = cheerio.load(page.html);
-		$('img[src]').each((_, element) => {
-			const source = $(element).attr('src') || '';
-			const path = resolveArchivePath(page.path, source);
-			if (path && files.has(path)) localImagePaths.add(path);
-			else if (source && !/^https:\/\//i.test(source)) warnings.add('Some non-local images could not be imported.');
-		});
-	}
-
 	if ([...files.keys()].some((path) => extname(path).toLowerCase() === '.csv')) {
 		warnings.add('CSV files were found but database import is not available yet.');
 	}
 
-	return { pages, files, localImagePaths, warnings };
+	return { pages, files, warnings };
 }
 
 async function readZipFiles(contents: ArrayBuffer | Uint8Array, label: string): Promise<Map<string, Uint8Array>> {
@@ -209,11 +225,120 @@ function findHtmlEntries(files: Map<string, Uint8Array>) {
 		.map(([path, bytes], position) => ({ path, position, html: new TextDecoder().decode(bytes) }));
 }
 
-function previewFrom(prepared: PreparedArchive): NotionImportPreview {
+function previewFrom(prepared: PreparedArchive, stats: ImportStats): NotionImportPreview {
 	return {
 		pageCount: prepared.pages.length,
-		imageCount: prepared.localImagePaths.size,
+		imageCount: stats.imageCount,
+		remoteImageCount: stats.remoteImageCount,
+		skippedImageCount: stats.skippedImageCount,
 		warnings: [...prepared.warnings]
+	};
+}
+
+function decodeEmbeddedImage(source: string): EmbeddedImage | null {
+	const value = source.trim();
+	if (!/^data:/i.test(value)) return null;
+
+	const separator = value.indexOf(',');
+	if (separator < 0) return null;
+	const metadata = value.slice(5, separator);
+	const payload = value.slice(separator + 1);
+	if (!/^image\//i.test(metadata.split(';', 1)[0])) return null;
+
+	try {
+		const bytes = /;base64(?:;|$)/i.test(metadata)
+			? new Uint8Array(Buffer.from(payload.replace(/\s/g, ''), 'base64'))
+			: Uint8Array.from(decodeURIComponent(payload), (character) => character.charCodeAt(0));
+		return bytes.byteLength > 0 ? { bytes, filename: 'embedded-image' } : null;
+	} catch {
+		return null;
+	}
+}
+
+type PersistLocalImage = (filename: string, bytes: Uint8Array, alt: string) => Promise<TiptapNode>;
+
+function createImageResolver(
+	prepared: PreparedArchive,
+	stats: ImportStats,
+	imageCache: Map<string, TiptapNode | null>,
+	persistLocalImage: PersistLocalImage
+) {
+	return async (pagePath: string, src: string, alt: string): Promise<TiptapNode | null> => {
+		const value = src.trim();
+		if (/^https:\/\//i.test(value)) {
+			stats.imageCount += 1;
+			stats.remoteImageCount += 1;
+			prepared.warnings.add('HTTPS images remain externally hosted and were not copied into local storage.');
+			return imageNode({ src: value, source: 'remote', assetId: null, alt, title: alt });
+		}
+
+		if (/^data:/i.test(value)) {
+			const cacheKey = `data:${value}`;
+			if (imageCache.has(cacheKey)) {
+				const cached = imageCache.get(cacheKey) ?? null;
+				if (cached) stats.imageCount += 1;
+				else stats.skippedImageCount += 1;
+				return cached ? imageWithAlt(cached, alt) : null;
+			}
+
+			const embedded = decodeEmbeddedImage(value);
+			if (!embedded) {
+				stats.skippedImageCount += 1;
+				prepared.warnings.add(`Skipped an invalid embedded image in “${basename(pagePath)}”.`);
+				imageCache.set(cacheKey, null);
+				return null;
+			}
+
+			try {
+				const node = await persistLocalImage(embedded.filename, embedded.bytes, alt);
+				stats.imageCount += 1;
+				imageCache.set(cacheKey, node);
+				return node;
+			} catch (error) {
+				if (!(error instanceof AssetValidationError)) throw error;
+				stats.skippedImageCount += 1;
+				prepared.warnings.add(`Skipped an unsupported embedded image in “${basename(pagePath)}”.`);
+				imageCache.set(cacheKey, null);
+				return null;
+			}
+		}
+
+		const archivePath = resolveArchivePath(pagePath, value);
+		if (!archivePath) {
+			stats.skippedImageCount += 1;
+			prepared.warnings.add(hasMalformedPercentEncoding(value)
+				? `Skipped an image with malformed percent-encoding in “${basename(pagePath)}”.`
+				: `Skipped an image with an unsafe or unsupported source in “${basename(pagePath)}”.`);
+			return null;
+		}
+
+		if (imageCache.has(archivePath)) {
+			const cached = imageCache.get(archivePath) ?? null;
+			if (cached) stats.imageCount += 1;
+			else stats.skippedImageCount += 1;
+			return cached ? imageWithAlt(cached, alt) : null;
+		}
+
+		const bytes = prepared.files.get(archivePath);
+		if (!bytes) {
+			stats.skippedImageCount += 1;
+			prepared.warnings.add(`Could not find an image referenced by “${basename(pagePath)}”.`);
+			imageCache.set(archivePath, null);
+			return null;
+		}
+
+		try {
+			const node = await persistLocalImage(basename(archivePath), bytes, alt);
+			stats.imageCount += 1;
+			imageCache.set(archivePath, node);
+			return node;
+		} catch (error) {
+			if (!(error instanceof AssetValidationError)) throw error;
+			stats.skippedImageCount += 1;
+			prepared.warnings.add(`Skipped an unsupported image in “${basename(pagePath)}”.`);
+			imageCache.set(archivePath, null);
+			return null;
+		}
 	};
 }
 
@@ -226,8 +351,23 @@ function normalizeArchivePath(path: string): string | null {
 function resolveArchivePath(pagePath: string, source: string): string | null {
 	const value = source.trim();
 	if (!value || /^data:/i.test(value) || /^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith('//')) return null;
-	const withoutQuery = value.split(/[?#]/, 1)[0];
-	return normalizeArchivePath(posix.join(posix.dirname(pagePath), withoutQuery));
+	const withoutQuery = value.split(/[?#]/, 1)[0].replace(/\\/g, '/');
+	let decodedPath: string;
+	try {
+		decodedPath = withoutQuery.split('/').map((segment) => decodeURIComponent(segment)).join('/');
+	} catch {
+		return null;
+	}
+	return normalizeArchivePath(posix.join(posix.dirname(pagePath), decodedPath));
+}
+
+function hasMalformedPercentEncoding(source: string): boolean {
+	try {
+		source.split(/[?#]/, 1)[0].split('/').forEach((segment) => decodeURIComponent(segment));
+		return false;
+	} catch {
+		return true;
+	}
 }
 
 function findParentPath(path: string, pagePaths: Set<string>): string | null {
@@ -243,7 +383,7 @@ function findParentPath(path: string, pagePaths: Set<string>): string | null {
 function titleFromHtml(html: string, path: string): string {
 	const $ = cheerio.load(html);
 	const title = cleanTitle($('h1').first().text()) || cleanTitle($('title').text());
-	return title || cleanTitle(basename(path, '.html')) || 'Untitled';
+	return title || cleanTitle(basename(path, extname(path))) || 'Untitled';
 }
 
 function cleanTitle(value: string): string {
@@ -261,6 +401,9 @@ async function convertHtmlToDocument(
 	warnings: Set<string>
 ): Promise<TiptapNode> {
 	const $ = cheerio.load(page.html);
+	for (const selector of ['script img', 'style img', 'noscript img', 'nav img', 'header img', 'footer img', 'svg img']) {
+		if ($(selector).length > 0) warnings.add(`Images inside ${selector.slice(0, -4)} elements are unsupported and were skipped.`);
+	}
 	$('script, style, noscript, nav, header, footer, svg, link, meta').remove();
 	const root = $('article').first().length ? $('article').first() : $('main').first().length ? $('main').first() : $('body').first();
 	const content = await convertBlocks($, root.contents().toArray(), page.path, resolveImage, warnings);
@@ -310,7 +453,8 @@ function isInlineFragment($: any, node: any): boolean {
 	if (node.type !== 'tag') return false;
 
 	const tag = String(node.tagName || '').toLowerCase();
-	if (tag === 'br' || inlineHtmlTags.has(tag)) return true;
+	if (tag === 'br') return true;
+	if (inlineHtmlTags.has(tag)) return !$(node).find('img').length;
 	return tag === 'div' && hasOnlyInlineContent($, $(node));
 }
 
@@ -335,17 +479,23 @@ async function convertBlock(
 	const selection = $(element);
 	const inline = () => inlineFromNodes($, selection.contents().toArray());
 
-	if (/^h[1-6]$/.test(tag)) return [{ type: 'heading', attrs: { level: Math.min(Number(tag[1]), 3) }, content: inline() }];
+	if (/^h[1-6]$/.test(tag)) {
+		const heading = { type: 'heading', attrs: { level: Math.min(Number(tag[1]), 3) }, content: inline() };
+		const images = await resolveDescendantImages($, selection, pagePath, resolveImage);
+		if (images.length > 0) warnings.add('Images inside headings were moved below the heading.');
+		return [heading, ...images];
+	}
 	if (tag === 'p') {
-		const image = await soleImage($, selection, pagePath, resolveImage);
-		return image ? [image] : [paragraph(inline())];
+		return await convertBlockContent($, selection.contents().toArray(), pagePath, resolveImage, warnings);
 	}
 	if (tag === 'blockquote') return [{ type: 'blockquote', content: ensureBlocks(await convertBlocks($, selection.contents().toArray(), pagePath, resolveImage, warnings)) }];
 	if (tag === 'pre') {
 		const code = selection.find('code').first();
 		const languageClass = code.attr('class') || '';
 		const language = /(?:language|lang)-([\w+-]+)/i.exec(languageClass)?.[1] || null;
-		return [{ type: 'codeBlock', attrs: { language }, content: codeText(code.length ? code.text() : selection.text()) }];
+		const images = await resolveDescendantImages($, selection, pagePath, resolveImage);
+		if (images.length > 0) warnings.add('Images inside code blocks were moved below the code block.');
+		return [{ type: 'codeBlock', attrs: { language }, content: codeText(code.length ? code.text() : selection.text()) }, ...images];
 	}
 	if (tag === 'hr') return [{ type: 'horizontalRule' }];
 	if (tag === 'img') {
@@ -360,35 +510,51 @@ async function convertBlock(
 	if (tag === 'details') {
 		const summary = selection.children('summary').first();
 		const detailChildren = selection.contents().toArray().filter((child: any) => child !== summary.get(0));
+		const summaryImages = await resolveDescendantImages($, summary, pagePath, resolveImage);
+		if (summaryImages.length > 0) warnings.add('Images inside toggle summaries were moved into the toggle body.');
 		return [{
 			type: 'details',
 			attrs: { open: selection.attr('open') !== undefined, level: toggleHeadingLevel($, selection, summary) },
 			content: [
 				{ type: 'detailsSummary', content: inlineFromNodes($, summary.contents().toArray()) },
-				{ type: 'detailsContent', content: ensureBlocks(await convertBlocks($, detailChildren, pagePath, resolveImage, warnings)) }
+				{ type: 'detailsContent', content: ensureBlocks([...summaryImages, ...await convertBlocks($, detailChildren, pagePath, resolveImage, warnings)]) }
 			]
 		}];
 	}
 	if (tag === 'ul' || tag === 'ol') return [await convertList($, selection, pagePath, resolveImage, warnings)];
 	if (tag === 'li') return [await convertList($, selection.parent(), pagePath, resolveImage, warnings)];
-	if (tag === 'table') return [convertTable($, selection)];
+	if (tag === 'table') return [await convertTable($, selection, pagePath, resolveImage, warnings)];
 	if (tag === 'iframe' || tag === 'embed' || tag === 'object') {
 		warnings.add('Embeds are not supported and were skipped.');
 		return [];
 	}
 	if (tag === 'aside') {
 		warnings.add('Callouts were imported as quotes.');
-		return [{ type: 'blockquote', content: [paragraph(inline())] }];
+		return [{ type: 'blockquote', content: ensureBlocks(await convertBlocks($, selection.contents().toArray(), pagePath, resolveImage, warnings)) }];
 	}
 	// Notion's HTML export wraps rich-text fragments in spans. Treating those
 	// wrappers as block containers turns every fragment into its own paragraph.
-	if (isInlineHtmlWrapper($, selection, tag)) {
+	if (isInlineHtmlWrapper($, selection, tag) && selection.find('img').length === 0) {
 		const content = inline();
 		return content.length > 0 ? [paragraph(content)] : [];
 	}
 
 	const nested = await convertBlocks($, selection.contents().toArray(), pagePath, resolveImage, warnings);
 	return nested.length > 0 ? nested : inline().length > 0 ? [paragraph(inline())] : [];
+}
+
+async function resolveDescendantImages(
+	$: any,
+	selection: any,
+	pagePath: string,
+	resolveImage: (pagePath: string, src: string, alt: string) => Promise<TiptapNode | null>
+): Promise<TiptapNode[]> {
+	const images: TiptapNode[] = [];
+	for (const element of selection.find('img').toArray()) {
+		const image = await resolveImage(pagePath, $(element).attr('src') || '', $(element).attr('alt') || '');
+		if (image) images.push(image);
+	}
+	return images;
 }
 
 function isInlineHtmlWrapper($: any, selection: any, tag: string): boolean {
@@ -420,6 +586,42 @@ function toggleHeadingLevel($: any, details: any, summary: any): 1 | 2 | 3 {
 	return 1;
 }
 
+async function convertBlockContent(
+	$: any,
+	nodes: any[],
+	pagePath: string,
+	resolveImage: (pagePath: string, src: string, alt: string) => Promise<TiptapNode | null>,
+	warnings: Set<string>
+): Promise<TiptapNode[]> {
+	const blocks: TiptapNode[] = [];
+	let inlineBuffer: TiptapNode[] = [];
+	const flushInlineBuffer = () => {
+		const content = mergeAdjacentText(inlineBuffer);
+		if (content.length > 0) blocks.push(paragraph(content));
+		inlineBuffer = [];
+	};
+
+	for (const node of nodes) {
+		if (node.type === 'tag' && String(node.tagName || '').toLowerCase() === 'img') {
+			flushInlineBuffer();
+			const image = await resolveImage(pagePath, $(node).attr('src') || '', $(node).attr('alt') || '');
+			if (image) blocks.push(image);
+			continue;
+		}
+
+		if (node.type === 'tag' && $(node).find('img').length > 0) {
+			flushInlineBuffer();
+			blocks.push(...await convertBlockContent($, $(node).contents().toArray(), pagePath, resolveImage, warnings));
+			continue;
+		}
+
+		inlineBuffer.push(...inlineFromNodes($, [node]));
+	}
+
+	flushInlineBuffer();
+	return blocks.length > 0 ? blocks : [paragraph([])];
+}
+
 async function soleImage(
 	$: any,
 	selection: any,
@@ -448,7 +650,7 @@ async function convertList(
 		const itemSelection = $(item);
 		const nestedLists = itemSelection.children('ul, ol').toArray();
 		const inlineNodes = itemSelection.contents().toArray().filter((child: any) => child.type === 'text' || (child.type === 'tag' && child.tagName !== 'ul' && child.tagName !== 'ol'));
-		const itemContent: TiptapNode[] = [paragraph(inlineFromNodes($, inlineNodes))];
+		const itemContent = await convertBlockContent($, inlineNodes, pagePath, resolveImage, warnings);
 		for (const nested of nestedLists) itemContent.push(await convertList($, $(nested), pagePath, resolveImage, warnings));
 
 		if (taskList) {
@@ -462,17 +664,24 @@ async function convertList(
 	return { type: taskList ? 'taskList' : list.is('ol') ? 'orderedList' : 'bulletList', content: convertedItems };
 }
 
-function convertTable($: any, table: any): TiptapNode {
-	const rows = table.find('tr').toArray().map((row: any) => {
+async function convertTable(
+	$: any,
+	table: any,
+	pagePath: string,
+	resolveImage: (pagePath: string, src: string, alt: string) => Promise<TiptapNode | null>,
+	warnings: Set<string>
+): Promise<TiptapNode> {
+	const rows = [];
+	for (const row of table.find('tr').toArray()) {
 		const cells = $(row).children('th, td').toArray();
-		return {
+		rows.push({
 			type: 'tableRow',
-			content: cells.map((cell: any) => ({
+			content: await Promise.all(cells.map(async (cell: any) => ({
 				type: String(cell.tagName).toLowerCase() === 'th' ? 'tableHeader' : 'tableCell',
-				content: [paragraph(inlineFromNodes($, $(cell).contents().toArray()))]
-			}))
-		};
-	});
+				content: await convertBlockContent($, $(cell).contents().toArray(), pagePath, resolveImage, warnings)
+			})))
+		});
+	}
 	return { type: 'table', content: rows.length > 0 ? rows : [{ type: 'tableRow', content: [{ type: 'tableCell', content: [paragraph([])] }] }] };
 }
 
@@ -538,6 +747,10 @@ function codeText(text: string): TiptapNode[] | undefined {
 
 function imageNode(attrs: Record<string, unknown>): TiptapNode {
 	return { type: 'image', attrs };
+}
+
+function imageWithAlt(node: TiptapNode, alt: string): TiptapNode {
+	return { ...node, attrs: { ...node.attrs, alt } };
 }
 
 function textFromNode(node: TiptapNode): string {
