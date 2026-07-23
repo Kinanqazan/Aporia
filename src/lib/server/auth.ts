@@ -37,7 +37,9 @@ export function sessionCookieOptions(persistent: boolean) {
 	return {
 		path: '/',
 		httpOnly: true,
-		sameSite: 'strict' as const,
+		// Allow safe top-level navigation from a dashboard such as Proxmox
+		// Homepage while still blocking cross-site POST requests.
+		sameSite: 'lax' as const,
 		secure: process.env.NODE_ENV === 'production',
 		...(persistent ? { maxAge: SESSION_MAX_AGE_SECONDS } : {})
 	};

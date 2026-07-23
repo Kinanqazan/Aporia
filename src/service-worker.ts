@@ -45,20 +45,22 @@ self.addEventListener('fetch', (event) => {
 		if (ASSETS.includes(url.pathname)) {
 			const cachedResponse = await cache.match(url.pathname);
 			if (cachedResponse) return cachedResponse;
+			try {
+				const response = await fetch(event.request);
+				if (response.status === 200) {
+					cache.put(url.pathname, response.clone());
+				}
+				return response;
+			} catch (err) {
+				const cachedResponse = await cache.match(url.pathname);
+				if (cachedResponse) return cachedResponse;
+				throw err;
+			}
 		}
 
-		// Network-first for other requests, falling back to cache if offline
-		try {
-			const response = await fetch(event.request);
-			if (response.status === 200) {
-				cache.put(event.request, response.clone());
-			}
-			return response;
-		} catch (err) {
-			const cachedResponse = await cache.match(event.request);
-			if (cachedResponse) return cachedResponse;
-			throw err;
-		}
+		// Never cache navigation, authentication, or API responses. These are
+		// session-dependent and a cached login page can look like a logout.
+		return fetch(event.request);
 	}
 
 	event.respondWith(respond());

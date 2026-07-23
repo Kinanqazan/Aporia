@@ -1,7 +1,9 @@
 {
   "name": "Aporia",
   "short_name": "Aporia",
+  "id": "/",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#191919",
   "theme_color": "#191919",
