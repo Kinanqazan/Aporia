@@ -1,6 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { configurePassword, isPasswordConfigured, createSession } from '$lib/server/auth';
+import { configurePassword, isPasswordConfigured, createSession, sessionCookieOptions } from '$lib/server/auth';
 
 export const load: PageServerLoad = async () => {
 	if (isPasswordConfigured()) {
@@ -36,13 +36,7 @@ export const actions: Actions = {
 			return fail(400, { error: 'Setup is already complete.' });
 		}
 
-		cookies.set('aporia_session', createSession(), {
-			path: '/',
-			httpOnly: true,
-			sameSite: 'strict',
-			secure: process.env.NODE_ENV === 'production',
-			maxAge: 60 * 60 * 24 * 30
-		});
+		cookies.set('aporia_session', createSession(true), sessionCookieOptions(true));
 
 		throw redirect(303, '/');
 	}

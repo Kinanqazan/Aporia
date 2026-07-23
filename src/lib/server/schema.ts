@@ -14,6 +14,7 @@ export const pages: any = sqliteTable('pages', {
 	schemaVersion: integer('schema_version').notNull().default(1),
 	revision: integer('revision').notNull().default(1),
 	isLocked: integer('is_locked').notNull().default(0), // 0 = unlocked, 1 = locked
+	isFullWidth: integer('is_full_width').notNull().default(0), // 0 = constrained, 1 = full width
 	isInTrash: integer('is_in_trash').notNull().default(0), // 0 = false, 1 = true
 	createdAt: text('created_at').notNull(),
 	updatedAt: text('updated_at').notNull(),

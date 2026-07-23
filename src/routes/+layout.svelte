@@ -25,7 +25,8 @@
 		MoreHorizontal,
 		Settings,
 		FileUp,
-		LogOut
+		LogOut,
+		Maximize2
 	} from 'lucide-svelte';
 	import type { PageNode } from '$lib/server/pages';
 
@@ -95,7 +96,14 @@
 
 	// Active page tracking from route params
 	let currentPageId = $derived($page.params.id || null);
+	let currentPage = $derived(data.activePages?.find((page) => page.id === currentPageId));
+	let isCurrentPageFullWidth = $state(false);
+	let isFullWidthRequestInFlight = $state(false);
 	let isAuthRoute = $derived($page.url.pathname === '/login' || $page.url.pathname === '/setup' || $page.url.pathname === '/change-password');
+
+	$effect(() => {
+		isCurrentPageFullWidth = currentPage?.isFullWidth === 1;
+	});
 
 	function editorTextSizeStorageKeyForPage(pageId: string) {
 		return `${editorTextSizeStorageKey}:${pageId}`;
@@ -351,6 +359,31 @@
 		}
 		expandedNodes = next;
 		localStorage.setItem(expandedNodesStorageKey, JSON.stringify([...next]));
+	}
+
+	async function toggleFullWidth() {
+		if (!currentPageId || !currentPage || currentPage.isLocked === 1 || isFullWidthRequestInFlight) return;
+
+		const previousValue = isCurrentPageFullWidth;
+		isCurrentPageFullWidth = !previousValue;
+		isFullWidthRequestInFlight = true;
+
+		try {
+			const response = await fetch(`/api/pages/${currentPageId}/layout`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ isFullWidth: isCurrentPageFullWidth })
+			});
+			const result = await response.json();
+			if (!response.ok || !result.success) throw new Error(result.error || `HTTP ${response.status}`);
+			isCurrentPageFullWidth = result.isFullWidth;
+			await invalidateAll();
+		} catch (error) {
+			isCurrentPageFullWidth = previousValue;
+			console.error('Full-width update failed:', error);
+		} finally {
+			isFullWidthRequestInFlight = false;
+		}
 	}
 
 	function setEditorTextSize(size: number) {
@@ -843,6 +876,20 @@
 							</div>
 						{/if}
 					</div>
+					{#if !isMobile}
+						<button
+							type="button"
+							class="footer-icon-btn full-width-trigger"
+							class:active={isCurrentPageFullWidth}
+							disabled={!currentPageId || currentPage?.isLocked === 1 || isFullWidthRequestInFlight}
+							aria-pressed={isCurrentPageFullWidth}
+							onclick={toggleFullWidth}
+							title={isCurrentPageFullWidth ? 'Use centered width' : 'Use full width'}
+							aria-label={isCurrentPageFullWidth ? 'Use centered width' : 'Use full width'}
+						>
+							<Maximize2 size={18} />
+						</button>
+					{/if}
 					<button
 						class="footer-icon-btn"
 						onclick={() => {
@@ -926,6 +973,12 @@
 							<span>Log out</span>
 						</button>
 					</form>
+					<form method="POST" action="/logout-all">
+						<button type="submit" class="settings-action settings-danger">
+							<LogOut size={16} />
+							<span>Log out all devices</span>
+						</button>
+					</form>
 				</div>
 			</div>
 		{/if}
@@ -976,13 +1029,14 @@
 				{/if}
 				{#if !isMobile}
 					<div class="breadcrumbs">
-						<span class="breadcrumb-item">Aporia</span>
 						{#if currentPageId}
 							{#each breadcrumbs as crumb, i}
-								<span class="breadcrumb-separator">/</span>
+								{#if i > 0}
+									<span class="breadcrumb-separator">/</span>
+								{/if}
 								{#if i === breadcrumbs.length - 1}
 									<span class="breadcrumb-item active">
-										<span style="display: inline-flex; align-items: center; margin-right: 6px; vertical-align: middle;">
+										<span class="breadcrumb-icon">
 											<PageIcon icon={crumb.icon} color={crumb.iconColor} size={14} />
 										</span>
 										<span>{crumb.title || 'Untitled'}</span>
@@ -999,15 +1053,14 @@
 									</span>
 								{:else}
 									<a href="/{crumb.id}" class="breadcrumb-item link">
-										<span style="display: inline-flex; align-items: center; margin-right: 4px; vertical-align: middle;">
-												<PageIcon icon={crumb.icon} color={crumb.iconColor} size={12} />
+										<span class="breadcrumb-icon">
+											<PageIcon icon={crumb.icon} color={crumb.iconColor} size={14} />
 										</span>
 										<span>{crumb.title || 'Untitled'}</span>
 									</a>
 								{/if}
 							{/each}
 						{:else}
-							<span class="breadcrumb-separator">/</span>
 							<span class="breadcrumb-item active">Workspace</span>
 						{/if}
 					</div>
@@ -1019,7 +1072,7 @@
 
 		<!-- Canvas Area -->
 		<div class="canvas-wrapper">
-			<div class="canvas">
+			<div class="canvas" class:full-width={isCurrentPageFullWidth}>
 				{@render children()}
 			</div>
 		</div>
@@ -1058,17 +1111,17 @@
 						aria-label={expandedNodes.has(node.id) ? 'Collapse' : 'Expand'}
 					>
 						{#if expandedNodes.has(node.id)}
-							<ChevronDown size={12} />
+							<ChevronDown size={13} />
 						{:else}
-							<ChevronRight size={12} />
+							<ChevronRight size={13} />
 						{/if}
 					</button>
 					<span class="page-emoji">
-						<PageIcon icon={node.icon} color={node.iconColor} size={16} />
+						<PageIcon icon={node.icon} color={node.iconColor} size={18} />
 					</span>
 				{:else}
 					<span class="page-emoji">
-						<PageIcon icon={node.icon} color={node.iconColor} size={16} />
+						<PageIcon icon={node.icon} color={node.iconColor} size={18} />
 					</span>
 				{/if}
 			</div>
@@ -1340,7 +1393,7 @@
 
 	.inline-rename-input {
 		width: 100%;
-		font-size: 14px;
+		font-size: 15px;
 		background: var(--bg-canvas);
 		border: 1px solid var(--accent-color);
 		border-radius: 3px;
@@ -1466,6 +1519,14 @@
 	.settings-action:hover {
 		background: var(--hover-sidebar);
 		border-color: var(--border-color);
+	}
+
+	.settings-action.settings-danger {
+		color: var(--error-color);
+	}
+
+	.settings-action.settings-danger :global(svg) {
+		color: var(--error-color);
 	}
 
 	.settings-action:disabled {
@@ -1816,6 +1877,28 @@
 
 	.editor-text-size-menu {
 		position: relative;
+	}
+
+	.full-width-trigger.active,
+	.full-width-trigger:not(:disabled):hover {
+		background-color: var(--hover-sidebar);
+		color: var(--accent-color);
+	}
+
+	.full-width-trigger:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+
+	.canvas.full-width {
+		max-width: none;
+		width: calc(100% - clamp(48px, 8vw, 160px));
+	}
+
+	@media (max-width: 767px) {
+		.canvas.full-width {
+			width: 100%;
+		}
 	}
 
 	.text-size-trigger {

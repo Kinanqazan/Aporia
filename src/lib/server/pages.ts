@@ -26,6 +26,7 @@ export interface PageNode {
 	schemaVersion: number;
 	revision: number;
 	isLocked: number;
+	isFullWidth: number;
 	isInTrash: number;
 	createdAt: string;
 	updatedAt: string;
@@ -105,7 +106,7 @@ export async function createPage(parentId: string | null = null, title: string =
 // Update page attributes (metadata, content, etc.)
 export async function updatePage(
 	id: string, 
-	updates: Partial<Pick<PageNode, 'title' | 'icon' | 'iconColor' | 'contentJson' | 'contentText' | 'isLocked'>>
+	updates: Partial<Pick<PageNode, 'title' | 'icon' | 'iconColor' | 'contentJson' | 'contentText' | 'isLocked' | 'isFullWidth'>>
 ): Promise<PageNode | null> {
 	const now = new Date().toISOString();
 	const page = await getPageById(id);

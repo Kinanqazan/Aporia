@@ -5,7 +5,6 @@
 	--bg-canvas: #ffffff;
 	--bg-sidebar: #ffffff;
 	--sidebar-surface: #ffffff;
-	--sidebar-blur: 12px;
 	--text-main: #37352f;
 	--text-muted: #7c7b77;
 	--border-color: #b3b3b3;
@@ -47,7 +46,7 @@
 	/* Dark Mode (Notion Aesthetic) */
 	--bg-canvas: #191919;
 	--bg-sidebar: #202020;
-	--sidebar-surface: rgba(25, 25, 25, 0.4);
+	--sidebar-surface: #202020;
 	--text-main: #e3e3e3;
 	--text-muted: #8f8f8f;
 	--border-color: #2d2d2d;
@@ -188,7 +187,6 @@ textarea {
 	height: 100%;
 	min-height: 0;
 	background-color: var(--sidebar-surface);
-	-webkit-backdrop-filter: blur(var(--sidebar-blur));
 	border-right: 1px solid var(--border-color);
 	display: flex;
 	flex-direction: column;
@@ -196,13 +194,6 @@ textarea {
 	z-index: 10;
 	flex-shrink: 0;
 	position: relative;
-}
-
-/* Keep the standards-based declaration in production builds as well as the WebKit fallback. */
-@supports (backdrop-filter: blur(1px)) {
-	.sidebar {
-		backdrop-filter: blur(var(--sidebar-blur));
-	}
 }
 
 .sidebar-closed .sidebar {
@@ -447,7 +438,7 @@ textarea {
 	min-width: 0;
 	text-decoration: none;
 	color: inherit;
-	font-size: 14px;
+	font-size: 15px;
 	cursor: pointer;
 	user-select: none;
 	padding: 4px 0;
@@ -455,8 +446,8 @@ textarea {
 
 .page-symbol-slot {
 	position: relative;
-	width: 22px;
-	height: 22px;
+	width: 24px;
+	height: 24px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -468,8 +459,8 @@ textarea {
 	position: absolute;
 	top: 1px;
 	left: 1px;
-	width: 20px;
-	height: 20px;
+	width: 22px;
+	height: 22px;
 	display: none;
 	align-items: center;
 	justify-content: center;
@@ -495,7 +486,7 @@ textarea {
 	justify-content: center;
 	width: 100%;
 	height: 100%;
-	font-size: 16px;
+	font-size: 18px;
 	transition: opacity var(--transition-speed);
 }
 
@@ -589,6 +580,21 @@ textarea {
 .breadcrumb-item.active {
 	color: var(--text-main);
 	font-weight: 500;
+}
+
+.breadcrumb-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 14px;
+	line-height: 20px;
+}
+
+.breadcrumb-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
 }
 
 .breadcrumb-item.link {
@@ -720,12 +726,12 @@ textarea {
 }
 
 .mobile .page-item-link {
-	font-size: 16px;
+	font-size: 15px;
 }
 
 .mobile .page-symbol-slot {
-	width: 26px;
-	height: 26px;
+	width: 24px;
+	height: 24px;
 }
 
 /* ==========================================================================

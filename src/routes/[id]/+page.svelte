@@ -2,7 +2,8 @@
 	import { enhance } from '$app/forms';
 	import { page } from '$app/stores';
 	import { onMount, onDestroy } from 'svelte';
-	import { Editor, Extension } from '@tiptap/core';
+	import { Editor, Extension, ResizableNodeView, mergeAttributes } from '@tiptap/core';
+	import type { ResizableNodeViewDirection } from '@tiptap/core';
 	import { Selection, Plugin, TextSelection } from '@tiptap/pm/state';
 	import { DOMSerializer } from '@tiptap/pm/model';
 	import { Decoration, DecorationSet } from '@tiptap/pm/view';
@@ -36,6 +37,7 @@
 	import { CURATED_ICONS } from '$lib/icons';
 	import { ICON_COLORS } from '$lib/icon-colors';
 	import PageIcon from '$lib/components/PageIcon.svelte';
+	import { constrainImageSizeToWidth } from '$lib/editor/image-resize';
 
 	let { data } = $props();
 	
@@ -1152,6 +1154,8 @@
 		if (isLocked) {
 			isIconPickerOpen = false;
 			isSlashMenuOpen = false;
+			isGutterVisible = false;
+			activeBlockNode = null;
 			isTableHovered = false;
 			activeTableNode = null;
 			activeCellNode = null;
@@ -1174,6 +1178,92 @@
 					parseHTML: (element) => element.getAttribute('data-asset-id'),
 					renderHTML: (attributes) => attributes.assetId ? ({ 'data-asset-id': attributes.assetId }) : ({})
 				}
+			};
+		},
+		addNodeView() {
+			if (!this.options.resize || !this.options.resize.enabled || typeof document === 'undefined') {
+				return null;
+			}
+
+			const { directions, minWidth, minHeight, alwaysPreserveAspectRatio } = this.options.resize;
+
+			return ({ node, getPos, HTMLAttributes, editor }) => {
+				const element = document.createElement('img');
+				element.draggable = false;
+
+				const mergedAttributes = mergeAttributes(this.options.HTMLAttributes, HTMLAttributes);
+				Object.entries(mergedAttributes).forEach(([key, value]) => {
+					if (value == null || key === 'width' || key === 'height') return;
+					element.setAttribute(key, String(value));
+				});
+
+				if (mergedAttributes.src != null) element.src = String(mergedAttributes.src);
+
+				const getContainingBlockWidth = () => {
+					const container = element.parentElement?.parentElement;
+					const containingBlock = container?.parentElement;
+					return containingBlock && containingBlock.clientWidth > 0 ? containingBlock.clientWidth : Infinity;
+				};
+
+				const constrainToContainingBlock = (width: number, height: number) =>
+					constrainImageSizeToWidth({ width, height }, getContainingBlockWidth());
+
+				const nodeView = new ResizableNodeView({
+					element,
+					editor,
+					node,
+					getPos,
+					onResize: (width, height) => {
+						const constrained = constrainToContainingBlock(width, height);
+						element.style.width = `${constrained.width}px`;
+						element.style.height = `${constrained.height}px`;
+					},
+					onCommit: (width, height) => {
+						const constrained = constrainToContainingBlock(width, height);
+						const pos = getPos();
+						if (pos === undefined) return;
+
+						this.editor
+							.chain()
+							.setNodeSelection(pos)
+							.updateAttributes(this.name, constrained)
+							.run();
+					},
+					onUpdate: (updatedNode) => updatedNode.type === node.type,
+					options: {
+						directions: directions as ResizableNodeViewDirection[] | undefined,
+						min: {
+							width: minWidth,
+							height: minHeight
+						},
+						preserveAspectRatio: alwaysPreserveAspectRatio === true
+					}
+				});
+
+				const dom = nodeView.dom as HTMLElement;
+				dom.style.visibility = 'hidden';
+				dom.style.pointerEvents = 'none';
+
+				const applyInitialConstraint = () => {
+					const width = typeof node.attrs.width === 'number' && node.attrs.width > 0 ? node.attrs.width : element.offsetWidth;
+					const height = typeof node.attrs.height === 'number' && node.attrs.height > 0 ? node.attrs.height : element.offsetHeight;
+					if (width <= 0 || height <= 0) return;
+
+					const constrained = constrainToContainingBlock(width, height);
+					if (constrained.width !== width || constrained.height !== height) {
+						element.style.width = `${constrained.width}px`;
+						element.style.height = `${constrained.height}px`;
+					}
+				};
+
+				element.onload = () => {
+					applyInitialConstraint();
+					dom.style.visibility = '';
+					dom.style.pointerEvents = '';
+				};
+				queueMicrotask(applyInitialConstraint);
+
+				return nodeView;
 			};
 		}
 	});
@@ -1221,6 +1311,11 @@
 
 	function handleMouseMove(e: MouseEvent) {
 		if (!editorElement || !editor || isActionMenuOpen) return;
+		if (isLocked) {
+			isGutterVisible = false;
+			activeBlockNode = null;
+			return;
+		}
 
 		const editorRect = editorElement.getBoundingClientRect();
 		const target = e.target as HTMLElement;
@@ -2109,7 +2204,7 @@
 			<div class="drop-line-indicator-vertical" style="top: {dropLineVertical.top}px; left: {dropLineVertical.left}px; height: {dropLineVertical.height}px;"></div>
 		{/if}
 		<!-- Floating Block Gutter Handles (Moved inside the relative canvas wrapper container) -->
-		{#if isGutterVisible && !isMobile}
+		{#if isGutterVisible && !isMobile && !isLocked}
 			<div 
 				class="block-gutter" 
 				style="top: {gutterTop}px; left: {gutterLeft}px;"
@@ -2916,7 +3011,6 @@
 		background: var(--hover-sidebar);
 		color: var(--text-main);
 	}
-
 
 	.page-title-input {
 		width: 100%;

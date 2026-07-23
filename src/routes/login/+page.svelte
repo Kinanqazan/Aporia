@@ -16,7 +16,6 @@
 		<div class="login-logo-wrapper">
 			<img src="/aporia-logo.svg" alt="Aporia Logo" class="login-logo" />
 		<h1>Aporia</h1>
-			<p class="subtitle">Enter password to unlock your personal workspace</p>
 		</div>
 
 		<form 
@@ -46,19 +45,24 @@
 				<input 
 					type="password" 
 					name="password" 
-					placeholder="Workspace password..." 
+					placeholder="Password..."
 					required 
 					disabled={loading}
 					autocomplete="current-password"
 				/>
-				<button type="submit" disabled={loading} aria-label="Unlock" class="submit-btn">
-					{#if loading}
-						<div class="spinner"></div>
-					{:else}
-						<ArrowRight size={16} />
-					{/if}
-				</button>
 			</div>
+			<button type="submit" disabled={loading} aria-label="Unlock" class="submit-btn">
+				{#if loading}
+					<div class="spinner"></div>
+				{:else}
+					<span>Log in</span>
+					<ArrowRight size={16} />
+				{/if}
+			</button>
+			<label class="remember-device">
+				<input type="checkbox" name="remember" value="on" checked />
+				<span>Keep me signed in on this device</span>
+			</label>
 
 			{#if form?.error}
 				<div class="error-message">
@@ -120,12 +124,6 @@
 		color: var(--text-main);
 	}
 
-	.subtitle {
-		font-size: 14px;
-		color: var(--text-muted);
-		line-height: 1.4;
-	}
-
 	.login-form {
 		display: flex;
 		flex-direction: column;
@@ -151,6 +149,26 @@
 	.input-wrapper.has-error {
 		border-color: var(--error-color);
 		animation: shake 0.4s ease-in-out;
+	}
+
+	.remember-device {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		justify-content: center;
+		width: fit-content;
+		margin: 0 auto;
+		padding: 2px 4px;
+		font-size: 13px;
+		color: var(--text-muted);
+		cursor: pointer;
+	}
+
+	.remember-device input {
+		flex: none;
+		width: 15px;
+		height: 15px;
+		accent-color: var(--accent-color);
 	}
 
 	@keyframes shake {
@@ -181,17 +199,18 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 28px;
-		height: 28px;
-		border-radius: 6px;
-		background-color: var(--accent-color);
+		gap: 8px;
+		width: 100%;
+		height: 42px;
+		border-radius: 8px;
+		background-color: #e86666;
 		color: white;
 		transition: opacity var(--transition-speed);
 	}
 
 	.submit-btn:hover {
 		opacity: 0.9;
-		background-color: var(--accent-color);
+		background-color: #e86666;
 	}
 
 	.submit-btn:disabled {

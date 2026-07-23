@@ -1,6 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { changePassword, isPasswordConfigured } from '$lib/server/auth';
+import { changePassword, isPasswordConfigured, SESSION_COOKIE_NAME } from '$lib/server/auth';
 
 export const load: PageServerLoad = async () => {
 	if (!isPasswordConfigured()) throw redirect(307, '/setup');
@@ -22,7 +22,7 @@ export const actions: Actions = {
 			return fail(400, { error: 'The current password is incorrect.' });
 		}
 
-		cookies.delete('aporia_session', { path: '/' });
+		cookies.delete(SESSION_COOKIE_NAME, { path: '/' });
 		throw redirect(303, '/login');
 	}
 };

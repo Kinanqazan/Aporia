@@ -1,5 +1,10 @@
 import { redirect, type Handle } from '@sveltejs/kit';
-import { hasValidSession, isPasswordConfigured } from '$lib/server/auth';
+import {
+	getValidSession,
+	isPasswordConfigured,
+	SESSION_COOKIE_NAME,
+	sessionCookieOptions
+} from '$lib/server/auth';
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const path = event.url.pathname;
@@ -22,10 +27,17 @@ export const handle: Handle = async ({ event, resolve }) => {
 		throw redirect(307, '/setup');
 	}
 
-	const session = event.cookies.get('aporia_session');
+	const session = event.cookies.get(SESSION_COOKIE_NAME);
+	const validSession = getValidSession(session);
 	
-	if (!hasValidSession(session)) {
+	if (!validSession) {
 		throw redirect(307, '/login');
+	}
+
+	// Refresh remembered cookies as the user works so active devices do not
+	// unexpectedly expire after the fixed initial max-age.
+	if (session && validSession.persistent) {
+		event.cookies.set(SESSION_COOKIE_NAME, session, sessionCookieOptions(true));
 	}
 
 	return resolve(event);

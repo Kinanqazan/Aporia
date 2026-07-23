@@ -5,15 +5,22 @@ import { sqlite } from './database';
 const scryptAsync = promisify(scrypt);
 const PASSWORD_KEY_LENGTH = 64;
 const PASSWORD_SALT_LENGTH = 16;
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+export const SESSION_COOKIE_NAME = 'aporia_session';
+export const SESSION_MAX_AGE_SECONDS = 90 * 24 * 60 * 60;
 
 const PASSWORD_HASH_KEY = 'auth.password.hash';
 const PASSWORD_SALT_KEY = 'auth.password.salt';
 const USERNAME_KEY = 'auth.username';
-const SESSION_HASH_KEY = 'auth.session.hash';
-const SESSION_EXPIRES_KEY = 'auth.session.expires';
 
 type SettingRow = { value: string } | undefined;
+type SessionRow = {
+	token_hash: string;
+	persistent: number;
+	created_at: number;
+	last_used_at: number;
+	expires_at: number;
+};
 
 function getSetting(key: string): string | undefined {
 	const row = sqlite.prepare('SELECT value FROM settings WHERE key = ?').get(key) as SettingRow;
@@ -26,14 +33,14 @@ function setSetting(key: string, value: string): void {
 		.run(key, value);
 }
 
-function deleteSetting(key: string): void {
-	sqlite.prepare('DELETE FROM settings WHERE key = ?').run(key);
-}
-
-function equalStrings(left: string, right: string): boolean {
-	const leftBuffer = Buffer.from(left);
-	const rightBuffer = Buffer.from(right);
-	return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+export function sessionCookieOptions(persistent: boolean) {
+	return {
+		path: '/',
+		httpOnly: true,
+		sameSite: 'strict' as const,
+		secure: process.env.NODE_ENV === 'production',
+		...(persistent ? { maxAge: SESSION_MAX_AGE_SECONDS } : {})
+	};
 }
 
 async function hashPassword(password: string, salt: Buffer): Promise<Buffer> {
@@ -59,7 +66,7 @@ export async function configurePassword(username: string, password: string): Pro
 		setSetting(USERNAME_KEY, normalizedUsername);
 		setSetting(PASSWORD_HASH_KEY, passwordHash.toString('hex'));
 		setSetting(PASSWORD_SALT_KEY, salt.toString('hex'));
-		deleteSession();
+		deleteAllSessions();
 		return true;
 	});
 
@@ -92,32 +99,55 @@ export async function changePassword(currentPassword: string, newPassword: strin
 	const update = sqlite.transaction(() => {
 		setSetting(PASSWORD_HASH_KEY, passwordHash.toString('hex'));
 		setSetting(PASSWORD_SALT_KEY, salt.toString('hex'));
-		deleteSession();
+		deleteAllSessions();
 	});
 	update();
 	return true;
 }
 
-export function createSession(): string {
+export function createSession(persistent: boolean): string {
 	const token = randomBytes(32).toString('base64url');
-	setSetting(SESSION_HASH_KEY, hashSessionToken(token));
-	setSetting(SESSION_EXPIRES_KEY, String(Date.now() + SESSION_TTL_MS));
+	const now = Date.now();
+	sqlite
+		.prepare(`
+			INSERT INTO auth_sessions (token_hash, persistent, created_at, last_used_at, expires_at)
+			VALUES (?, ?, ?, ?, ?)
+		`)
+		.run(hashSessionToken(token), persistent ? 1 : 0, now, now, now + SESSION_TTL_MS);
 	return token;
 }
 
-export function hasValidSession(token: string | undefined): boolean {
-	const storedHash = getSetting(SESSION_HASH_KEY);
-	const expiresAt = Number(getSetting(SESSION_EXPIRES_KEY));
-	if (!token || !storedHash || !Number.isFinite(expiresAt)) return false;
-	if (expiresAt <= Date.now()) {
-		deleteSession();
-		return false;
+export function getValidSession(token: string | undefined): SessionRow | undefined {
+	if (!token) return undefined;
+
+	const tokenHash = hashSessionToken(token);
+	const session = sqlite
+		.prepare('SELECT token_hash, persistent, created_at, last_used_at, expires_at FROM auth_sessions WHERE token_hash = ?')
+		.get(tokenHash) as SessionRow | undefined;
+	if (!session) return undefined;
+
+	if (session.expires_at <= Date.now()) {
+		deleteSession(token);
+		return undefined;
 	}
 
-	return equalStrings(hashSessionToken(token), storedHash);
+	const now = Date.now();
+	sqlite
+		.prepare('UPDATE auth_sessions SET last_used_at = ?, expires_at = ? WHERE token_hash = ?')
+		.run(now, now + SESSION_TTL_MS, session.token_hash);
+
+	return { ...session, last_used_at: now, expires_at: now + SESSION_TTL_MS };
 }
 
-export function deleteSession(): void {
-	deleteSetting(SESSION_HASH_KEY);
-	deleteSetting(SESSION_EXPIRES_KEY);
+export function hasValidSession(token: string | undefined): boolean {
+	return Boolean(getValidSession(token));
+}
+
+export function deleteSession(token: string | undefined): void {
+	if (!token) return;
+	sqlite.prepare('DELETE FROM auth_sessions WHERE token_hash = ?').run(hashSessionToken(token));
+}
+
+export function deleteAllSessions(): void {
+	sqlite.prepare('DELETE FROM auth_sessions').run();
 }

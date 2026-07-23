@@ -36,6 +36,13 @@
       "when": 1784800001000,
       "tag": "0004_add_icon_color",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784800002000,
+      "tag": "0005_add_page_full_width",
+      "breakpoints": true
     }
   ]
 }
