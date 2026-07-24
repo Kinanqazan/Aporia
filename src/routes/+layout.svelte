@@ -19,7 +19,6 @@
 		Trash,
 		RotateCcw,
 		Edit3,
-		Unlock,
 		Lock,
 		FileDown,
 		MoreHorizontal,
@@ -93,8 +92,6 @@
 	let editingTitleText = $state('');
 	let draggedPageId = $state<string | null>(null);
 	let dropTarget = $state<{ id: string; placement: 'before' | 'inside' | 'after' } | null>(null);
-	let isLockRequestInFlight = $state(false);
-	
 	// Section Title States
 	let sectionTitle = $state(initialSectionTitle());
 	let isEditingSectionTitle = $state(false);
@@ -298,26 +295,6 @@
 	function selectSearchResult(result: any) {
 		isSearchOpen = false;
 		goto(`/${result.id}`);
-	}
-
-	async function togglePageLock() {
-		if (!currentPageId || isLockRequestInFlight) return;
-		const activePage = data.activePages?.find((page) => page.id === currentPageId);
-		if (!activePage) return;
-
-		isLockRequestInFlight = true;
-		try {
-			const response = await fetch(`/api/pages/${currentPageId}/lock`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ isLocked: activePage.isLocked !== 1 })
-			});
-			if (response.ok) await invalidateAll();
-		} catch (err) {
-			console.error('Lock update failed:', err);
-		} finally {
-			isLockRequestInFlight = false;
-		}
 	}
 
 	function startResizing(e: MouseEvent) {
@@ -1047,21 +1024,6 @@
 						<Menu size={isMobile ? 22 : 16} />
 					</button>
 				{/if}
-				{#if isMobile && currentPageId}
-					{@const activePage = data.activePages?.find(p => p.id === currentPageId)}
-					{#if activePage}
-						<button
-							class="icon-btn mobile-lock-btn"
-							type="button"
-							onclick={togglePageLock}
-							disabled={isLockRequestInFlight}
-							title={activePage.isLocked ? 'Unlock page' : 'Lock page'}
-							aria-label={activePage.isLocked ? 'Unlock page' : 'Lock page'}
-						>
-							{#if activePage.isLocked}<Lock size={isMobile ? 22 : 20} />{:else}<Unlock size={isMobile ? 22 : 20} />{/if}
-						</button>
-					{/if}
-				{/if}
 				{#if !isMobile}
 					<div class="breadcrumbs">
 						{#if currentPageId}
@@ -1075,16 +1037,6 @@
 											<PageIcon icon={crumb.icon} color={crumb.iconColor} size={14} />
 										</span>
 										<span>{crumb.title || 'Untitled'}</span>
-										<button
-											class="breadcrumb-lock-btn"
-											type="button"
-											onclick={togglePageLock}
-											disabled={isLockRequestInFlight}
-											title={crumb.isLocked ? 'Unlock page' : 'Lock page'}
-											aria-label={crumb.isLocked ? 'Unlock page' : 'Lock page'}
-										>
-											{#if crumb.isLocked}<Lock size={13} />{:else}<Unlock size={13} />{/if}
-										</button>
 									</span>
 								{:else}
 									<a href="/{crumb.id}" class="breadcrumb-item link">
@@ -1255,29 +1207,6 @@
 		min-height: 100vh;
 		width: 100%;
 	}
-	.breadcrumb-lock-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 22px;
-		height: 22px;
-		margin-left: 2px;
-		border-radius: 4px;
-		color: var(--text-muted);
-		vertical-align: middle;
-		transition: background var(--transition-speed), color var(--transition-speed);
-	}
-
-	.breadcrumb-lock-btn:hover {
-		background: var(--hover-icon);
-		color: var(--text-main);
-	}
-
-	.breadcrumb-lock-btn:disabled {
-		cursor: wait;
-		opacity: 0.55;
-	}
-
 	/* Sidebar Custom Additions */
 
 	.empty-tree-message {

@@ -135,6 +135,34 @@ export async function updatePage(
 	return result[0] || null;
 }
 
+// Persist content only if the page still has the same lock state and content
+// observed by the request handler. This closes the check-then-update race
+// between autosave and locking, and prevents concurrent writers from silently
+// overwriting one another.
+export async function updatePageContentConditionally(
+	id: string,
+	contentJson: string,
+	expected: { isLocked: number; contentJson: string }
+): Promise<PageNode | null> {
+	const now = new Date().toISOString();
+	const contentText = extractTextFromJson(contentJson);
+	const result = await db.update(pages)
+		.set({
+			contentJson,
+			contentText,
+			revision: sql`case when ${pages.contentJson} <> ${contentJson} then ${pages.revision} + 1 else ${pages.revision} end`,
+			updatedAt: now
+		})
+		.where(and(
+			eq(pages.id, id),
+			eq(pages.isLocked, expected.isLocked),
+			eq(pages.contentJson, expected.contentJson)
+		))
+		.returning() as PageNode[];
+
+	return result[0] || null;
+}
+
 // Move a page to a new parent and position
 export async function movePage(id: string, targetParentId: string | null, targetPosition: number): Promise<boolean> {
 	const now = new Date().toISOString();

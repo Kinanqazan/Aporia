@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { onMount, onDestroy } from 'svelte';
 	import { Editor, Extension, ResizableNodeView, mergeAttributes } from '@tiptap/core';
@@ -27,10 +28,10 @@
 	import { TableHeader } from '@tiptap/extension-table-header';
 	import { TableCell } from '@tiptap/extension-table-cell';
 	import { 
-		Cloud, CloudLightning, Plus, GripVertical, Trash2, Copy, 
+		CloudLightning, Plus, GripVertical, Trash2, Copy,
 		Heading1, Heading2, Heading3, Type, Quote, Code, 
 		List, ListOrdered, Bold, Italic, Link as LinkIcon, Palette,
-		CheckSquare, Minus, Table as TableIcon, ChevronRight, Lock,
+		CheckSquare, Minus, Table as TableIcon, ChevronRight, Lock, Unlock,
 		ChevronDown, Database, Image as ImageIcon, X, ZoomIn, ZoomOut, RotateCcw
 	} from 'lucide-svelte';
 
@@ -38,6 +39,11 @@
 	import { ICON_COLORS } from '$lib/icon-colors';
 	import PageIcon from '$lib/components/PageIcon.svelte';
 	import { constrainImageSizeToWidth } from '$lib/editor/image-resize';
+	import { createAutosaveController } from '$lib/editor/autosave-controller.js';
+	import {
+		restorePersistedDetailsOpenState,
+		synchronizeDetailsElement
+	} from '$lib/editor/details-open-state.js';
 
 	let { data } = $props();
 	
@@ -73,7 +79,7 @@
 	let iconInputText = $state('');
 
 	function selectIcon(newIcon: string) {
-		if (isLocked) return;
+		if (isLocked || isLockRequestInFlight) return;
 		icon = newIcon.trim();
 		if (icon === '📄') iconColor = null;
 		isIconPickerOpen = false;
@@ -81,9 +87,46 @@
 	}
 
 	function selectIconColor(newColor: string | null) {
-		if (isLocked) return;
+		if (isLocked || isLockRequestInFlight) return;
 		iconColor = newColor;
 		submitIconChange();
+	}
+
+	let isLockRequestInFlight = $state(false);
+
+	async function togglePageLock() {
+		if (isLockRequestInFlight) return;
+
+		// Snapshot the document before the editor becomes read-only so the lock
+		// barrier flushes the exact state the user sees.
+		const contentBeforeLock = !isLocked && editor ? editor.getJSON() : null;
+		isLockRequestInFlight = true;
+		try {
+			if (!isLocked && editor) {
+				triggerAutosave(JSON.stringify(contentBeforeLock ?? editor.getJSON()));
+			}
+			// Locking waits for normal edits; unlocking waits for any task-checkbox
+			// save that was allowed while the page was read-only.
+			const saved = await flushPendingSave();
+			if (!saved) return;
+
+			const response = await fetch(`/api/pages/${data.pageRecord.id}/lock`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ isLocked: !isLocked })
+			});
+			const result = await response.json();
+			if (!response.ok || !result.success) {
+				throw new Error(result.error || 'Unable to update page lock');
+			}
+			isLocked = result.isLocked;
+			await invalidateAll();
+			if (!isLocked && editor) restorePersistedDetailsOpenState(editor);
+		} catch (err) {
+			console.error('Lock update failed:', err);
+		} finally {
+			isLockRequestInFlight = false;
+		}
 	}
 
 	function submitIconChange() {
@@ -96,9 +139,13 @@
 	let editorElement = $state<HTMLDivElement>();
 	let editor = $state<Editor>();
 	let editorPageId = $state<string | null>(null);
-	let autosaveStatus = $state<'saved' | 'saving' | 'error'>('saved');
-	let autosaveTimeout: any;
-	let saveInFlight: Promise<void> | null = null;
+	let autosaveStatus = $state<'idle' | 'saving' | 'error'>('idle');
+	const autosaveController = createAutosaveController({
+		save: savePageContent,
+		onStatusChange: (status) => autosaveStatus = status,
+		debounceMs: 600,
+		successIndicatorMs: 300
+	});
 	let toggleCount = $state(0);
 	let openToggleCount = $state(0);
 
@@ -328,24 +375,41 @@
 			return (props) => {
 				const detailsNodeView = createDetailsNodeView(props);
 				if (!detailsNodeView) return detailsNodeView;
+				let currentNode = props.node;
+				let openStateSyncTimeout: ReturnType<typeof setTimeout> | null = null;
 				
 				const updateHeadingLevel = (node: typeof props.node) => {
 					detailsNodeView.dom.setAttribute('data-heading-level', String(node.attrs.level));
 				};
+				const scheduleOpenStateSync = () => {
+					if (openStateSyncTimeout !== null) clearTimeout(openStateSyncTimeout);
+					openStateSyncTimeout = setTimeout(() => {
+						openStateSyncTimeout = null;
+						synchronizeDetailsElement(detailsNodeView.dom, Boolean(currentNode.attrs.open));
+					}, 0);
+				};
 				updateHeadingLevel(props.node);
+				scheduleOpenStateSync();
 
 				const parentUpdate = detailsNodeView.update?.bind(detailsNodeView);
+				const parentDestroy = detailsNodeView.destroy?.bind(detailsNodeView);
 
 				return {
 					...detailsNodeView,
 					update: (updatedNode, decorations, innerDecorations) => {
 						const didUpdate = parentUpdate?.(updatedNode, decorations, innerDecorations) ?? true;
 						if (didUpdate) {
+							currentNode = updatedNode;
 							updateHeadingLevel(updatedNode);
+							scheduleOpenStateSync();
+							}
+							return didUpdate;
+						},
+						destroy: () => {
+							if (openStateSyncTimeout !== null) clearTimeout(openStateSyncTimeout);
+							parentDestroy?.();
 						}
-						return didUpdate;
-					}
-				};
+					};
 			};
 		}
 	});
@@ -806,11 +870,14 @@
 		isLocked = data.pageRecord.isLocked === 1;
 
 		// Flush any pending save for the previous page immediately before switching.
-		// This preserves the last edit even if the user navigates before the 1s debounce.
-		clearTimeout(autosaveTimeout);
-		flushPendingSave();
+		// This preserves the last edit even if the user navigates before the debounce.
+		void flushPendingSave();
 		
 		if (editor && editorPageId !== data.pageRecord.id) {
+			autosaveController.markSaved({
+				pageId: data.pageRecord.id,
+				contentJson: data.pageRecord.contentJson
+			});
 			editor.destroy();
 			editor = undefined;
 			editorElement?.replaceChildren();
@@ -1150,8 +1217,9 @@
 	}
 
 	$effect(() => {
-		editor?.setEditable(!isLocked);
-		if (isLocked) {
+		const shouldBeEditable = !isLocked && !isLockRequestInFlight;
+		if (editor && editor.isEditable !== shouldBeEditable) editor.setEditable(shouldBeEditable);
+		if (isLocked || isLockRequestInFlight) {
 			isIconPickerOpen = false;
 			isColorMenuOpen = false;
 			isSlashMenuOpen = false;
@@ -1270,6 +1338,10 @@
 	});
 
 	onMount(() => {
+		autosaveController.markSaved({
+			pageId: data.pageRecord.id,
+			contentJson: data.pageRecord.contentJson
+		});
 		createEditor();
 		const handlePageHide = () => {
 			void flushPendingSave({ keepalive: true });
@@ -1294,10 +1366,10 @@
 
 	onDestroy(() => {
 		void flushPendingSave({ keepalive: true });
+		autosaveController.destroy();
 		if (editor) {
 			editor.destroy();
 		}
-		clearTimeout(autosaveTimeout);
 		if (typeof window !== 'undefined') {
 			window.removeEventListener('mousemove', handleMouseMove);
 			window.removeEventListener('click', handleGlobalClick);
@@ -1472,45 +1544,31 @@
 		openImageViewer(image);
 	}
 
-	// Holds the content and page ID for any pending unsaved edit.
-	let pendingSave: { pageId: string; contentJson: string } | null = null;
+	async function flushPendingSave(options: { keepalive?: boolean } = {}): Promise<boolean> {
+		return autosaveController.flush(options);
+	}
 
-	async function flushPendingSave(options: { keepalive?: boolean } = {}) {
-		while (saveInFlight || pendingSave) {
-			if (saveInFlight) {
-				await saveInFlight;
-				continue;
-			}
-
-			const save = pendingSave;
-			if (!save) continue;
-			pendingSave = null;
-			saveInFlight = (async () => {
-				const controller = new AbortController();
-				const timeoutId = setTimeout(() => controller.abort(), 5000);
-				try {
-					const response = await fetch(`/api/pages/${save.pageId}`, {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ contentJson: save.contentJson }),
-						keepalive: options.keepalive,
-						signal: controller.signal
-					});
-					const result = await response.json();
-					autosaveStatus = result.success ? 'saved' : 'error';
-				} catch (err) {
-					console.error('Autosave failed:', err);
-					autosaveStatus = 'error';
-				} finally {
-					clearTimeout(timeoutId);
-				}
-			})();
-
-			try {
-				await saveInFlight;
-			} finally {
-				saveInFlight = null;
-			}
+	async function savePageContent(
+		save: { pageId: string; contentJson: string },
+		options: { keepalive?: boolean } = {}
+	): Promise<boolean> {
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), 5000);
+		try {
+			const response = await fetch(`/api/pages/${save.pageId}`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ contentJson: save.contentJson }),
+				keepalive: options.keepalive,
+				signal: controller.signal
+			});
+			const result = await response.json();
+			return response.ok && result.success === true;
+		} catch (err) {
+			console.error('Autosave failed:', err);
+			return false;
+		} finally {
+			clearTimeout(timeoutId);
 		}
 	}
 
@@ -1520,11 +1578,8 @@
 		if (isLocked && !options.allowWhenLocked) {
 			return;
 		}
-		autosaveStatus = 'saving';
-		// Capture page ID immediately so a navigation mid-debounce can't corrupt another page
-		pendingSave = { pageId: data.pageRecord.id, contentJson };
-		clearTimeout(autosaveTimeout);
-		autosaveTimeout = setTimeout(flushPendingSave, 1000);
+		// Capture page ID immediately so a navigation mid-debounce can't corrupt another page.
+		autosaveController.queue({ pageId: data.pageRecord.id, contentJson });
 	}
 
 	let titleForm: HTMLFormElement;
@@ -2039,30 +2094,38 @@
 </script>
 
 <article class="editor-page">
-	<!-- Autosave Status Floating Indicator -->
-	<div class="autosave-indicator" class:status-saving={autosaveStatus === 'saving'} class:status-error={autosaveStatus === 'error'}>
-		{#if isLocked}
-			<Lock size={14} />
-			<span>Locked</span>
-		{:else if autosaveStatus === 'saved'}
-			<Cloud size={14} />
-			<span>Saved</span>
-		{:else if autosaveStatus === 'error'}
-			<CloudLightning size={14} />
-			<span>Save failed</span>
-		{:else}
-			<CloudLightning size={14} />
-			<span>Saving...</span>
+	<!-- Combined save status and page lock controls -->
+	<div class="page-status-controls">
+		{#if autosaveStatus === 'saving' || autosaveStatus === 'error'}
+			<div
+				class="autosave-indicator"
+				class:status-saving={autosaveStatus === 'saving'}
+				class:status-error={autosaveStatus === 'error'}
+				role="status"
+				aria-label={autosaveStatus === 'error' ? 'Save failed' : 'Saving'}
+			>
+				<CloudLightning size={18} />
+			</div>
 		{/if}
+		<button
+			type="button"
+			class="page-lock-btn"
+			disabled={isLockRequestInFlight}
+			onclick={togglePageLock}
+			title={isLocked ? 'Unlock page' : 'Lock page'}
+			aria-label={isLocked ? 'Unlock page' : 'Lock page'}
+		>
+			{#if isLocked}<Lock size={18} />{:else}<Unlock size={18} />{/if}
+		</button>
 	</div>
 
 	<!-- Page Icon emoji picker input -->
-	<div class="page-icon-wrapper">
+	<div class="page-icon-wrapper" class:locked={isLocked || isLockRequestInFlight}>
 		<!-- Clickable Icon button -->
 		<button 
 			type="button" 
 			class="icon-btn-picker" 
-			disabled={isLocked}
+			disabled={isLocked || isLockRequestInFlight}
 			onclick={() => isIconPickerOpen = !isIconPickerOpen}
 			title="Change page icon"
 		>
@@ -2080,7 +2143,7 @@
 			<input type="hidden" name="iconColor" value={iconColor || ''} />
 		</form>
 
-		{#if isIconPickerOpen}
+		{#if isIconPickerOpen && !isLockRequestInFlight}
 			<!-- svelte-ignore a11y_click_events_have_key_events -->
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div class="icon-picker-overlay" onclick={() => isIconPickerOpen = false}></div>
@@ -2154,7 +2217,7 @@
 				class:arabic-text-input={containsArabic(title)}
 				placeholder="Untitled"
 				spellcheck="false"
-				disabled={isLocked}
+				disabled={isLocked || isLockRequestInFlight}
 			/>
 		</form>
 		{#if !isLocked && toggleCount > 0}
@@ -2742,24 +2805,53 @@
 		padding: 2px 8px 4px;
 	}
 
-	/* Autosave Floating indicator */
-	.autosave-indicator {
+	/* Combined save status and page lock controls */
+	.page-status-controls {
 		position: fixed;
 		top: calc(10px + env(safe-area-inset-top));
-		right: max(16px, env(safe-area-inset-right));
+		right: max(20px, env(safe-area-inset-right));
 		display: inline-flex;
 		align-items: center;
-		gap: 6px;
+		gap: 4px;
+		z-index: 1000;
+	}
+
+	.autosave-indicator,
+	.page-lock-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 34px;
+		height: 34px;
 		font-size: 12px;
-		color: var(--text-muted);
-		padding: 4px 8px;
+		padding: 0;
 		border-radius: 4px;
 		background-color: var(--bg-sidebar);
 		border: 1px solid var(--border-color);
 		user-select: none;
-		pointer-events: none;
 		transition: color var(--transition-speed), border-color var(--transition-speed);
-		z-index: 1000;
+	}
+
+	.autosave-indicator {
+		color: var(--text-muted);
+		pointer-events: none;
+	}
+
+	.page-lock-btn {
+		color: var(--text-muted);
+		cursor: pointer;
+		border: none;
+		background: transparent;
+	}
+
+	.page-lock-btn:hover {
+		color: var(--text-main);
+		background: transparent;
+	}
+
+	.page-lock-btn:disabled {
+		cursor: wait;
+		opacity: 0.55;
 	}
 
 	.autosave-indicator.status-saving {
@@ -2772,7 +2864,7 @@
 		border-color: var(--error-color);
 	}
 
-	:global(.mobile) .autosave-indicator {
+	:global(.mobile) .page-status-controls {
 		top: calc(18px + env(safe-area-inset-top));
 	}
 
@@ -2781,6 +2873,10 @@
 		user-select: none;
 		display: inline-block;
 		position: relative;
+	}
+
+	.page-icon-wrapper.locked {
+		pointer-events: none;
 	}
 
 	.icon-btn-picker {

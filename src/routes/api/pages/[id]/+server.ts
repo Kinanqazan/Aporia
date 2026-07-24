@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getPageById, updatePage } from '$lib/server/pages';
+import { getPageById, updatePageContentConditionally } from '$lib/server/pages';
 import { validateImageReferences } from '$lib/server/assets';
 
 function isTaskCheckboxOnlyChange(previous: unknown, next: unknown): boolean {
@@ -94,9 +94,19 @@ export const POST: RequestHandler = async ({ params, request }) => {
 				return json({ success: false, error: 'Page is locked' }, { status: 423 });
 			}
 		}
-		const page = await updatePage(id, { contentJson });
+		const page = await updatePageContentConditionally(id, contentJson, {
+			isLocked: existingPage.isLocked,
+			contentJson: existingPage.contentJson
+		});
 		if (!page) {
-			return json({ success: false, error: 'Page not found' }, { status: 404 });
+			const currentPage = await getPageById(id);
+			if (!currentPage) {
+				return json({ success: false, error: 'Page not found' }, { status: 404 });
+			}
+			if (currentPage.isLocked && !existingPage.isLocked) {
+				return json({ success: false, error: 'Page was locked while saving' }, { status: 423 });
+			}
+			return json({ success: false, error: 'Page changed while saving' }, { status: 409 });
 		}
 		
 		return json({ success: true });
