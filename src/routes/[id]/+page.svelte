@@ -153,53 +153,6 @@
 	let bubbleMenuElement = $state<HTMLDivElement>();
 	let isColorMenuOpen = $state(false);
 
-	// Table interaction states
-	let isTableHovered = $state(false);
-	let activeTableNode = $state<HTMLTableElement | null>(null);
-
-	// Column/Row Handles states
-	let activeCellNode = $state<HTMLElement | null>(null);
-	let columnHandlePosition = $state({ top: 0, left: 0 });
-	let rowHandlePosition = $state({ top: 0, left: 0 });
-	let isColMenuOpen = $state(false);
-	let isRowMenuOpen = $state(false);
-	let colMenuPosition = $state({ top: 0, left: 0 });
-	let rowMenuPosition = $state({ top: 0, left: 0 });
-
-	function handleColumnHandleClick(e: MouseEvent) {
-		e.stopPropagation();
-		if (isLocked || !editor || !activeCellNode) return;
-		
-		// Focus editor and select the cell
-		editor.commands.focus();
-		const pos = editor.view.posAtDOM(activeCellNode, 0);
-		editor.commands.setTextSelection(pos);
-		
-		colMenuPosition = {
-			top: columnHandlePosition.top + 16,
-			left: columnHandlePosition.left
-		};
-		isColMenuOpen = true;
-		isRowMenuOpen = false;
-	}
-
-	function handleRowHandleClick(e: MouseEvent) {
-		e.stopPropagation();
-		if (isLocked || !editor || !activeCellNode) return;
-		
-		// Focus editor and select the cell
-		editor.commands.focus();
-		const pos = editor.view.posAtDOM(activeCellNode, 0);
-		editor.commands.setTextSelection(pos);
-		
-		rowMenuPosition = {
-			top: rowHandlePosition.top,
-			left: rowHandlePosition.left + 16
-		};
-		isRowMenuOpen = true;
-		isColMenuOpen = false;
-	}
-
 	// Slash Command states
 	let isSlashMenuOpen = $state(false);
 	let slashMenuPosition = $state({ top: 0, left: 0 });
@@ -1225,11 +1178,6 @@
 			isSlashMenuOpen = false;
 			isGutterVisible = false;
 			activeBlockNode = null;
-			isTableHovered = false;
-			activeTableNode = null;
-			activeCellNode = null;
-			isColMenuOpen = false;
-			isRowMenuOpen = false;
 		}
 	});
 
@@ -1392,87 +1340,10 @@
 
 		const editorRect = editorElement.getBoundingClientRect();
 		const target = e.target as HTMLElement;
-
-		// If we are already hovering a table, check if mouse is still near it
-		if (activeTableNode && isTableHovered) {
-			const rect = activeTableNode.getBoundingClientRect();
-			// Keep the handles alive while the pointer crosses the small gap around
-			// the table, to make the menu easy to reach.
-			const isNearTable = 
-				e.clientX >= rect.left - 30 &&
-				e.clientX <= rect.right + 30 &&
-				e.clientY >= rect.top - 30 &&
-				e.clientY <= rect.bottom + 30;
-			
-			if (isNearTable) {
-				isGutterVisible = false;
-				// Update handles to currently hovered cell inside table
-				const cell = target.closest('td, th') as HTMLElement | null;
-				if (cell) {
-					activeCellNode = cell;
-					const cellRect = cell.getBoundingClientRect();
-					columnHandlePosition = {
-						left: cellRect.left - editorRect.left + (cellRect.width / 2) - 12,
-						top: rect.top - editorRect.top - 12
-					};
-					rowHandlePosition = {
-						left: rect.left - editorRect.left - 12,
-						top: cellRect.top - editorRect.top + (cellRect.height / 2) - 12
-					};
-				}
-				return;
-			}
-		}
-
-		// Check if mouse is hovering over a table cell (td/th)
-		const cell = target.closest('td, th') as HTMLElement | null;
-		const table = cell?.closest('table') as HTMLTableElement | null;
-
-		if (table && cell) {
-			activeTableNode = table;
-			activeCellNode = cell;
-			const tableRect = table.getBoundingClientRect();
-			const cellRect = cell.getBoundingClientRect();
-			
-			// Position column handle centered above the cell
-			columnHandlePosition = {
-				left: cellRect.left - editorRect.left + (cellRect.width / 2) - 12,
-				top: tableRect.top - editorRect.top - 12
-			};
-			
-			// Position row handle centered to the left of the cell
-			rowHandlePosition = {
-				left: tableRect.left - editorRect.left - 12,
-				top: cellRect.top - editorRect.top + (cellRect.height / 2) - 12
-			};
-
-			isTableHovered = true;
-			isGutterVisible = false;
-			return;
-		} else {
-			isTableHovered = false;
-			activeTableNode = null;
-			activeCellNode = null;
-		}
-		
-		// Keep the current handle alive while the pointer crosses the gap between
-		// the block and its dots, so it remains clickable.
-		if (isGutterVisible &&
-			e.clientX >= editorRect.left + gutterLeft - 8 &&
-			e.clientX <= editorRect.left + gutterLeft + 28 &&
-			e.clientY >= editorRect.top + gutterTop - 8 &&
-			e.clientY <= editorRect.top + gutterTop + 32) {
-			return;
-		}
-
-		// Ensure mouse is horizontally near the editor bounds.
-		if (e.clientX < editorRect.left - 60 || e.clientX > editorRect.right + 20) {
+		if (target.closest('table')) {
 			isGutterVisible = false;
 			return;
 		}
-
-		// Find any block node at the cursor Y — including blocks inside columns
-		// Filter out column-layout and column wrapper divs BEFORE find(),
 		// otherwise the wrapper's bounding rect matches first and steals the hit.
 		const allBlocks = Array.from(editorElement.querySelectorAll(
 			'.ProseMirror > *, .ProseMirror [data-type="detailsContent"] > *, .ProseMirror [data-type="column"] > *'
@@ -1526,10 +1397,6 @@
 		}
 		if (!target.closest('.color-picker-dropdown') && !target.closest('.bubble-color-btn')) {
 			isColorMenuOpen = false;
-		}
-		if (!target.closest('.table-handle-menu') && !target.closest('.table-col-handle') && !target.closest('.table-row-handle')) {
-			isColMenuOpen = false;
-			isRowMenuOpen = false;
 		}
 	}
 
@@ -2362,120 +2229,6 @@
 
 		<div bind:this={editorElement} class="tiptap-editor-element"></div>
 
-		<!-- Table controls: column/row handles open the insert/delete menus. -->
-		{#if !isLocked && isTableHovered && activeTableNode}
-			<!-- Column Handle (above cell) -->
-			<button 
-				type="button"
-				class="table-col-handle"
-				style="top: {columnHandlePosition.top}px; left: {columnHandlePosition.left}px;"
-				onclick={handleColumnHandleClick}
-				title="Column options"
-			></button>
-
-			<!-- Row Handle (left of cell) -->
-			<button 
-				type="button"
-				class="table-row-handle"
-				style="top: {rowHandlePosition.top}px; left: {rowHandlePosition.left}px;"
-				onclick={handleRowHandleClick}
-				title="Row options"
-			></button>
-		{/if}
-
-		<!-- Column Options Dropdown -->
-		{#if !isLocked && isColMenuOpen}
-			<div 
-				class="table-handle-menu"
-				style="top: {colMenuPosition.top}px; left: {colMenuPosition.left}px;"
-			>
-				<button 
-					type="button" 
-					class="menu-item-action"
-					onclick={() => {
-						if (isLocked) return;
-						editor?.chain().focus().deleteColumn().run();
-						isColMenuOpen = false;
-						isTableHovered = false;
-					}}
-				>
-					<Trash2 size={13} class="menu-icon" />
-					<span>Delete column</span>
-				</button>
-				<button 
-					type="button" 
-					class="menu-item-action"
-					onclick={() => {
-						if (isLocked) return;
-						editor?.chain().focus().addColumnBefore().run();
-						isColMenuOpen = false;
-					}}
-				>
-					<Plus size={13} class="menu-icon" />
-					<span>Insert left</span>
-				</button>
-				<button 
-					type="button" 
-					class="menu-item-action"
-					onclick={() => {
-						if (isLocked) return;
-						editor?.chain().focus().addColumnAfter().run();
-						isColMenuOpen = false;
-					}}
-				>
-					<Plus size={13} class="menu-icon" />
-					<span>Insert right</span>
-				</button>
-			</div>
-		{/if}
-
-		<!-- Row Options Dropdown -->
-		{#if !isLocked && isRowMenuOpen}
-			<div 
-				class="table-handle-menu"
-				style="top: {rowMenuPosition.top}px; left: {rowMenuPosition.left}px;"
-			>
-				<button 
-					type="button" 
-					class="menu-item-action"
-					onclick={() => {
-						if (isLocked) return;
-						editor?.chain().focus().deleteRow().run();
-						isRowMenuOpen = false;
-						isTableHovered = false;
-					}}
-				>
-					<Trash2 size={13} class="menu-icon" />
-					<span>Delete row</span>
-				</button>
-				<button 
-					type="button" 
-					class="menu-item-action"
-					onclick={() => {
-						if (isLocked) return;
-						editor?.chain().focus().addRowBefore().run();
-						isRowMenuOpen = false;
-					}}
-				>
-					<Plus size={13} class="menu-icon" />
-					<span>Insert above</span>
-				</button>
-				<button 
-					type="button" 
-					class="menu-item-action"
-					onclick={() => {
-						if (isLocked) return;
-						editor?.chain().focus().addRowAfter().run();
-						isRowMenuOpen = false;
-					}}
-				>
-					<Plus size={13} class="menu-icon" />
-					<span>Insert below</span>
-				</button>
-			</div>
-		{/if}
-
-		<!-- Svelte Bubble Menu (Managed by Tiptap BubbleMenu extension) -->
 		<div bind:this={bubbleMenuElement} class="editor-bubble-menu" class:locked={isLocked}>
 			{#if editor}
 				<button 
@@ -3645,47 +3398,4 @@
 		margin-top: 1px;
 	}
 
-	/* Row and Column selection handles */
-	.table-col-handle, .table-row-handle {
-		position: absolute;
-		background-color: var(--border-color);
-		border-radius: 4px;
-		cursor: pointer;
-		z-index: 100;
-		opacity: 0.5;
-		transition: opacity var(--transition-speed), background-color var(--transition-speed), transform var(--transition-speed);
-		border: 1px solid var(--border-color);
-		box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-	}
-
-	.table-col-handle {
-		width: 24px;
-		height: 8px;
-	}
-
-	.table-row-handle {
-		width: 8px;
-		height: 24px;
-	}
-
-	.table-col-handle:hover, .table-row-handle:hover {
-		opacity: 1;
-		background-color: var(--accent-color);
-		border-color: var(--accent-color);
-		transform: scale(1.1);
-	}
-
-	.table-handle-menu {
-		position: absolute;
-		background-color: var(--bg-canvas);
-		border: 1px solid var(--border-color);
-		border-radius: 6px;
-		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-		padding: 4px;
-		width: 140px;
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
-		z-index: 210;
-	}
 </style>

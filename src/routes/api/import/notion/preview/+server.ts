@@ -8,7 +8,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
 
 	const formData = await request.formData();
 	const archive = formData.get('archive');
-	if (!(archive instanceof File)) return json({ success: false, error: 'A Notion HTML or ZIP export file is required' }, { status: 400 });
+	if (!(archive instanceof File)) return json({ success: false, error: 'A Notion HTML, Markdown, CSV, or ZIP export file is required' }, { status: 400 });
 
 	try {
 		return json({ success: true, preview: await previewNotionHtmlImport(archive) });

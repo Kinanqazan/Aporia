@@ -103,6 +103,26 @@ try {
 	assert.equal(standaloneImages.length, 1);
 	assert.equal(sqlite.prepare('select count(*) as count from assets').get().count, 5, 'embedded HTML images should create assets');
 
+	const csvFile = new File(['Name,Status,Estimate\nTask A,Done,3\nTask B,Todo,5\n'], 'Tasks.csv', { type: 'text/csv' });
+	const csvPreview = await importer.previewNotionHtmlImport(csvFile);
+	assert.equal(csvPreview.pageCount, 1);
+	assert.equal(csvPreview.databaseCount, 1);
+	await importer.applyNotionHtmlImport(csvFile);
+	const csvPage = (await pagesModule.getActivePages()).find((page) => page.title === 'Tasks');
+	assert.ok(csvPage, 'the imported CSV database page should exist');
+	const csvDocument = JSON.parse(csvPage.contentJson);
+	assert.equal(csvDocument.content[0].type, 'databaseBlock');
+	assert.equal(csvDocument.content[0].attrs.columns[1].type, 'status');
+
+	const markdownFile = new File(['# Projects\n\n| Name | Status |\n| --- | --- |\n| Alpha | Done |\n'], 'Projects.md', { type: 'text/markdown' });
+	const markdownPreview = await importer.previewNotionHtmlImport(markdownFile);
+	assert.equal(markdownPreview.databaseCount, 1);
+	await importer.applyNotionHtmlImport(markdownFile);
+	const markdownPage = (await pagesModule.getActivePages()).find((page) => page.title === 'Projects');
+	assert.ok(markdownPage, 'the imported Markdown page should exist');
+	const markdownDocument = JSON.parse(markdownPage.contentJson);
+	assert.equal(markdownDocument.content[0].type, 'databaseBlock');
+
 	console.log('Notion image import regression checks passed');
 } finally {
 	if (sqlite && sqlite.open) sqlite.close();

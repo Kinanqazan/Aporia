@@ -1,4 +1,4 @@
-import { getSchema } from '@tiptap/core';
+import { Node, getSchema } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import Details, { DetailsContent, DetailsSummary } from '@tiptap/extension-details';
@@ -23,6 +23,22 @@ const ToggleHeading = Details.extend({
 	}
 });
 
+const DatabaseBlock = Node.create({
+	name: 'databaseBlock',
+	group: 'block',
+	atom: true,
+	addAttributes() {
+		return {
+			columns: { default: [] },
+			rows: { default: [] },
+			options: { default: {} },
+			showSummary: { default: false },
+			summary: { default: {} },
+			sort: { default: null }
+		};
+	}
+});
+
 const schema = getSchema([
 	StarterKit.configure({
 		link: false,
@@ -35,6 +51,7 @@ const schema = getSchema([
 	Link,
 	TaskList,
 	TaskItem.configure({ nested: true }),
+	DatabaseBlock,
 	Table,
 	TableRow,
 	TableHeader,

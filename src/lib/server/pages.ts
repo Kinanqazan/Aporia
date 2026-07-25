@@ -395,6 +395,17 @@ function walkNode(node: any): string {
 	if (node.type === 'text' && typeof node.text === 'string') {
 		text += node.text;
 	}
+	if (node.type === 'databaseBlock') {
+		const columns = Array.isArray(node.attrs?.columns) ? node.attrs.columns : [];
+		const rows = Array.isArray(node.attrs?.rows) ? node.attrs.rows : [];
+		text += ' ' + columns.map((column: any) => String(column?.name || '')).join(' ');
+		for (const row of rows) {
+			text += ' ' + columns.map((column: any) => {
+				const value = row?.[column?.id];
+				return Array.isArray(value) ? value.join(' ') : value == null ? '' : String(value);
+			}).join(' ');
+		}
+	}
 	if (Array.isArray(node.content)) {
 		text += ' ' + node.content.map(walkNode).join(' ');
 	}

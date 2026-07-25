@@ -7,6 +7,7 @@ import { pages } from '$lib/server/schema';
 import { extractTextFromJson, generateId, getActivePages } from '$lib/server/pages';
 import { AssetValidationError, publicAssetUrl, removeAsset, storeImageBytes, validateImageBytes, validateImageReferences } from '$lib/server/assets';
 import { validateTiptapDocument } from './validation';
+import { countMarkdownTables, csvToHtml, markdownToHtml, titleFromMarkdown } from './formats';
 
 const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
 const MAX_ARCHIVE_FILES = 1_000;
@@ -37,10 +38,12 @@ type PreparedArchive = {
 	pages: ImportedPage[];
 	files: Map<string, Uint8Array>;
 	warnings: Set<string>;
+	databaseCount: number;
 };
 
 export type NotionImportPreview = {
 	pageCount: number;
+	databaseCount: number;
 	imageCount: number;
 	remoteImageCount: number;
 	skippedImageCount: number;
@@ -135,22 +138,31 @@ async function assertValidImportedDocument(document: TiptapNode, pageTitle: stri
 
 async function prepareArchive(archive: File): Promise<PreparedArchive> {
 	const extension = extname(archive.name).toLowerCase();
-	if (extension !== '.zip' && extension !== '.html' && extension !== '.htm') {
-		throw new NotionImportError('Choose a Notion HTML or ZIP export file');
+	if (!['.zip', '.html', '.htm', '.md', '.markdown', '.csv'].includes(extension)) {
+		throw new NotionImportError('Choose a Notion HTML, Markdown, CSV, or ZIP export file');
 	}
 	if (archive.size === 0) throw new NotionImportError('The selected import file is empty');
 	if (archive.size > MAX_ARCHIVE_BYTES) {
 		throw new NotionImportError('Notion import files must be 50 MB or smaller');
 	}
 
-	if (extension === '.html' || extension === '.htm') {
-		const html = new TextDecoder().decode(new Uint8Array(await archive.arrayBuffer()));
-		if (!html.trim()) throw new NotionImportError('The selected HTML file is empty');
+	if (extension !== '.zip') {
+		const text = new TextDecoder().decode(new Uint8Array(await archive.arrayBuffer()));
+		if (!text.trim()) throw new NotionImportError('The selected import file is empty');
 		const path = normalizeArchivePath(basename(archive.name)) || 'Page.html';
+		const isCsv = extension === '.csv';
+		const isMarkdown = extension === '.md' || extension === '.markdown';
+		const title = isCsv
+			? cleanTitle(basename(path, extension))
+			: isMarkdown
+				? titleFromMarkdown(text, cleanTitle(basename(path, extension)))
+				: titleFromHtml(text, path);
+		const html = isCsv ? csvToHtml(text, title) : isMarkdown ? markdownToHtml(text) : text;
 		return {
-			pages: [{ path, parentPath: null, position: 0, title: titleFromHtml(html, path), html }],
+			pages: [{ path, parentPath: null, position: 0, title, html }],
 			files: new Map(),
-			warnings: new Set(['Standalone HTML files do not include neighboring local image files.'])
+			warnings: isCsv || isMarkdown ? new Set() : new Set(['Standalone HTML files do not include neighboring local image files.']),
+			databaseCount: isCsv ? 1 : isMarkdown ? countMarkdownTables(text) : 0
 		};
 	}
 
@@ -158,32 +170,51 @@ async function prepareArchive(archive: File): Promise<PreparedArchive> {
 
 	const warnings = new Set<string>();
 	let htmlEntries = findHtmlEntries(files);
-	if (htmlEntries.length === 0) {
+	let markdownEntries = findMarkdownEntries(files);
+	let csvEntries = findCsvEntries(files);
+	if (htmlEntries.length === 0 && markdownEntries.length === 0 && csvEntries.length === 0) {
 		const nestedArchives = [...files.entries()].filter(([path]) => extname(path).toLowerCase() === '.zip');
 		if (nestedArchives.length === 1) {
 			files = await readZipFiles(nestedArchives[0][1], 'The embedded Notion export');
 			htmlEntries = findHtmlEntries(files);
+			markdownEntries = findMarkdownEntries(files);
+			csvEntries = findCsvEntries(files);
 		}
 	}
 
-	if (htmlEntries.length === 0) {
-		throw new NotionImportError('No Notion HTML pages were found in this ZIP');
+	if (htmlEntries.length === 0 && markdownEntries.length === 0 && csvEntries.length === 0) {
+		throw new NotionImportError('No Notion HTML, Markdown, or CSV pages were found in this ZIP');
 	}
 
-	const pagePaths = new Set(htmlEntries.map((entry) => entry.path));
-	const pages = htmlEntries.map((entry) => ({
-		path: entry.path,
-		parentPath: findParentPath(entry.path, pagePaths),
-		position: entry.position,
-		title: titleFromHtml(entry.html, entry.path),
-		html: entry.html
-	}));
+	const pagePaths = new Set([...htmlEntries, ...markdownEntries, ...csvEntries].map((entry) => entry.path));
+	const pages = [
+		...htmlEntries.map((entry) => ({
+			path: entry.path,
+			parentPath: findParentPath(entry.path, pagePaths),
+			position: entry.position,
+			title: titleFromHtml(entry.html, entry.path),
+			html: entry.html
+		})),
+		...markdownEntries.map((entry) => ({
+			path: entry.path,
+			parentPath: findParentPath(entry.path, pagePaths),
+			position: entry.position,
+			title: titleFromMarkdown(entry.text, cleanTitle(basename(entry.path, extname(entry.path)))),
+			html: markdownToHtml(entry.text)
+		})),
+		...csvEntries.map((entry) => {
+			const title = cleanTitle(basename(entry.path, extname(entry.path)));
+			return {
+				path: entry.path,
+				parentPath: findParentPath(entry.path, pagePaths),
+				position: entry.position,
+				title,
+				html: csvToHtml(entry.text, title)
+			};
+		})
+	];
 
-	if ([...files.keys()].some((path) => extname(path).toLowerCase() === '.csv')) {
-		warnings.add('CSV files were found but database import is not available yet.');
-	}
-
-	return { pages, files, warnings };
+	return { pages, files, warnings, databaseCount: csvEntries.length + markdownEntries.reduce((count, entry) => count + countMarkdownTables(entry.text), 0) };
 }
 
 async function readZipFiles(contents: ArrayBuffer | Uint8Array, label: string): Promise<Map<string, Uint8Array>> {
@@ -221,13 +252,26 @@ async function readZipFiles(contents: ArrayBuffer | Uint8Array, label: string): 
 
 function findHtmlEntries(files: Map<string, Uint8Array>) {
 	return [...files.entries()]
-		.filter(([path]) => extname(path).toLowerCase() === '.html' && path.toLowerCase() !== 'index.html')
-		.map(([path, bytes], position) => ({ path, position, html: new TextDecoder().decode(bytes) }));
+		.map(([path, bytes], position) => ({ path, position, html: new TextDecoder().decode(bytes) }))
+		.filter(({ path }) => ['.html', '.htm'].includes(extname(path).toLowerCase()) && path.toLowerCase() !== 'index.html');
+}
+
+function findMarkdownEntries(files: Map<string, Uint8Array>) {
+	return [...files.entries()]
+		.map(([path, bytes], position) => ({ path, position, text: new TextDecoder().decode(bytes) }))
+		.filter(({ path }) => ['.md', '.markdown'].includes(extname(path).toLowerCase()));
+}
+
+function findCsvEntries(files: Map<string, Uint8Array>) {
+	return [...files.entries()]
+		.map(([path, bytes], position) => ({ path, position, text: new TextDecoder().decode(bytes) }))
+		.filter(({ path }) => extname(path).toLowerCase() === '.csv');
 }
 
 function previewFrom(prepared: PreparedArchive, stats: ImportStats): NotionImportPreview {
 	return {
 		pageCount: prepared.pages.length,
+		databaseCount: prepared.databaseCount,
 		imageCount: stats.imageCount,
 		remoteImageCount: stats.remoteImageCount,
 		skippedImageCount: stats.skippedImageCount,
@@ -373,8 +417,10 @@ function hasMalformedPercentEncoding(source: string): boolean {
 function findParentPath(path: string, pagePaths: Set<string>): string | null {
 	let parentDirectory = posix.dirname(path);
 	while (parentDirectory && parentDirectory !== '.') {
-		const candidate = `${parentDirectory}.html`;
-		if (pagePaths.has(candidate)) return candidate;
+		for (const extension of ['.html', '.htm', '.md', '.markdown']) {
+			const candidate = `${parentDirectory}${extension}`;
+			if (pagePaths.has(candidate)) return candidate;
+		}
 		parentDirectory = posix.dirname(parentDirectory);
 	}
 	return null;
@@ -523,7 +569,11 @@ async function convertBlock(
 	}
 	if (tag === 'ul' || tag === 'ol') return [await convertList($, selection, pagePath, resolveImage, warnings)];
 	if (tag === 'li') return [await convertList($, selection.parent(), pagePath, resolveImage, warnings)];
-	if (tag === 'table') return [await convertTable($, selection, pagePath, resolveImage, warnings)];
+	if (tag === 'table') {
+		return [selection.attr('data-database-block') === 'true'
+			? convertDatabaseTable($, selection)
+			: await convertTable($, selection, pagePath, resolveImage, warnings)];
+	}
 	if (tag === 'iframe' || tag === 'embed' || tag === 'object') {
 		warnings.add('Embeds are not supported and were skipped.');
 		return [];
@@ -683,6 +733,70 @@ async function convertTable(
 		});
 	}
 	return { type: 'table', content: rows.length > 0 ? rows : [{ type: 'tableRow', content: [{ type: 'tableCell', content: [paragraph([])] }] }] };
+}
+
+function convertDatabaseTable($: any, table: any): TiptapNode {
+	type DatabaseColumn = { id: string; name: string; type: 'text' | 'number' | 'date' | 'status' | 'multi-select' };
+	const headerRow = table.find('thead tr').first();
+	const headerCells = headerRow.length ? headerRow.children('th, td').toArray() : table.find('tr').first().children('th, td').toArray();
+	const headers = headerCells.map((cell: any, index: number) => String($(cell).text()).replace(/\s+/g, ' ').trim() || `Column ${index + 1}`);
+	const bodyRows = table.find('tbody tr').length
+		? table.find('tbody tr').toArray()
+		: table.find('tr').toArray().slice(headerRow.length ? 1 : 0);
+	const values: string[][] = bodyRows.map((row: any) => headers.map((_: string, index: number) => String($(row).children('th, td').eq(index).text()).replace(/\s+/g, ' ').trim()));
+	const usedColumnIds = new Set<string>();
+	const columns: DatabaseColumn[] = headers.map((name: string, index: number) => {
+		const baseId = databaseColumnId(name, index);
+		let id = baseId;
+		let suffix = 2;
+		while (usedColumnIds.has(id)) id = `${baseId}-${suffix++}`;
+		usedColumnIds.add(id);
+		return { id, name, type: inferDatabaseColumnType(name, values.map((row) => row[index] || '')) };
+	});
+	const options: Record<string, string[]> = {};
+	const rows = values.map((valueRow: string[], rowIndex: number) => {
+		const row: Record<string, unknown> = { id: `row-${rowIndex + 1}` };
+		columns.forEach((column: DatabaseColumn, index: number) => {
+			const value = valueRow[index] || '';
+			if (column.type === 'number') row[column.id] = value === '' ? '' : Number(value);
+			else if (column.type === 'multi-select') row[column.id] = splitDatabaseOptions(value);
+			else row[column.id] = value;
+		});
+		return row;
+	});
+
+	for (const column of columns) {
+		if (column.type === 'status' || column.type === 'multi-select') {
+			const valuesForColumn: string[] = values.flatMap((row: string[]) => column.type === 'multi-select'
+				? splitDatabaseOptions(row[columns.indexOf(column)] || '')
+				: [row[columns.indexOf(column)] || '']);
+			options[column.id] = [...new Set(valuesForColumn.filter(Boolean))];
+		}
+	}
+
+	return {
+		type: 'databaseBlock',
+		attrs: { columns, rows, options }
+	};
+}
+
+function inferDatabaseColumnType(name: string, values: string[]): 'text' | 'number' | 'date' | 'status' | 'multi-select' {
+	const nonEmpty = values.filter(Boolean);
+	const normalizedName = name.toLowerCase();
+	if (nonEmpty.length > 0 && nonEmpty.every((value) => /^-?\d+(?:\.\d+)?$/.test(value))) return 'number';
+	if (nonEmpty.length > 0 && nonEmpty.every((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))) return 'date';
+	if (/(tag|label|multi[- ]?select)/i.test(normalizedName) && nonEmpty.some((value) => /[,;]\s*/.test(value))) return 'multi-select';
+	if (/(status|state|priority|select)/i.test(normalizedName) && new Set(nonEmpty).size <= 20) return 'status';
+	return 'text';
+}
+
+function splitDatabaseOptions(value: string): string[] {
+	return value.split(/[,;]\s*/).map((entry) => entry.trim()).filter(Boolean);
+}
+
+function databaseColumnId(name: string, index: number): string {
+	const normalized = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+	return normalized || `column-${index + 1}`;
 }
 
 function inlineFromNodes($: any, nodes: any[], marks: TiptapNode['marks'] = []): TiptapNode[] {

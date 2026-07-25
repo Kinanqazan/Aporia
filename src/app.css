@@ -978,6 +978,76 @@ textarea {
 }
 
 /* ==========================================================================
+   TABLE SYSTEM STYLING
+   ========================================================================== */
+.ProseMirror .tableWrapper {
+	width: 100%;
+	max-width: 100%;
+	overflow-x: auto;
+	margin: 16px 0;
+}
+
+.ProseMirror table {
+	border-collapse: collapse;
+	table-layout: fixed;
+	width: 100%;
+	margin: 0;
+	overflow: hidden;
+}
+
+.ProseMirror td,
+.ProseMirror th {
+	min-width: 1em;
+	border: 1px solid var(--border-color);
+	padding: 3px 12px;
+	vertical-align: top;
+	box-sizing: border-box;
+	position: relative;
+	line-height: 1.35;
+}
+
+.ProseMirror td p,
+.ProseMirror th p {
+	margin-bottom: 0;
+}
+
+.ProseMirror th {
+	font-weight: bold;
+	text-align: left;
+	background-color: var(--hover-sidebar);
+}
+
+.ProseMirror .selectedCell:after {
+	z-index: 2;
+	position: absolute;
+	content: "";
+	left: 0;
+	right: 0;
+	top: 0;
+	bottom: 0;
+	background: rgba(35, 131, 226, 0.08);
+	pointer-events: none;
+}
+
+.ProseMirror .column-resize-handle {
+	position: absolute;
+	right: -1px;
+	top: 0;
+	bottom: 0;
+	width: 2px;
+	z-index: 20;
+	background-color: var(--accent-color);
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 0.15s ease;
+}
+
+.ProseMirror th:hover .column-resize-handle,
+.ProseMirror td:hover .column-resize-handle {
+	opacity: 0.6;
+}
+
+/* ==========================================================================
    TASK LIST (CHECKLIST) STYLING
    ========================================================================== */
 .ProseMirror ul[data-type="taskList"] {
@@ -1040,82 +1110,6 @@ textarea {
 	color: var(--text-muted);
 }
 
-/* ==========================================================================
-   TABLE SYSTEM STYLING
-   ========================================================================== */
-.ProseMirror .tableWrapper {
-	width: 100%;
-	max-width: 100%;
-	overflow-x: auto;
-	margin: 16px 0;
-}
-
-.ProseMirror table {
-	border-collapse: collapse;
-	table-layout: fixed;
-	width: 100%;
-	margin: 0;
-	overflow: hidden;
-}
-
-.ProseMirror td,
-.ProseMirror th {
-	min-width: 1em;
-	border: 1px solid var(--border-color);
-	padding: 3px 12px;
-	vertical-align: top;
-	box-sizing: border-box;
-	position: relative;
-	line-height: 1.35;
-}
-
-.ProseMirror td p,
-.ProseMirror th p {
-	margin-bottom: 0;
-}
-
-.ProseMirror th {
-	font-weight: bold;
-	text-align: left;
-	background-color: var(--hover-sidebar);
-}
-
-.ProseMirror .selectedCell:after {
-	z-index: 2;
-	position: absolute;
-	content: "";
-	left: 0;
-	right: 0;
-	top: 0;
-	bottom: 0;
-	background: rgba(35, 131, 226, 0.08);
-	pointer-events: none;
-}
-
-.ProseMirror .column-resize-handle {
-	position: absolute;
-	right: -4px;
-	top: 0;
-	bottom: 0;
-	width: 8px;
-	z-index: 20;
-	/* Keep a forgiving hit area while drawing only a 2px visual guide. */
-	background: linear-gradient(
-		to right,
-		transparent 3px,
-		var(--accent-color) 3px,
-		var(--accent-color) 5px,
-		transparent 5px
-	);
-	pointer-events: none;
-	opacity: 0;
-}
-
-.ProseMirror th:hover .column-resize-handle,
-.ProseMirror td:hover .column-resize-handle {
-	opacity: 0.5;
-}
-
 .ProseMirror.resize-cursor,
 .ProseMirror .column-resize-dragging {
 	cursor: col-resize;
@@ -1123,4 +1117,22 @@ textarea {
 
 .ProseMirror.resize-cursor .column-resize-handle {
 	opacity: 1;
+}
+
+/* Strictly disable column resizing affordances when page is locked */
+.ProseMirror[contenteditable="false"] .column-resize-handle,
+.ProseMirror[contenteditable="false"] .col-resizer,
+.editor-container.locked .column-resize-handle,
+.editor-container.locked .col-resizer {
+	display: none !important;
+	pointer-events: none !important;
+	cursor: default !important;
+	opacity: 0 !important;
+}
+
+.ProseMirror[contenteditable="false"] th:hover .column-resize-handle,
+.ProseMirror[contenteditable="false"] td:hover .column-resize-handle,
+.editor-container.locked th:hover .column-resize-handle,
+.editor-container.locked td:hover .column-resize-handle {
+	opacity: 0 !important;
 }

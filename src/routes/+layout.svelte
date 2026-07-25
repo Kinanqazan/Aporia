@@ -46,6 +46,7 @@
 	let notionImportFile = $state<File | null>(null);
 	let notionImportPreview = $state<{
 		pageCount: number;
+		databaseCount: number;
 		imageCount: number;
 		remoteImageCount: number;
 		skippedImageCount: number;
@@ -921,7 +922,7 @@
 						bind:this={notionImportInput}
 						class="notion-import-input"
 						type="file"
-						accept=".zip,.html,.htm,application/zip,application/x-zip-compressed,text/html"
+						accept=".zip,.html,.htm,.md,.markdown,.csv,application/zip,application/x-zip-compressed,text/html,text/markdown,text/csv"
 						onchange={selectNotionImport}
 					/>
 					<button class="settings-action" disabled={isNotionPreviewInProgress || isNotionImportInProgress} onclick={() => notionImportInput?.click()}>
@@ -970,7 +971,7 @@
 				<div class="notion-import-modal-header">
 					<div>
 						<h2 id="notion-import-modal-title">Import from Notion</h2>
-						<p>Choose a Notion HTML export ZIP or standalone HTML file. ZIP files preserve local images; standalone HTML only preserves embedded and external images.</p>
+						<p>Choose a Notion HTML, Markdown, CSV, or ZIP export. CSV files and Markdown tables are imported as editable databases.</p>
 					</div>
 					<button type="button" class="notion-import-modal-close" onclick={() => notionImportDialogOpen = false} aria-label="Close import dialog">×</button>
 				</div>
@@ -991,6 +992,9 @@
 					<p class="notion-import-modal-success">{notionImportMessage}</p>
 				{:else if notionImportPreview}
 					<div class="notion-import-modal-preview">
+						{#if notionImportPreview.databaseCount > 0}
+							<p>{notionImportPreview.databaseCount} database{notionImportPreview.databaseCount === 1 ? '' : 's'} will be imported as editable tables.</p>
+						{/if}
 						<p>{notionImportPreview.pageCount} page{notionImportPreview.pageCount === 1 ? '' : 's'} · {notionImportPreview.imageCount} image{notionImportPreview.imageCount === 1 ? '' : 's'} imported{notionImportPreview.remoteImageCount > 0 ? ` · ${notionImportPreview.remoteImageCount} external` : ''}{notionImportPreview.skippedImageCount > 0 ? ` · ${notionImportPreview.skippedImageCount} skipped` : ''}</p>
 						{#each notionImportPreview.warnings as warning}
 							<span class="notion-import-warning">{warning}</span>
@@ -1001,7 +1005,7 @@
 						</button>
 					</div>
 				{:else}
-					<p class="notion-import-modal-error">Choose an HTML or ZIP file to begin.</p>
+					<p class="notion-import-modal-error">Choose an HTML, Markdown, CSV, or ZIP file to begin.</p>
 				{/if}
 			</div>
 		</div>
