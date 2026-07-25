@@ -2,53 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getPageById, updatePageContentConditionally } from '$lib/server/pages';
 import { validateImageReferences } from '$lib/server/assets';
-
-function isTaskCheckboxOnlyChange(previous: unknown, next: unknown): boolean {
-	let changed = false;
-
-	const compare = (left: any, right: any): boolean => {
-		if (left === right) return true;
-
-		if (Array.isArray(left) && Array.isArray(right)) {
-			return left.length === right.length && left.every((value, index) => compare(value, right[index]));
-		}
-
-		if (left && right && typeof left === 'object' && typeof right === 'object') {
-			const leftKeys = Object.keys(left);
-			const rightKeys = Object.keys(right);
-			if (leftKeys.length !== rightKeys.length || leftKeys.some(key => !rightKeys.includes(key))) return false;
-
-			return leftKeys.every(key => {
-				if (key === 'attrs' && left.type === 'taskItem' && right.type === 'taskItem') {
-					const leftAttrs = left.attrs;
-					const rightAttrs = right.attrs;
-					if (!leftAttrs || !rightAttrs || typeof leftAttrs !== 'object' || typeof rightAttrs !== 'object') {
-						return false;
-					}
-
-					const leftAttrKeys = Object.keys(leftAttrs);
-					const rightAttrKeys = Object.keys(rightAttrs);
-					if (leftAttrKeys.length !== rightAttrKeys.length || leftAttrKeys.some(attr => !rightAttrKeys.includes(attr))) {
-						return false;
-					}
-
-					return leftAttrKeys.every(attr => {
-						if (attr === 'checked') {
-							if (leftAttrs.checked !== rightAttrs.checked) changed = true;
-							return true;
-						}
-						return compare(leftAttrs[attr], rightAttrs[attr]);
-					});
-				}
-				return compare(left[key], right[key]);
-			});
-		}
-
-		return false;
-	};
-
-	return compare(previous, next) && changed;
-}
+import { isTaskCheckboxOnlyChange } from '$lib/server/task-checkbox-change.js';
 
 export const POST: RequestHandler = async ({ params, request }) => {
 	const id = params.id;

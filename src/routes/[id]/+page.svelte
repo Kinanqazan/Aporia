@@ -21,8 +21,7 @@
 	import Details, { DetailsContent, DetailsSummary } from '@tiptap/extension-details';
 	import { BubbleMenu } from '@tiptap/extension-bubble-menu';
 	import { Link as TiptapLink } from '@tiptap/extension-link';
-	import { TaskList } from '@tiptap/extension-task-list';
-	import { TaskItem } from '@tiptap/extension-task-item';
+	import { EnhancedTaskList as TaskList, EnhancedTaskItem as TaskItem } from '$lib/editor/extensions/TaskListExtension';
 	import { Table as TiptapTable } from '@tiptap/extension-table';
 	import { TableRow } from '@tiptap/extension-table-row';
 	import { TableHeader } from '@tiptap/extension-table-header';
@@ -152,6 +151,53 @@
 	// Bubble Menu elements and states
 	let bubbleMenuElement = $state<HTMLDivElement>();
 	let isColorMenuOpen = $state(false);
+
+	// Table interaction states
+	let isTableHovered = $state(false);
+	let activeTableNode = $state<HTMLTableElement | null>(null);
+
+	// Column/Row Handles states
+	let activeCellNode = $state<HTMLElement | null>(null);
+	let columnHandlePosition = $state({ top: 0, left: 0 });
+	let rowHandlePosition = $state({ top: 0, left: 0 });
+	let isColMenuOpen = $state(false);
+	let isRowMenuOpen = $state(false);
+	let colMenuPosition = $state({ top: 0, left: 0 });
+	let rowMenuPosition = $state({ top: 0, left: 0 });
+
+	function handleColumnHandleClick(e: MouseEvent) {
+		e.stopPropagation();
+		if (isLocked || !editor || !activeCellNode) return;
+		
+		// Focus editor and select the cell
+		editor.commands.focus();
+		const pos = editor.view.posAtDOM(activeCellNode, 0);
+		editor.commands.setTextSelection(pos);
+		
+		colMenuPosition = {
+			top: columnHandlePosition.top + 16,
+			left: columnHandlePosition.left
+		};
+		isColMenuOpen = true;
+		isRowMenuOpen = false;
+	}
+
+	function handleRowHandleClick(e: MouseEvent) {
+		e.stopPropagation();
+		if (isLocked || !editor || !activeCellNode) return;
+		
+		// Focus editor and select the cell
+		editor.commands.focus();
+		const pos = editor.view.posAtDOM(activeCellNode, 0);
+		editor.commands.setTextSelection(pos);
+		
+		rowMenuPosition = {
+			top: rowHandlePosition.top,
+			left: rowHandlePosition.left + 16
+		};
+		isRowMenuOpen = true;
+		isColMenuOpen = false;
+	}
 
 	// Slash Command states
 	let isSlashMenuOpen = $state(false);
@@ -978,25 +1024,28 @@
 				TaskList,
 				TaskItem.configure({
 					nested: true,
-					onReadOnlyChecked: (node: ProseMirrorNode, checked: boolean) => {
+					onReadOnlyChecked: (node: ProseMirrorNode, checked: boolean, givenPos?: number) => {
 						if (!editor) return false;
 
-						let position: number | null = null;
-						let equivalentPosition: number | null = null;
-						let equivalentMatches = 0;
-						editor.state.doc.descendants((candidate, candidatePosition) => {
-							if (candidate === node) {
-								position = candidatePosition;
-								return false;
-							}
-							if (candidate.type === node.type && candidate.eq(node)) {
-								equivalentPosition = candidatePosition;
-								equivalentMatches += 1;
-							}
-							return true;
-						});
+						let position: number | null = typeof givenPos === 'number' ? givenPos : null;
+						if (position === null) {
+							let equivalentPosition: number | null = null;
+							let equivalentMatches = 0;
+							editor.state.doc.descendants((candidate, candidatePosition) => {
+								if (candidate === node) {
+									position = candidatePosition;
+									return false;
+								}
+								if (candidate.type === node.type && candidate.eq(node)) {
+									equivalentPosition = candidatePosition;
+									equivalentMatches += 1;
+								}
+								return true;
+							});
 
-						if (position === null && equivalentMatches === 1) position = equivalentPosition;
+							if (position === null && equivalentMatches === 1) position = equivalentPosition;
+						}
+
 						if (position === null) return false;
 
 						const currentNode = editor.state.doc.nodeAt(position);
@@ -1171,13 +1220,26 @@
 
 	$effect(() => {
 		const shouldBeEditable = !isLocked && !isLockRequestInFlight;
-		if (editor && editor.isEditable !== shouldBeEditable) editor.setEditable(shouldBeEditable);
+		if (editor && editor.isEditable !== shouldBeEditable) {
+			editor.setEditable(shouldBeEditable);
+			if (!shouldBeEditable) {
+				editor.commands.blur();
+				if (typeof window !== 'undefined') {
+					window.getSelection()?.removeAllRanges();
+				}
+			}
+		}
 		if (isLocked || isLockRequestInFlight) {
 			isIconPickerOpen = false;
 			isColorMenuOpen = false;
 			isSlashMenuOpen = false;
 			isGutterVisible = false;
 			activeBlockNode = null;
+			isTableHovered = false;
+			activeTableNode = null;
+			activeCellNode = null;
+			isColMenuOpen = false;
+			isRowMenuOpen = false;
 		}
 	});
 
@@ -1335,14 +1397,91 @@
 		if (isLocked) {
 			isGutterVisible = false;
 			activeBlockNode = null;
+			isTableHovered = false;
+			activeTableNode = null;
+			activeCellNode = null;
+			isColMenuOpen = false;
+			isRowMenuOpen = false;
 			return;
 		}
 
 		const editorRect = editorElement.getBoundingClientRect();
 		const target = e.target as HTMLElement;
-		if (target.closest('table')) {
+
+		// Ignore database tables for simple table handles
+		const dbBlock = target.closest('.database-block-nodeview, .database-block') || target.closest('table.database-table');
+		if (dbBlock) {
+			isGutterVisible = false;
+			isTableHovered = false;
+			activeTableNode = null;
+			activeCellNode = null;
+			return;
+		}
+
+		// If we are already hovering a table, check if mouse is still near it
+		if (activeTableNode && isTableHovered && !activeTableNode.closest('.database-block-nodeview, .database-block') && !activeTableNode.classList.contains('database-table')) {
+			const rect = activeTableNode.getBoundingClientRect();
+			// Keep the handles alive while the pointer crosses the small gap around
+			// the table, to make the menu easy to reach.
+			const isNearTable = 
+				e.clientX >= rect.left - 30 &&
+				e.clientX <= rect.right + 30 &&
+				e.clientY >= rect.top - 30 &&
+				e.clientY <= rect.bottom + 30;
+			
+			if (isNearTable) {
+				isGutterVisible = false;
+				// Update handles to currently hovered cell inside table
+				const cell = target.closest('td, th') as HTMLElement | null;
+				if (cell) {
+					activeCellNode = cell;
+					const cellRect = cell.getBoundingClientRect();
+					columnHandlePosition = {
+						left: cellRect.left - editorRect.left + (cellRect.width / 2) - 12,
+						top: rect.top - editorRect.top - 12
+					};
+					rowHandlePosition = {
+						left: rect.left - editorRect.left - 12,
+						top: cellRect.top - editorRect.top + (cellRect.height / 2) - 12
+					};
+				}
+				return;
+			}
+		}
+
+		// Check if mouse is hovering over a simple table cell (td/th)
+		const cell = target.closest('td, th') as HTMLElement | null;
+		const table = cell?.closest('table') as HTMLTableElement | null;
+
+		if (table && cell && !table.closest('.database-block-nodeview, .database-block') && !table.classList.contains('database-table')) {
+			activeTableNode = table;
+			activeCellNode = cell;
+			const tableRect = table.getBoundingClientRect();
+			const cellRect = cell.getBoundingClientRect();
+			
+			// Position column handle centered above the cell
+			columnHandlePosition = {
+				left: cellRect.left - editorRect.left + (cellRect.width / 2) - 12,
+				top: tableRect.top - editorRect.top - 12
+			};
+			
+			// Position row handle centered to the left of the cell
+			rowHandlePosition = {
+				left: tableRect.left - editorRect.left - 12,
+				top: cellRect.top - editorRect.top + (cellRect.height / 2) - 12
+			};
+
+			isTableHovered = true;
 			isGutterVisible = false;
 			return;
+		} else {
+			isTableHovered = false;
+			activeTableNode = null;
+			activeCellNode = null;
+			if (target.closest('table')) {
+				isGutterVisible = false;
+				return;
+			}
 		}
 		// otherwise the wrapper's bounding rect matches first and steals the hit.
 		const allBlocks = Array.from(editorElement.querySelectorAll(
@@ -1397,6 +1536,10 @@
 		}
 		if (!target.closest('.color-picker-dropdown') && !target.closest('.bubble-color-btn')) {
 			isColorMenuOpen = false;
+		}
+		if (!target.closest('.table-handle-menu') && !target.closest('.table-col-handle') && !target.closest('.table-row-handle')) {
+			isColMenuOpen = false;
+			isRowMenuOpen = false;
 		}
 	}
 
@@ -1689,12 +1832,63 @@
 		return true;
 	}
 
-	function convertActiveBlockTo(type: 'paragraph' | 'heading' | 'toggleHeading' | 'blockquote' | 'codeBlock' | 'todoList' | 'divider' | 'table', level?: number) {
+	function convertActiveBlockTo(
+		type:
+			| 'paragraph'
+			| 'heading'
+			| 'toggleHeading'
+			| 'blockquote'
+			| 'codeBlock'
+			| 'todoList'
+			| 'bulletList'
+			| 'orderedList'
+			| 'divider'
+			| 'table'
+			| 'image'
+			| 'database',
+		level?: number
+	) {
 		if (!editor || !activeBlockNode) return;
 		editor.commands.focus();
 
+		const activeBlock = getActiveBlock();
+
 		if (type === 'toggleHeading' && level) {
 			turnActiveBlockIntoToggleHeading(level as 1 | 2 | 3);
+		} else if (type === 'image') {
+			if (activeBlock) {
+				const range = { from: activeBlock.pos, to: activeBlock.pos + activeBlock.node.nodeSize };
+				openImagePicker(range);
+			} else {
+				openImagePicker();
+			}
+		} else if (type === 'database') {
+			if (activeBlock) {
+				const range = { from: activeBlock.pos, to: activeBlock.pos + activeBlock.node.nodeSize };
+				editor
+					.chain()
+					.focus()
+					.deleteRange(range)
+					.insertContent({
+						type: 'databaseBlock',
+						attrs: {
+							columns: [
+								{ id: 'name', name: 'Name', type: 'text' },
+								{ id: 'status', name: 'Status', type: 'status' },
+								{ id: 'date', name: 'Date', type: 'date' }
+							],
+							rows: [
+								{ id: 'row-1', name: 'Draft implementation plan', status: 'Done', date: '2026-07-19' },
+								{ id: 'row-2', name: 'Build Svelte 5 component', status: 'In Progress', date: '2026-07-20' },
+								{ id: 'row-3', name: 'Verify Markdown export', status: 'Todo', date: '2026-07-21' }
+							],
+							options: {
+								status: ['Todo', 'In Progress', 'Done']
+							}
+						}
+					})
+					.run();
+			}
 		} else if (!selectActiveBlockContent()) {
 			return;
 		} else if (type === 'paragraph') {
@@ -1707,6 +1901,10 @@
 			}
 		} else if (type === 'heading' && level) {
 			editor.commands.toggleHeading({ level: level as any });
+		} else if (type === 'bulletList') {
+			editor.commands.toggleBulletList();
+		} else if (type === 'orderedList') {
+			editor.commands.toggleOrderedList();
 		} else if (type === 'blockquote') {
 			editor.commands.toggleBlockquote();
 		} else if (type === 'codeBlock') {
@@ -2202,6 +2400,18 @@
 							<ChevronRight size={13} class="menu-icon" />
 							<span>Toggle Heading 3</span>
 						</button>
+						<button class="menu-item-action" onclick={() => convertActiveBlockTo('image')}>
+							<ImageIcon size={13} class="menu-icon" />
+							<span>Image</span>
+						</button>
+						<button class="menu-item-action" onclick={() => convertActiveBlockTo('bulletList')}>
+							<List size={13} class="menu-icon" />
+							<span>Bullet List</span>
+						</button>
+						<button class="menu-item-action" onclick={() => convertActiveBlockTo('orderedList')}>
+							<ListOrdered size={13} class="menu-icon" />
+							<span>Numbered List</span>
+						</button>
 						<button class="menu-item-action" onclick={() => convertActiveBlockTo('blockquote')}>
 							<Quote size={13} class="menu-icon" />
 							<span>Quote Block</span>
@@ -2222,12 +2432,129 @@
 							<TableIcon size={13} class="menu-icon" />
 							<span>Table</span>
 						</button>
+						<button class="menu-item-action" onclick={() => convertActiveBlockTo('database')}>
+							<Database size={13} class="menu-icon" />
+							<span>Database Table</span>
+						</button>
 					</div>
 				{/if}
 			</div>
 		{/if}
 
 		<div bind:this={editorElement} class="tiptap-editor-element"></div>
+
+		<!-- Table controls: column/row handles open the insert/delete menus for simple tables. -->
+		{#if !isLocked && isTableHovered && activeTableNode}
+			<!-- Column Handle (above cell) -->
+			<button 
+				type="button"
+				class="table-col-handle"
+				style="top: {columnHandlePosition.top}px; left: {columnHandlePosition.left}px;"
+				onclick={handleColumnHandleClick}
+				title="Column options"
+			></button>
+
+			<!-- Row Handle (left of cell) -->
+			<button 
+				type="button"
+				class="table-row-handle"
+				style="top: {rowHandlePosition.top}px; left: {rowHandlePosition.left}px;"
+				onclick={handleRowHandleClick}
+				title="Row options"
+			></button>
+		{/if}
+
+		<!-- Column Options Dropdown -->
+		{#if !isLocked && isColMenuOpen}
+			<div 
+				class="table-handle-menu"
+				style="top: {colMenuPosition.top}px; left: {colMenuPosition.left}px;"
+			>
+				<button 
+					type="button" 
+					class="menu-item-action"
+					onclick={() => {
+						if (isLocked) return;
+						editor?.chain().focus().deleteColumn().run();
+						isColMenuOpen = false;
+						isTableHovered = false;
+					}}
+				>
+					<Trash2 size={13} class="menu-icon" />
+					<span>Delete column</span>
+				</button>
+				<button 
+					type="button" 
+					class="menu-item-action"
+					onclick={() => {
+						if (isLocked) return;
+						editor?.chain().focus().addColumnBefore().run();
+						isColMenuOpen = false;
+					}}
+				>
+					<Plus size={13} class="menu-icon" />
+					<span>Insert left</span>
+				</button>
+				<button 
+					type="button" 
+					class="menu-item-action"
+					onclick={() => {
+						if (isLocked) return;
+						editor?.chain().focus().addColumnAfter().run();
+						isColMenuOpen = false;
+					}}
+				>
+					<Plus size={13} class="menu-icon" />
+					<span>Insert right</span>
+				</button>
+			</div>
+		{/if}
+
+		<!-- Row Options Dropdown -->
+		{#if !isLocked && isRowMenuOpen}
+			<div 
+				class="table-handle-menu"
+				style="top: {rowMenuPosition.top}px; left: {rowMenuPosition.left}px;"
+			>
+				<button 
+					type="button" 
+					class="menu-item-action"
+					onclick={() => {
+						if (isLocked) return;
+						editor?.chain().focus().deleteRow().run();
+						isRowMenuOpen = false;
+						isTableHovered = false;
+					}}
+				>
+					<Trash2 size={13} class="menu-icon" />
+					<span>Delete row</span>
+				</button>
+				<button 
+					type="button" 
+					class="menu-item-action"
+					onclick={() => {
+						if (isLocked) return;
+						editor?.chain().focus().addRowBefore().run();
+						isRowMenuOpen = false;
+					}}
+				>
+					<Plus size={13} class="menu-icon" />
+					<span>Insert above</span>
+				</button>
+				<button 
+					type="button" 
+					class="menu-item-action"
+					onclick={() => {
+						if (isLocked) return;
+						editor?.chain().focus().addRowAfter().run();
+						isRowMenuOpen = false;
+					}}
+				>
+					<Plus size={13} class="menu-icon" />
+					<span>Insert below</span>
+				</button>
+			</div>
+		{/if}
 
 		<div bind:this={bubbleMenuElement} class="editor-bubble-menu" class:locked={isLocked}>
 			{#if editor}
@@ -2506,6 +2833,8 @@
 		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 		padding: 6px 4px;
 		width: 170px;
+		max-height: 380px;
+		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
@@ -2903,9 +3232,14 @@
 		cursor: pointer;
 	}
 
-	:global(.tiptap-content-canvas img.editor-image.ProseMirror-selectednode) {
+	:global(.tiptap-content-canvas:not([contenteditable='false']) img.editor-image.ProseMirror-selectednode) {
 		outline: 2px solid var(--accent-color);
 		outline-offset: 2px;
+	}
+
+	:global(.tiptap-content-canvas[contenteditable='false'] img.editor-image.ProseMirror-selectednode),
+	:global(.tiptap-content-canvas[contenteditable='false'] .ProseMirror-selectednode) {
+		outline: none !important;
 	}
 
 	:global([data-resize-container][data-node='image']) {
@@ -2930,8 +3264,14 @@
 		transition: opacity 120ms ease;
 	}
 
-	:global([data-resize-container][data-node='image'].ProseMirror-selectednode [data-resize-handle]),
-	:global([data-resize-container][data-node='image'][data-resize-state='true'] [data-resize-handle]) {
+	:global(.tiptap-content-canvas[contenteditable='false'] [data-resize-handle]) {
+		display: none !important;
+		opacity: 0 !important;
+		pointer-events: none !important;
+	}
+
+	:global(.tiptap-content-canvas:not([contenteditable='false']) [data-resize-container][data-node='image'].ProseMirror-selectednode [data-resize-handle]),
+	:global(.tiptap-content-canvas:not([contenteditable='false']) [data-resize-container][data-node='image'][data-resize-state='true'] [data-resize-handle]) {
 		opacity: 1;
 		pointer-events: auto;
 	}
@@ -3396,6 +3736,50 @@
 		font-size: 11px;
 		color: var(--text-muted);
 		margin-top: 1px;
+	}
+
+	/* Row and Column selection handles */
+	.table-col-handle, .table-row-handle {
+		position: absolute;
+		background-color: var(--border-color);
+		border-radius: 4px;
+		cursor: pointer;
+		z-index: 100;
+		opacity: 0.5;
+		transition: opacity var(--transition-speed), background-color var(--transition-speed), transform var(--transition-speed);
+		border: 1px solid var(--border-color);
+		box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+	}
+
+	.table-col-handle {
+		width: 24px;
+		height: 8px;
+	}
+
+	.table-row-handle {
+		width: 8px;
+		height: 24px;
+	}
+
+	.table-col-handle:hover, .table-row-handle:hover {
+		opacity: 1;
+		background-color: var(--accent-color);
+		border-color: var(--accent-color);
+		transform: scale(1.1);
+	}
+
+	.table-handle-menu {
+		position: absolute;
+		background-color: var(--bg-canvas);
+		border: 1px solid var(--border-color);
+		border-radius: 6px;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+		padding: 4px;
+		width: 140px;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		z-index: 210;
 	}
 
 </style>

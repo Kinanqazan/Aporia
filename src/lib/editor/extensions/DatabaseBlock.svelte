@@ -111,7 +111,6 @@
 		if (!editable) {
 			if (activeColumnMenu !== null) activeColumnMenu = null;
 			if (activeSelectDropdown !== null) activeSelectDropdown = null;
-			if (isFilterOpen) isFilterOpen = false;
 			if (isResizing) cancelResize();
 		}
 	});
