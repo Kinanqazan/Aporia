@@ -70,13 +70,13 @@ Try Aporia directly in your browser: **[aporia-notes.vercel.app](https://aporia-
 On the Docker host, create a directory for Aporia and its persistent data:
 
 ```sh
-mkdir -p /opt/appsstack/aporia/config/aporia
-sudo chown -R 1000:1000 /opt/appsstack/aporia/config/aporia
-cd /opt/appsstack/aporia
+mkdir -p /opt/aporia/config/aporia
+sudo chown -R 1000:1000 /opt/aporia/config/aporia
+cd /opt/aporia
 ```
 
 ### 2. Create `docker-compose.yml`
-Create `/opt/appsstack/aporia/docker-compose.yml` with the following contents:
+Create `/opt/aporia/docker-compose.yml` with the following contents:
 
 ```yaml
 services:
