@@ -22,8 +22,41 @@ sqlite.pragma('journal_mode = WAL');
 export const db = drizzle(sqlite, { schema });
 
 // The pages table must exist before creating or backfilling the FTS index.
-// This ordering is essential for a fresh database on first application start.
-migrate(db, { migrationsFolder: './drizzle' });
+try {
+	migrate(db, { migrationsFolder: './drizzle' });
+} catch {
+	// Fallback table creation if migration folder is missing in serverless build
+}
+
+sqlite.exec(`
+	CREATE TABLE IF NOT EXISTS pages (
+		id TEXT PRIMARY KEY,
+		parent_id TEXT REFERENCES pages(id) ON DELETE CASCADE,
+		position INTEGER NOT NULL DEFAULT 0,
+		title TEXT NOT NULL DEFAULT 'Untitled',
+		icon TEXT,
+		icon_color TEXT,
+		content_json TEXT NOT NULL DEFAULT '{"type":"doc","content":[]}',
+		content_text TEXT NOT NULL DEFAULT '',
+		schema_version INTEGER NOT NULL DEFAULT 1,
+		revision INTEGER NOT NULL DEFAULT 1,
+		is_locked INTEGER NOT NULL DEFAULT 0,
+		is_full_width INTEGER NOT NULL DEFAULT 0,
+		is_in_trash INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		trash_at TEXT
+	);
+
+	CREATE TABLE IF NOT EXISTS assets (
+		id TEXT PRIMARY KEY,
+		storage_key TEXT NOT NULL UNIQUE,
+		original_filename TEXT NOT NULL,
+		mime_type TEXT NOT NULL,
+		byte_size INTEGER NOT NULL,
+		created_at TEXT NOT NULL
+	);
+`);
 
 // Initialize Settings Table
 sqlite.exec(`
