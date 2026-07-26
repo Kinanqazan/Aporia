@@ -1,11 +1,14 @@
 import { redirect, fail } from '@sveltejs/kit';
 import type { PageServerLoad, Actions } from './$types';
-import { getActivePages, getTrashPages, createPage, sendToTrash, restoreFromTrash, deletePermanently, emptyTrash, movePage, updatePage } from '$lib/server/pages';
+import { getActivePages, getTrashPages, createPage, seedDemoWorkspace, sendToTrash, restoreFromTrash, deletePermanently, emptyTrash, movePage, updatePage } from '$lib/server/pages';
 
 export const load: PageServerLoad = async () => {
-	const active = await getActivePages();
+	let active = await getActivePages();
+	if (active.length === 0) {
+		active = await seedDemoWorkspace();
+	}
 	if (active.length > 0) {
-		// Automatically redirect to the first active document
+		// Automatically redirect to the first active document (Getting Started)
 		throw redirect(307, `/${active[0].id}`);
 	}
 	return {
@@ -29,6 +32,13 @@ export const actions: Actions = {
 		}
 
 		throw redirect(303, `/${page.id}`);
+	},
+	seedDemo: async () => {
+		const active = await seedDemoWorkspace();
+		if (active.length > 0) {
+			throw redirect(303, `/${active[0].id}`);
+		}
+		throw redirect(303, '/');
 	},
 	rename: async ({ request }) => {
 		const data = await request.formData();

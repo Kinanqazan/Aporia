@@ -411,3 +411,249 @@ function walkNode(node: any): string {
 	}
 	return text;
 }
+
+export async function seedDemoWorkspace(): Promise<PageNode[]> {
+	const active = await getActivePages();
+	if (active.length > 0) return active;
+
+	// 1. Getting Started
+	const page1 = await createPage(null, 'Getting Started', 'lucide:rocket');
+	const content1 = {
+		type: 'doc',
+		content: [
+			{
+				type: 'heading',
+				attrs: { level: 1 },
+				content: [{ type: 'text', text: 'Welcome to Aporia' }]
+			},
+			{
+				type: 'paragraph',
+				content: [
+					{
+						type: 'text',
+						text: 'Aporia is your private, local-first workspace for notes, task checklists, and database views. Everything stays fast, clean, and 100% under your control.'
+					}
+				]
+			},
+			{
+				type: 'heading',
+				attrs: { level: 2 },
+				content: [{ type: 'text', text: 'Quick Start Checklist' }]
+			},
+			{
+				type: 'taskList',
+				content: [
+					{
+						type: 'taskItem',
+						attrs: { checked: true },
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Type / anywhere in the editor to open the block command menu' }] }]
+					},
+					{
+						type: 'taskItem',
+						attrs: { checked: true },
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Explore the starter pages in the sidebar (Shopping List, Book Tracker, Ideas)' }] }]
+					},
+					{
+						type: 'taskItem',
+						attrs: { checked: false },
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Create your own custom page using the + button in the sidebar' }] }]
+					}
+				]
+			},
+			{
+				type: 'heading',
+				attrs: { level: 2 },
+				content: [{ type: 'text', text: 'Key Features' }]
+			},
+			{
+				type: 'bulletList',
+				content: [
+					{
+						type: 'listItem',
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Block-Based Editor: Headings, checklists, code blocks, and custom tables.' }] }]
+					},
+					{
+						type: 'listItem',
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'SQLite Full-Text Search: Fast search across page titles and body content.' }] }]
+					},
+					{
+						type: 'listItem',
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Notion Import & Data Export: Backup and restore your workspace as ZIP archives.' }] }]
+					}
+				]
+			}
+		]
+	};
+	await updatePage(page1.id, {
+		contentJson: JSON.stringify(content1),
+		contentText: extractTextFromJson(JSON.stringify(content1))
+	});
+
+	// 2. Shopping & To-Do List
+	const page2 = await createPage(null, 'Shopping & To-Do List', 'lucide:shopping-cart');
+	const content2 = {
+		type: 'doc',
+		content: [
+			{
+				type: 'heading',
+				attrs: { level: 2 },
+				content: [{ type: 'text', text: 'Weekly Groceries' }]
+			},
+			{
+				type: 'taskList',
+				content: [
+					{
+						type: 'taskItem',
+						attrs: { checked: true },
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Fresh Organic Avocados & Spinach' }] }]
+					},
+					{
+						type: 'taskItem',
+						attrs: { checked: true },
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Almond Milk & Greek Yogurt' }] }]
+					},
+					{
+						type: 'taskItem',
+						attrs: { checked: false },
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Whole Grain Sourdough Bread' }] }]
+					},
+					{
+						type: 'taskItem',
+						attrs: { checked: false },
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Cold Brew Coffee Beans' }] }]
+					},
+					{
+						type: 'taskItem',
+						attrs: { checked: false },
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Extra Virgin Olive Oil & Sea Salt' }] }]
+					}
+				]
+			},
+			{
+				type: 'heading',
+				attrs: { level: 2 },
+				content: [{ type: 'text', text: 'Household Essentials' }]
+			},
+			{
+				type: 'taskList',
+				content: [
+					{
+						type: 'taskItem',
+						attrs: { checked: true },
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Warm LED Light Bulbs' }] }]
+					},
+					{
+						type: 'taskItem',
+						attrs: { checked: false },
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Microfiber Cleaning Cloths' }] }]
+					},
+					{
+						type: 'taskItem',
+						attrs: { checked: false },
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Dishwasher Pods & Sponge' }] }]
+					}
+				]
+			}
+		]
+	};
+	await updatePage(page2.id, {
+		contentJson: JSON.stringify(content2),
+		contentText: extractTextFromJson(JSON.stringify(content2))
+	});
+
+	// 3. Book Tracker
+	const page3 = await createPage(null, 'Book Tracker', 'lucide:book-open');
+	const content3 = {
+		type: 'doc',
+		content: [
+			{
+				type: 'heading',
+				attrs: { level: 2 },
+				content: [{ type: 'text', text: 'My Reading List' }]
+			},
+			{
+				type: 'paragraph',
+				content: [
+					{
+						type: 'text',
+						text: 'Track books, reading status, and ratings using Aporia database blocks:'
+					}
+				]
+			},
+			{
+				type: 'databaseBlock',
+				attrs: {
+					columns: [
+						{ id: 'title', name: 'Book Title', type: 'text' },
+						{ id: 'author', name: 'Author', type: 'text' },
+						{ id: 'status', name: 'Status', type: 'status' },
+						{ id: 'rating', name: 'Rating', type: 'status' }
+					],
+					rows: [
+						{ id: 'row-1', title: 'Atomic Habits', author: 'James Clear', status: 'Completed', rating: '5 Stars' },
+						{ id: 'row-2', title: 'Deep Work', author: 'Cal Newport', status: 'Completed', rating: '5 Stars' },
+						{ id: 'row-3', title: 'Designing Data-Intensive Applications', author: 'Martin Kleppmann', status: 'Reading', rating: '4 Stars' },
+						{ id: 'row-4', title: 'The Pragmatic Programmer', author: 'Andrew Hunt', status: 'Want to Read', rating: '5 Stars' }
+					],
+					options: {
+						status: ['Completed', 'Reading', 'Want to Read'],
+						rating: ['5 Stars', '4 Stars', '3 Stars']
+					},
+					showSummary: false,
+					summary: {},
+					sort: null
+				}
+			}
+		]
+	};
+	await updatePage(page3.id, {
+		contentJson: JSON.stringify(content3),
+		contentText: extractTextFromJson(JSON.stringify(content3))
+	});
+
+	// 4. Project Ideas
+	const page4 = await createPage(null, 'Project Ideas', 'lucide:lightbulb');
+	const content4 = {
+		type: 'doc',
+		content: [
+			{
+				type: 'heading',
+				attrs: { level: 2 },
+				content: [{ type: 'text', text: 'Side Project Concepts' }]
+			},
+			{
+				type: 'paragraph',
+				content: [{ type: 'text', text: 'Notes and snippets for upcoming applications and features:' }]
+			},
+			{
+				type: 'codeBlock',
+				attrs: { language: 'typescript' },
+				content: [
+					{
+						type: 'text',
+						text: '// Aporia local-first database query example\nconst pages = await db.select().from(pagesTable).where(eq(pagesTable.isInTrash, 0));'
+					}
+				]
+			},
+			{
+				type: 'bulletList',
+				content: [
+					{
+						type: 'listItem',
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Build Svelte 5 interactive block extensions.' }] }]
+					},
+					{
+						type: 'listItem',
+						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Optimize SQLite full-text search indexing.' }] }]
+					}
+				]
+			}
+		]
+	};
+	await updatePage(page4.id, {
+		contentJson: JSON.stringify(content4),
+		contentText: extractTextFromJson(JSON.stringify(content4))
+	});
+
+	return await getActivePages();
+}

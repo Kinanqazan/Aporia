@@ -13,13 +13,10 @@
 			A private, local-first space for your thoughts. Create your first page in the sidebar or click the button below to get started.
 		</p>
 		
-		<form method="POST" action="?/create" use:enhance>
-			<input type="hidden" name="parentId" value="null" />
-			<input type="hidden" name="title" value="Getting Started 🚀" />
-			<input type="hidden" name="icon" value="🚀" />
+		<form method="POST" action="?/seedDemo" use:enhance>
 			<button type="submit" class="create-first-page-btn">
 				<Plus size={16} />
-				<span>Create First Page</span>
+				<span>Explore Starter Workspace</span>
 			</button>
 		</form>
 	</div>
