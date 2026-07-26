@@ -66,23 +66,17 @@ Try Aporia directly in your browser: **[aporia-notes.vercel.app](https://aporia-
 
 ## 🚀 Self-Hosting & Deployment
 
-### 1. Publish the Image
-Push your changes to GitHub. The GitHub Actions workflow (`.github/workflows/docker-publish.yml`) automatically builds and publishes the image to GitHub Container Registry (GHCR):
-
-```text
-ghcr.io/kinanqaz/aporia:latest
-```
-
-### 2. Prepare the Docker Host
-Create a directory on your host for persistent SQLite storage:
+### 1. Create a deployment directory
+On the Docker host, create a directory for Aporia and its persistent data:
 
 ```sh
-mkdir -p /opt/appsstack/config/aporia
-chown -R 1000:1000 /opt/appsstack/config/aporia
+mkdir -p /opt/appsstack/aporia/config/aporia
+sudo chown -R 1000:1000 /opt/appsstack/aporia/config/aporia
+cd /opt/appsstack/aporia
 ```
 
-### 3. Add Service to Docker Compose
-Add `aporia` to your `docker-compose.yml`:
+### 2. Create `docker-compose.yml`
+Create `/opt/appsstack/aporia/docker-compose.yml` with the following contents:
 
 ```yaml
 services:
@@ -98,29 +92,31 @@ services:
       PORT: 3000
       DATABASE_URL: /app/data/app.db
     volumes:
-      - /opt/appsstack/config/aporia:/app/data
+      - ./config/aporia:/app/data
 ```
 
-### 4. Authenticate to GHCR (If Repository is Private)
+### 3. Authenticate to GHCR (if the image is private)
 ```sh
 docker login ghcr.io
 ```
 
-### 5. Start the Service
+Skip this step if the published image is public.
+
+### 4. Start Aporia
 ```sh
-docker compose pull aporia
-docker compose up -d aporia
+docker compose pull
+docker compose up -d
 ```
 
 Check status and logs:
 ```sh
-docker compose ps aporia
+docker compose ps
 docker compose logs -f aporia
 ```
 
-> **First-Time Setup:** On initial visit, Aporia presents an account setup screen. Create your admin username and password. Once created, account registration closes automatically.
+Open `http://<your-host>:3001` in a browser. On the first visit, create the username and password for your private workspace. Account setup closes after the first account is created.
 
-### 6. Optional: HTTPS with Caddy Reverse Proxy
+### 5. Optional: HTTPS with Caddy Reverse Proxy
 Add the following site block to your `Caddyfile`:
 
 ```caddy
