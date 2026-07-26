@@ -1514,13 +1514,14 @@
 
 		if (block && block instanceof HTMLElement) {
 			activeBlockNode = block;
-			const toggleSummary = block.matches('[data-type="details"]')
+			const headerAnchor = block.matches('[data-type="details"]')
 				? block.querySelector<HTMLElement>('summary')
+				: block.matches('.task-list-wrapper')
+				? block.querySelector<HTMLElement>('.task-list-header')
 				: null;
-			const handleAnchorRect = (toggleSummary ?? block).getBoundingClientRect();
+			const handleAnchorRect = (headerAnchor ?? block).getBoundingClientRect();
 			
-			// A toggle's drag handle belongs beside its summary, not midway down its
-			// expanded content. This matches Notion's heading-row interaction.
+			// Position drag handle beside toggle summary or task list panel header
 			gutterTop = handleAnchorRect.top - editorRect.top + (handleAnchorRect.height / 2) - 12;
 			gutterLeft = handleAnchorRect.left - editorRect.left - 28;
 			isGutterVisible = true;
@@ -2169,7 +2170,7 @@
 				role="status"
 				aria-label={autosaveStatus === 'error' ? 'Save failed' : 'Saving'}
 			>
-				<CloudLightning size={18} />
+				<CloudLightning size={isMobile ? 22 : 18} />
 			</div>
 		{/if}
 		<button
@@ -2180,129 +2181,132 @@
 			title={isLocked ? 'Unlock page' : 'Lock page'}
 			aria-label={isLocked ? 'Unlock page' : 'Lock page'}
 		>
-			{#if isLocked}<Lock size={18} />{:else}<Unlock size={18} />{/if}
+			{#if isLocked}<Lock size={isMobile ? 22 : 18} />{:else}<Unlock size={isMobile ? 22 : 18} />{/if}
 		</button>
 	</div>
 
-	<!-- Page Icon emoji picker input -->
-	<div class="page-icon-wrapper" class:locked={isLocked || isLockRequestInFlight}>
-		<!-- Clickable Icon button -->
-		<button 
-			type="button" 
-			class="icon-btn-picker" 
-			disabled={isLocked || isLockRequestInFlight}
-			onclick={() => isIconPickerOpen = !isIconPickerOpen}
-			title="Change page icon"
-		>
-			<PageIcon icon={icon} color={iconColor} size={78} className="main-page-icon" />
-		</button>
+	<!-- Header row: Icon + Title inline -->
+	<div class="page-header-row">
+		<!-- Page Icon emoji picker input -->
+		<div class="page-icon-wrapper" class:locked={isLocked || isLockRequestInFlight}>
+			<!-- Clickable Icon button -->
+			<button 
+				type="button" 
+				class="icon-btn-picker" 
+				disabled={isLocked || isLockRequestInFlight}
+				onclick={() => isIconPickerOpen = !isIconPickerOpen}
+				title="Change page icon"
+			>
+				<PageIcon icon={icon} color={iconColor} size={48} className="main-page-icon" />
+			</button>
 
-		<form 
-			bind:this={iconForm}
-			method="POST" 
-			action="?/changeIcon" 
-			use:enhance
-			class="icon-form"
-		>
-			<input type="hidden" name="icon" value={icon} />
-			<input type="hidden" name="iconColor" value={iconColor || ''} />
-		</form>
+			<form 
+				bind:this={iconForm}
+				method="POST" 
+				action="?/changeIcon" 
+				use:enhance
+				class="icon-form"
+			>
+				<input type="hidden" name="icon" value={icon} />
+				<input type="hidden" name="iconColor" value={iconColor || ''} />
+			</form>
 
-		{#if isIconPickerOpen && !isLockRequestInFlight}
-			<!-- svelte-ignore a11y_click_events_have_key_events -->
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div class="icon-picker-overlay" onclick={() => isIconPickerOpen = false}></div>
-			<div class="icon-picker-popover">
-				<div class="icon-picker-search">
-					<input 
-						type="text" 
-						placeholder="Paste custom emoji..." 
-						bind:value={iconInputText}
-						onkeydown={(e) => {
-							if (e.key === 'Enter') {
-								e.preventDefault();
-								selectIcon(iconInputText);
-							}
-						}}
-					/>
-					<button type="button" class="apply-emoji-btn" onclick={() => selectIcon(iconInputText)}>Apply</button>
-				</div>
-				<div class="icon-picker-grid">
-					{#each CURATED_ICONS as curated}
-						<button 
-							type="button" 
-							class="icon-picker-item" 
-							class:active={icon === 'lucide:' + curated.name}
-							onclick={() => selectIcon('lucide:' + curated.name)}
-							title={curated.label}
-						>
-							<curated.component size={18} color={iconColor || 'currentColor'} strokeWidth={1.5} />
-						</button>
-					{/each}
-				</div>
-				<div class="icon-color-section">
-					<span class="icon-color-label">Icon color</span>
-					<div class="icon-color-palette" role="group" aria-label="Icon color">
-						{#each ICON_COLORS as color}
-							<button
-								type="button"
-								class="icon-color-item"
-								class:active={iconColor === color.value}
-								aria-label={color.label}
-								aria-pressed={iconColor === color.value}
-								title={color.label}
-								onclick={() => selectIconColor(color.value)}
+			{#if isIconPickerOpen && !isLockRequestInFlight}
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="icon-picker-overlay" onclick={() => isIconPickerOpen = false}></div>
+				<div class="icon-picker-popover">
+					<div class="icon-picker-search">
+						<input 
+							type="text" 
+							placeholder="Paste custom emoji..." 
+							bind:value={iconInputText}
+							onkeydown={(e) => {
+								if (e.key === 'Enter') {
+									e.preventDefault();
+									selectIcon(iconInputText);
+								}
+							}}
+						/>
+						<button type="button" class="apply-emoji-btn" onclick={() => selectIcon(iconInputText)}>Apply</button>
+					</div>
+					<div class="icon-picker-grid">
+						{#each CURATED_ICONS as curated}
+							<button 
+								type="button" 
+								class="icon-picker-item" 
+								class:active={icon === 'lucide:' + curated.name}
+								onclick={() => selectIcon('lucide:' + curated.name)}
+								title={curated.label}
 							>
-								<span class="icon-color-swatch" style:background={color.value || 'var(--text-main)'}></span>
+								<curated.component size={18} color={iconColor || 'currentColor'} strokeWidth={1.5} />
 							</button>
 						{/each}
 					</div>
+					<div class="icon-color-section">
+						<span class="icon-color-label">Icon color</span>
+						<div class="icon-color-palette" role="group" aria-label="Icon color">
+							{#each ICON_COLORS as color}
+								<button
+									type="button"
+									class="icon-color-item"
+									class:active={iconColor === color.value}
+									aria-label={color.label}
+									aria-pressed={iconColor === color.value}
+									title={color.label}
+									onclick={() => selectIconColor(color.value)}
+								>
+									<span class="icon-color-swatch" style:background={color.value || 'var(--text-main)'}></span>
+								</button>
+							{/each}
+						</div>
+					</div>
 				</div>
-			</div>
-		{/if}
-	</div>
+			{/if}
+		</div>
 
-	<!-- Page Title editor input -->
-	<div class="title-row">
-		<form 
-			bind:this={titleForm}
-			method="POST" 
-			action="?/renamePage" 
-			use:enhance
-			class="title-form"
-		>
-			<input 
-				type="text" 
-				name="title" 
-				bind:value={title} 
-				onblur={handleTitleBlur}
-				onkeydown={handleTitleKeyDown}
-				class="page-title-input"
-				dir={containsArabic(title) ? 'rtl' : 'ltr'}
-				class:arabic-text-input={containsArabic(title)}
-				placeholder="Untitled"
-				spellcheck="false"
-				disabled={isLocked || isLockRequestInFlight}
-			/>
-		</form>
-		{#if !isLocked && toggleCount > 0}
-			<div class="toggle-page-actions" aria-label="Toggle controls">
-				<button
-					type="button"
-					class="toggle-page-action"
-					onclick={() => setAllToggles(openToggleCount !== toggleCount)}
-					title={openToggleCount === toggleCount ? 'Collapse all toggles' : 'Expand all toggles'}
-				>
-					{#if openToggleCount === toggleCount}
-						<ChevronRight size={15} />
-						<span>Collapse all</span>
-					{:else}
-						<ChevronDown size={15} />
-						<span>Expand all</span>
-					{/if}
-				</button>
-			</div>
-		{/if}
+		<!-- Page Title editor input -->
+		<div class="title-row">
+			<form 
+				bind:this={titleForm}
+				method="POST" 
+				action="?/renamePage" 
+				use:enhance
+				class="title-form"
+			>
+				<input 
+					type="text" 
+					name="title" 
+					bind:value={title} 
+					onblur={handleTitleBlur}
+					onkeydown={handleTitleKeyDown}
+					class="page-title-input"
+					dir={containsArabic(title) ? 'rtl' : 'ltr'}
+					class:arabic-text-input={containsArabic(title)}
+					placeholder="Untitled"
+					spellcheck="false"
+					disabled={isLocked || isLockRequestInFlight}
+				/>
+			</form>
+			{#if !isLocked && toggleCount > 0}
+				<div class="toggle-page-actions" aria-label="Toggle controls">
+					<button
+						type="button"
+						class="toggle-page-action"
+						onclick={() => setAllToggles(openToggleCount !== toggleCount)}
+						title={openToggleCount === toggleCount ? 'Collapse all toggles' : 'Expand all toggles'}
+					>
+						{#if openToggleCount === toggleCount}
+							<ChevronRight size={15} />
+							<span>Collapse all</span>
+						{:else}
+							<ChevronDown size={15} />
+							<span>Expand all</span>
+						{/if}
+					</button>
+				</div>
+			{/if}
+		</div>
 	</div>
 	
 	<!-- Subpages nested within this page -->
@@ -2947,14 +2951,31 @@
 	}
 
 	:global(.mobile) .page-status-controls {
-		top: calc(18px + env(safe-area-inset-top));
+		top: calc(14px + env(safe-area-inset-top));
+		right: max(16px, env(safe-area-inset-right));
+		gap: 6px;
+	}
+
+	:global(.mobile) .autosave-indicator,
+	:global(.mobile) .page-lock-btn {
+		width: 40px;
+		height: 40px;
+		border-radius: 6px;
+	}
+
+	.page-header-row {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		margin-bottom: 24px;
 	}
 
 	.page-icon-wrapper {
-		margin-bottom: 8px;
+		margin-bottom: 0;
 		user-select: none;
 		display: inline-block;
 		position: relative;
+		flex-shrink: 0;
 	}
 
 	.page-icon-wrapper.locked {
@@ -2965,8 +2986,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 90px;
-		height: 90px;
+		width: 56px;
+		height: 56px;
 		border-radius: 8px;
 		background: transparent;
 		cursor: pointer;
@@ -2979,7 +3000,7 @@
 	}
 
 	:global(.main-page-icon) {
-		font-size: 78px;
+		font-size: 48px;
 		color: var(--text-main);
 	}
 
@@ -3162,7 +3183,9 @@
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		margin-bottom: 8px;
+		margin-bottom: 0;
+		flex: 1;
+		min-width: 0;
 	}
 
 	.title-form {
@@ -3214,7 +3237,7 @@
 	/* Editor Canvas Styling */
 	.editor-canvas-container {
 		width: 100%;
-		margin-top: 12px;
+		margin-top: 16px;
 		position: relative;
 	}
 

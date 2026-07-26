@@ -25,7 +25,8 @@
 		Settings,
 		FileUp,
 		LogOut,
-		Maximize2
+		Maximize2,
+		Archive
 	} from 'lucide-svelte';
 	import type { PageNode } from '$lib/server/pages';
 
@@ -57,6 +58,44 @@
 	let notionImportMessage = $state('');
 	let notionImportError = $state('');
 	let notionImportDialogOpen = $state(false);
+
+	let backupRestoreInput = $state<HTMLInputElement | null>(null);
+	let isBackupRestoring = $state(false);
+
+	async function selectBackupRestore(event: Event) {
+		const input = event.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+
+		if (!confirm('Restoring a backup will replace your current workspace database and files. Are you sure you want to proceed?')) {
+			input.value = '';
+			return;
+		}
+
+		isBackupRestoring = true;
+		try {
+			const formData = new FormData();
+			formData.append('file', file);
+
+			const res = await fetch('/api/backup/restore', {
+				method: 'POST',
+				body: formData
+			});
+			const result = await res.json();
+			if (result.success) {
+				alert(result.message || 'Workspace restored successfully');
+				isSettingsOpen = false;
+				await invalidateAll();
+			} else {
+				alert('Failed to restore backup: ' + (result.error || 'Unknown error'));
+			}
+		} catch (err: any) {
+			alert('Failed to restore backup: ' + (err?.message || 'Network error'));
+		} finally {
+			isBackupRestoring = false;
+			input.value = '';
+		}
+	}
 	function initialSidebarWidth() {
 		return data.sidebarWidth ?? 240;
 	}
@@ -603,7 +642,8 @@
 		// Ensure swipe is horizontal and exceeds threshold
 		if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 60) {
 			if (isMobile) {
-				if (diffX > 0 && !isSidebarOpen && touchStartX > 30) {
+				// Only open sidebar if swipe starts near the left region of the screen (<= 90px)
+				if (diffX > 0 && !isSidebarOpen && touchStartX <= 90) {
 					isSidebarOpen = true;
 				} else if (diffX < 0 && isSidebarOpen) {
 					isSidebarOpen = false;
@@ -907,16 +947,31 @@
 				</div>
 
 				<div class="settings-section">
-					<span class="settings-section-title">Import &amp; Export</span>
+					<span class="settings-section-title">Backup &amp; Export</span>
+					<a href="/api/backup/export" download class="settings-action" onclick={() => isSettingsOpen = false}>
+						<Archive size={16} />
+						<span>Backup workspace</span>
+					</a>
+					<input
+						bind:this={backupRestoreInput}
+						class="notion-import-input"
+						type="file"
+						accept=".zip,.aporia.zip,application/zip"
+						onchange={selectBackupRestore}
+					/>
+					<button class="settings-action" disabled={isBackupRestoring} onclick={() => backupRestoreInput?.click()}>
+						<RotateCcw size={16} />
+						<span>{isBackupRestoring ? 'Restoring backup…' : 'Restore backup'}</span>
+					</button>
 					{#if currentPageId}
 						<a href="/api/export?id={currentPageId}" download class="settings-action" onclick={() => isSettingsOpen = false}>
 							<FileDown size={16} />
-							<span>Export current page</span>
+							<span>Export current page (MD)</span>
 						</a>
 					{/if}
 					<a href="/api/export?all=true" download class="settings-action" onclick={() => isSettingsOpen = false}>
 						<Download size={16} />
-						<span>Export workspace</span>
+						<span>Export workspace (MD)</span>
 					</a>
 					<input
 						bind:this={notionImportInput}
@@ -1025,7 +1080,7 @@
 			<div class="left-controls">
 				{#if !isSidebarOpen || isMobile}
 					<button class="icon-btn menu-btn" onclick={toggleSidebar} title="Open sidebar">
-						<Menu size={isMobile ? 22 : 16} />
+						<Menu size={isMobile ? 22 : 19} />
 					</button>
 				{/if}
 				{#if !isMobile}
@@ -1038,14 +1093,14 @@
 								{#if i === breadcrumbs.length - 1}
 									<span class="breadcrumb-item active">
 										<span class="breadcrumb-icon">
-											<PageIcon icon={crumb.icon} color={crumb.iconColor} size={14} />
+											<PageIcon icon={crumb.icon} color={crumb.iconColor} size={17} />
 										</span>
 										<span>{crumb.title || 'Untitled'}</span>
 									</span>
 								{:else}
 									<a href="/{crumb.id}" class="breadcrumb-item link">
 										<span class="breadcrumb-icon">
-											<PageIcon icon={crumb.icon} color={crumb.iconColor} size={14} />
+											<PageIcon icon={crumb.icon} color={crumb.iconColor} size={17} />
 										</span>
 										<span>{crumb.title || 'Untitled'}</span>
 									</a>

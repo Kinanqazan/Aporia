@@ -55,6 +55,7 @@
 		}
 	}
 
+
 	function clearSelection() {
 		selectedRowIds = [];
 	}
@@ -82,14 +83,26 @@
 	// Temporary edit inputs
 	let newOptionText = $state('');
 	let containerElement = $state<HTMLDivElement>();
+	let filterWrapperElement = $state<HTMLDivElement>();
 
 	// Click outside detection & custom event listeners using standard Svelte 5 $effect
 	$effect(() => {
 		const handleDocumentClick = (e: MouseEvent) => {
-			if (containerElement && !containerElement.contains(e.target as Node)) {
+			const target = e.target as Node;
+
+			if (filterWrapperElement && !filterWrapperElement.contains(target)) {
+				isFilterOpen = false;
+			}
+
+			if (containerElement && !containerElement.contains(target)) {
 				activeColumnMenu = null;
 				activeSelectDropdown = null;
-				isFilterOpen = false;
+			} else if (target instanceof HTMLElement) {
+				const isPopoverClick = target.closest('.th-menu-popover, .th-menu-trigger, .tag-select-popover, .tag-trigger-btn');
+				if (!isPopoverClick) {
+					activeColumnMenu = null;
+					activeSelectDropdown = null;
+				}
 			}
 		};
 		document.addEventListener('click', handleDocumentClick);
@@ -495,13 +508,13 @@
 			<Search class="search-icon" size={14} />
 			<input 
 				type="text" 
-				placeholder="Filter table..." 
+				placeholder="Search..." 
 				bind:value={searchQuery}
 				onkeydown={(e) => e.stopPropagation()}
 				class="db-search-input"
 			/>
 		</div>
-		<div class="db-filter-wrapper">
+		<div class="db-filter-wrapper" bind:this={filterWrapperElement}>
 			<button
 				type="button"
 				class="db-filter-btn"
@@ -517,25 +530,42 @@
 				<!-- svelte-ignore a11y_click_events_have_key_events -->
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div class="db-filter-popover" onclick={(e) => e.stopPropagation()}>
+					<div class="filter-popover-header">
+						<div class="filter-title">
+							<Filter size={13} class="filter-header-icon" />
+							<span>Filter Rules</span>
+						</div>
+						{#if filterColumnId || filterValue}
+							<span class="filter-badge">Active</span>
+						{/if}
+					</div>
+
 					<div class="filter-field">
 						<label for="database-filter-column">Column</label>
-						<select id="database-filter-column" value={filterColumnId} onchange={(e) => { filterColumnId = e.currentTarget.value; filterValue = ''; }}>
-							<option value="">Choose a column</option>
-							{#each columns as column (column.id)}
-								<option value={column.id}>{column.name}</option>
-							{/each}
-						</select>
+						<div class="filter-select-wrapper">
+							<select id="database-filter-column" value={filterColumnId} onchange={(e) => { filterColumnId = e.currentTarget.value; filterValue = ''; }}>
+								<option value="">Choose a column</option>
+								{#each columns as column (column.id)}
+									<option value={column.id}>{column.name}</option>
+								{/each}
+							</select>
+							<ChevronDown size={13} class="filter-chevron" />
+						</div>
 					</div>
+
 					{#if activeFilterColumn}
 						<div class="filter-field">
 							<label for="database-filter-value">Value</label>
 							{#if activeFilterColumn.type === 'status' || activeFilterColumn.type === 'multi-select'}
-								<select id="database-filter-value" bind:value={filterValue}>
-									<option value="">Choose a value</option>
-									{#each options[activeFilterColumn.id] || [] as option (option)}
-										<option value={option}>{option}</option>
-									{/each}
-								</select>
+								<div class="filter-select-wrapper">
+									<select id="database-filter-value" bind:value={filterValue}>
+										<option value="">Choose a value</option>
+										{#each options[activeFilterColumn.id] || [] as option (option)}
+											<option value={option}>{option}</option>
+										{/each}
+									</select>
+									<ChevronDown size={13} class="filter-chevron" />
+								</div>
 							{:else}
 								<input
 									id="database-filter-value"
@@ -543,15 +573,17 @@
 									bind:value={filterValue}
 									placeholder={activeFilterColumn.type === 'number' ? 'Enter a number...' : activeFilterColumn.type === 'date' ? 'Choose a date...' : 'Enter text...'}
 									onkeydown={(e) => e.stopPropagation()}
+									class="filter-input-field"
 								/>
 							{/if}
 						</div>
-					{:else}
-						<p class="filter-help">Choose a column to set its filter value.</p>
 					{/if}
-					<button type="button" class="filter-clear-btn" onclick={clearFilter} disabled={!filterColumnId && !filterValue}>
-						<X size={13} /> Clear filter
-					</button>
+
+					<div class="filter-popover-footer">
+						<button type="button" class="filter-clear-btn" onclick={clearFilter} disabled={!filterColumnId && !filterValue}>
+							<X size={13} /> Reset filter
+						</button>
+					</div>
 				</div>
 			{/if}
 		</div>
@@ -578,7 +610,7 @@
 
 	<!-- Scrollable Table -->
 	<div class="db-table-layout">
-		<div class="db-table-wrapper" class:has-gutter={editable}>
+		<div class="db-table-wrapper" class:has-gutter={editable} class:has-open-popover={activeSelectDropdown !== null || activeColumnMenu !== null}>
 		<table class="db-table">
 			<thead>
 				<tr>
@@ -590,11 +622,10 @@
 									type="button"
 									class="row-checkbox-floating"
 									role="checkbox"
+									aria-checked={processedRows().length > 0 && processedRows().every((row: any) => selectedRowIds.includes(row.id))}
 									class:checked={processedRows().length > 0 && processedRows().every((row: any) => selectedRowIds.includes(row.id))}
-									class:indeterminate={processedRows().some((row: any) => selectedRowIds.includes(row.id)) && !processedRows().every((row: any) => selectedRowIds.includes(row.id))}
-									aria-label="Select visible rows"
-									aria-checked={processedRows().length > 0 && processedRows().every((row: any) => selectedRowIds.includes(row.id)) ? 'true' : processedRows().some((row: any) => selectedRowIds.includes(row.id)) ? 'mixed' : 'false'}
-									onclick={() => toggleSelectAll(processedRows())}
+									onclick={(e) => { e.stopPropagation(); toggleSelectAll(processedRows()); }}
+									title="Select All Visible"
 								>
 									{#if processedRows().length > 0 && processedRows().every((row: any) => selectedRowIds.includes(row.id))}
 										<span class="check-mark-icon">✓</span>
@@ -632,7 +663,7 @@
 							{#if activeColumnMenu === col.id}
 								<!-- svelte-ignore a11y_click_events_have_key_events -->
 								<!-- svelte-ignore a11y_no_static_element_interactions -->
-								<div class="th-menu-popover" onclick={(e) => e.stopPropagation()}>
+								<div class="th-menu-popover" class:open-left={colIdx >= columns.length - 1} onclick={(e) => e.stopPropagation()}>
 									<div class="popover-section">
 										<label for="col-name-input-{col.id}">Column Name</label>
 										<input 
@@ -716,7 +747,6 @@
 											</div>
 										</div>
 									{/if}
-
 									<div class="column-move-actions">
 										<button
 											type="button"
@@ -771,7 +801,7 @@
 			</thead>
 			
 			<tbody>
-					{#each processedRows() as row (row.id)}
+					{#each processedRows() as row, rowIdx (row.id)}
 					<tr data-row-id={row.id} class:row-selected={selectedRowIds.includes(row.id)}>
 						<!-- Cell inputs -->
 						{#each columns as col, colIdx (col.id)}
@@ -867,7 +897,9 @@
 								<!-- Options Popover (Status / Multi-Select) -->
 								{#if activeSelectDropdown?.rowId === row.id && activeSelectDropdown?.colId === col.id}
 									{@const isMulti = col.type === 'multi-select'}
-									<div class="tag-select-popover">
+									{@const isBottomRow = rowIdx >= processedRows().length - 2}
+									{@const isRightCol = colIdx >= columns.length - 1}
+									<div class="tag-select-popover" class:open-up={isBottomRow} class:open-left={isRightCol}>
 										<div class="options-list">
 											{#each options[col.id] || [] as option (option)}
 												{@const isSel = isOptionSelected(row, col.id, option, isMulti)}
@@ -1052,7 +1084,9 @@
 		background-color: var(--bg-canvas);
 		border: 1px solid var(--border-color);
 		border-radius: 6px;
-		padding: 4px 10px;
+		padding: 0 10px;
+		height: 34px;
+		box-sizing: border-box;
 		width: 180px;
 		box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
 	}
@@ -1070,6 +1104,7 @@
 	.db-search-input {
 		font-size: 13px;
 		width: 100%;
+		height: 100%;
 		border: 0;
 		outline: none;
 		box-shadow: none;
@@ -1098,8 +1133,9 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		height: 30px;
-		padding: 0 9px;
+		height: 34px;
+		box-sizing: border-box;
+		padding: 0 10px;
 		border: 1px solid var(--border-color);
 		border-radius: 6px;
 		font-size: 12px;
@@ -1119,8 +1155,9 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 5px;
-		height: 30px;
-		padding: 0 9px;
+		height: 34px;
+		box-sizing: border-box;
+		padding: 0 10px;
 		border: 1px solid var(--border-color);
 		border-radius: 6px;
 		font-size: 12px;
@@ -1157,70 +1194,177 @@
 		top: calc(100% + 6px);
 		left: 0;
 		z-index: 1000;
-		width: 220px;
-		padding: 12px;
+		width: 240px;
+		max-width: calc(100vw - 32px);
+		max-height: calc(100vh - 120px);
+		overflow-y: auto;
+		box-sizing: border-box;
+		padding: 14px;
 		border: 1px solid var(--border-color);
-		border-radius: 8px;
-		background: var(--bg-canvas);
-		box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.15);
+		border-radius: 10px;
+		background: color-mix(in srgb, var(--bg-canvas) 92%, var(--border-color));
+		backdrop-filter: blur(12px);
+		box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.18), 0 4px 12px -2px rgba(0, 0, 0, 0.08);
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
+		gap: 12px;
+		animation: popoverFadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+		transform-origin: top left;
+	}
+
+	@keyframes popoverFadeIn {
+		from {
+			opacity: 0;
+			transform: scale(0.96) translateY(-4px);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1) translateY(0);
+		}
+	}
+
+	@media (max-width: 640px) {
+		.db-header-bar {
+			flex-wrap: wrap;
+			max-width: 100%;
+			gap: 8px;
+		}
+
+		.db-search-wrapper {
+			flex: 1 1 140px;
+			max-width: 100%;
+		}
+
+		.db-filter-popover {
+			left: auto;
+			right: 0;
+			width: min(250px, calc(100vw - 32px));
+			transform-origin: top right;
+		}
+	}
+
+	.filter-popover-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding-bottom: 8px;
+		border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+	}
+
+	.filter-title {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--text-main);
+		letter-spacing: -0.01em;
+	}
+
+	.filter-title :global(.filter-header-icon) {
+		color: var(--accent-color);
+	}
+
+	.filter-badge {
+		font-size: 10px;
+		font-weight: 600;
+		padding: 2px 7px;
+		border-radius: 10px;
+		background-color: color-mix(in srgb, var(--accent-color) 15%, transparent);
+		color: var(--accent-color);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
 	}
 
 	.filter-field {
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
+		gap: 5px;
 	}
 
 	.filter-field label {
 		font-size: 10px;
 		font-weight: 600;
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: 0.06em;
 		color: var(--text-muted);
 	}
 
-	.filter-help {
-		margin: -2px 0 0;
-		font-size: 11px;
-		line-height: 1.4;
-		color: var(--text-muted);
+	.filter-select-wrapper {
+		position: relative;
+		display: flex;
+		align-items: center;
 	}
 
-	.filter-field input,
-	.filter-field select {
+	.filter-select-wrapper select,
+	.filter-input-field {
 		width: 100%;
-		min-height: 28px;
-		padding: 5px 7px;
+		height: 32px;
+		padding: 0 28px 0 10px;
 		border: 1px solid var(--border-color);
-		border-radius: 4px;
+		border-radius: 6px;
 		font-size: 12px;
 		color: var(--text-main);
-		background: var(--bg-canvas);
+		background-color: var(--bg-canvas);
+		appearance: none;
+		outline: none;
+		transition: all 0.15s ease;
+	}
+
+	.filter-input-field {
+		padding: 0 10px;
+	}
+
+	.filter-select-wrapper select:hover,
+	.filter-input-field:hover {
+		border-color: color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
+	}
+
+	.filter-select-wrapper select:focus,
+	.filter-input-field:focus {
+		border-color: var(--accent-color);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 18%, transparent);
+	}
+
+	.filter-select-wrapper :global(.filter-chevron) {
+		position: absolute;
+		right: 9px;
+		pointer-events: none;
+		color: var(--text-muted);
+		transition: transform 0.15s ease;
+	}
+
+	.filter-popover-footer {
+		padding-top: 4px;
+		border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
 	}
 
 	.filter-clear-btn {
+		width: 100%;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		gap: 5px;
-		padding: 6px 8px;
-		border-top: 1px solid var(--border-color);
+		gap: 6px;
+		padding: 6px 10px;
+		border-radius: 6px;
+		border: 1px solid transparent;
 		color: var(--text-muted);
 		font-size: 12px;
+		font-weight: 500;
+		background: transparent;
+		transition: all 0.15s ease;
+		cursor: pointer;
 	}
 
-	.filter-clear-btn:hover:not(:disabled),
-	.filter-clear-btn:focus-visible:not(:disabled) {
-		color: var(--text-main);
-		background: var(--hover-icon);
+	.filter-clear-btn:hover:not(:disabled) {
+		color: var(--color-red, #ef4444);
+		background-color: color-mix(in srgb, var(--color-red, #ef4444) 10%, transparent);
+		border-color: color-mix(in srgb, var(--color-red, #ef4444) 20%, transparent);
 	}
 
 	.filter-clear-btn:disabled {
-		cursor: not-allowed;
 		opacity: 0.45;
+		cursor: not-allowed;
 	}
 
 	/* Table Wrapper */
@@ -1306,14 +1450,6 @@
 	.row-checkbox-floating.checked,
 	.row-checkbox-floating:hover {
 		opacity: 1;
-	}
-
-	.row-checkbox-floating.indeterminate::after {
-		content: '';
-		width: 8px;
-		height: 2px;
-		background: #fff;
-		border-radius: 2px;
 	}
 
 	.db-td.first-col > input,
@@ -1770,18 +1906,30 @@
 	/* Select Popover */
 	.tag-select-popover {
 		position: absolute;
-		top: 100%;
+		top: calc(100% + 4px);
 		left: 0;
-		z-index: 60;
+		z-index: 1000;
 		background-color: var(--bg-canvas);
 		border: 1px solid var(--border-color);
 		border-radius: 8px;
-		box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+		box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.12);
 		padding: 8px;
 		width: 220px;
+		max-width: calc(100vw - 32px);
 		display: flex;
 		flex-direction: column;
 		gap: 8px;
+	}
+
+	.tag-select-popover.open-up {
+		top: auto;
+		bottom: calc(100% + 4px);
+		box-shadow: 0 -10px 25px -5px rgba(0, 0, 0, 0.18), 0 -8px 10px -6px rgba(0, 0, 0, 0.12);
+	}
+
+	.tag-select-popover.open-left {
+		left: auto;
+		right: 0;
 	}
 
 	.options-list {
