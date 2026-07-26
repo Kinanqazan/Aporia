@@ -2,10 +2,11 @@
 
 > A minimalist, debloated Notion alternative built for personal use. Self-hosted, lightning-fast, and 100% private.
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?style=for-the-badge&logo=vercel)](https://aporia.vercel.app)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?style=for-the-badge&logo=vercel)](https://aporia-notes.vercel.app/)
 [![Svelte 5](https://img.shields.io/badge/Svelte-5-orange?style=for-the-badge&logo=svelte)](https://svelte.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker)](https://www.docker.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
 ---
 
@@ -33,7 +34,7 @@ Built for speed, clarity, and simplicity, Aporia combines modern block-based edi
 
 ## 🚀 Live Demo
 
-Try Aporia directly in your browser: **[aporia.vercel.app](https://aporia.vercel.app)**
+Try Aporia directly in your browser: **[aporia-notes.vercel.app](https://aporia-notes.vercel.app/)**
 
 > **Note for Demo Visitors:**  
 > The public Vercel demo opens without a login. It is a shared, disposable workspace: changes may be visible to other visitors and can reset at any time. Do not add private or sensitive information.
@@ -69,7 +70,7 @@ Try Aporia directly in your browser: **[aporia.vercel.app](https://aporia.vercel
 Push your changes to GitHub. The GitHub Actions workflow (`.github/workflows/docker-publish.yml`) automatically builds and publishes the image to GitHub Container Registry (GHCR):
 
 ```text
-ghcr.io/<github-owner>/aporia:latest
+ghcr.io/kinanqaz/aporia:latest
 ```
 
 ### 2. Prepare the Docker Host
@@ -86,7 +87,7 @@ Add `aporia` to your `docker-compose.yml`:
 ```yaml
 services:
   aporia:
-    image: ghcr.io/<github-owner>/aporia:latest
+    image: ghcr.io/kinanqaz/aporia:latest
     container_name: aporia
     restart: unless-stopped
     ports:
@@ -140,7 +141,7 @@ systemctl reload caddy
 
 1. **Clone the repository:**
    ```sh
-   git clone https://github.com/<github-owner>/aporia.git
+   git clone https://github.com/kinanqaz/aporia.git
    cd aporia
    ```
 
@@ -163,4 +164,4 @@ systemctl reload caddy
 
 ## 📄 License
 
-MIT License.
+Released under the [MIT License](LICENSE).
