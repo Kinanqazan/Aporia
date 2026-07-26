@@ -1,4 +1,5 @@
 import { redirect, type Handle } from '@sveltejs/kit';
+import { env } from '$env/dynamic/private';
 import {
 	getValidSession,
 	isPasswordConfigured,
@@ -8,6 +9,21 @@ import {
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const path = event.url.pathname;
+	const isDemoMode = env.VERCEL === '1' && env.APORIA_DEMO_MODE === 'true';
+
+	if (isDemoMode) {
+		if (
+			path === '/login' ||
+			path === '/setup' ||
+			path === '/change-password' ||
+			path === '/logout' ||
+			path === '/logout-all'
+		) {
+			throw redirect(303, '/');
+		}
+
+		return resolve(event);
+	}
 	
 	// Allow public authentication pages and static assets.
 	if (

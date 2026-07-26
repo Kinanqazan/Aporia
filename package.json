@@ -14,7 +14,6 @@
 		"check:notion-import": "node scripts/check-notion-import.mjs"
 	},
 	"devDependencies": {
-		"@sveltejs/adapter-auto": "^7.0.1",
 		"@sveltejs/adapter-node": "^5.5.4",
 		"@sveltejs/adapter-vercel": "^6.3.4",
 		"@sveltejs/kit": "^2.63.0",

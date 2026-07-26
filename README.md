@@ -25,43 +25,7 @@ Built for speed, clarity, and simplicity, Aporia combines modern block-based edi
 <div align="center">
   <br />
   
-  <!-- Desktop Laptop Window Frame -->
-  <table border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: 850px; margin: 0 auto; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.4);">
-    <tr style="background: #181825;">
-      <td style="padding: 10px 16px; border-bottom: 1px solid #313244;">
-        <span style="color: #ed8796; font-size: 14px;">●</span>
-        <span style="color: #eed49f; font-size: 14px;">●</span>
-        <span style="color: #a6da95; font-size: 14px;">●</span>
-        <span style="color: #b7bdf8; font-size: 13px; margin-left: 12px; font-family: system-ui, sans-serif; font-weight: 500;">aporia.app — Workspace & Block Editor</span>
-      </td>
-    </tr>
-    <tr>
-      <td style="background: #11111b; padding: 0;">
-        <img src="static/screenshots/desktop.png" alt="Aporia Desktop Workspace" width="100%" style="display: block; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;">
-      </td>
-    </tr>
-  </table>
-  
-  <br />
-  <br />
-
-  <!-- Mobile Side-by-Side Frames -->
-  <table border="0" cellspacing="20" cellpadding="0">
-    <tr>
-      <td align="center" valign="top">
-        <div style="background: #181825; border: 3px solid #313244; border-radius: 36px; padding: 12px 10px 16px 10px; box-shadow: 0 12px 30px rgba(0,0,0,0.5); display: inline-block;">
-          <div style="width: 60px; height: 5px; background: #45475a; border-radius: 3px; margin: 0 auto 10px auto;"></div>
-          <img src="static/screenshots/phone-1.png" alt="Aporia Mobile View 1" width="240" style="border-radius: 24px; display: block;">
-        </div>
-      </td>
-      <td align="center" valign="top">
-        <div style="background: #181825; border: 3px solid #313244; border-radius: 36px; padding: 12px 10px 16px 10px; box-shadow: 0 12px 30px rgba(0,0,0,0.5); display: inline-block;">
-          <div style="width: 60px; height: 5px; background: #45475a; border-radius: 3px; margin: 0 auto 10px auto;"></div>
-          <img src="static/screenshots/phone-2.png" alt="Aporia Mobile View 2" width="240" style="border-radius: 24px; display: block;">
-        </div>
-      </td>
-    </tr>
-  </table>
+  <img src="static/screenshots/Aporia_Screenshot.png" alt="Aporia on desktop and mobile" width="100%" style="display: block; max-width: 1680px; border-radius: 12px;">
   <br />
 </div>
 
@@ -72,7 +36,7 @@ Built for speed, clarity, and simplicity, Aporia combines modern block-based edi
 Try Aporia directly in your browser: **[aporia.vercel.app](https://aporia.vercel.app)**
 
 > **Note for Demo Visitors:**  
-> The Vercel preview runs an isolated, temporary instance. On your first visit, set up any demo username & password (e.g. `admin` / `password123`) to explore the editor, create pages, and test all features. Demo instances automatically reset after inactivity.
+> The public Vercel demo opens without a login. It is a shared, disposable workspace: changes may be visible to other visitors and can reset at any time. Do not add private or sensitive information.
 
 ---
 
