@@ -426,7 +426,6 @@ textarea {
 }
 
 .page-item-row.active {
-	gap: 8px;
 	font-weight: 500;
 	font-size: 14px;
 }
@@ -1264,8 +1263,10 @@ textarea {
 .ProseMirror ul[data-type="taskList"] li {
 	display: flex;
 	align-items: flex-start;
-	gap: 10px;
+	gap: 6px;
 	margin-bottom: 6px;
+	position: relative;
+	transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .ProseMirror ul[data-type="taskList"] label {
@@ -1273,6 +1274,97 @@ textarea {
 	margin-top: 3px;
 	display: flex;
 	align-items: center;
+	gap: 4px;
+	flex-shrink: 0;
+}
+
+.task-item-drag-handle {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	cursor: grab;
+	opacity: 0;
+	color: var(--text-muted);
+	user-select: none;
+	touch-action: none;
+	-webkit-user-drag: element;
+	flex-shrink: 0;
+	width: 18px;
+	height: 18px;
+	margin-top: 3px;
+	transition: color 0.15s ease;
+}
+
+.task-item-drag-handle svg,
+.task-item-drag-handle circle {
+	pointer-events: none;
+}
+
+.ProseMirror ul[data-type="taskList"] li:hover .task-item-drag-handle {
+	opacity: 0.55;
+}
+
+/* Always show drag handle in phone mode and on touch screens */
+.mobile .task-item-drag-handle {
+	opacity: 0.65 !important;
+}
+
+@media (max-width: 768px) {
+	.task-item-drag-handle {
+		opacity: 0.65 !important;
+	}
+}
+
+@media (pointer: coarse) {
+	.task-item-drag-handle {
+		opacity: 0.65 !important;
+	}
+}
+
+.ProseMirror ul[data-type="taskList"] li .task-item-drag-handle:hover {
+	opacity: 1 !important;
+	color: var(--text-main);
+}
+
+.task-item-drag-handle:active {
+	cursor: grabbing;
+}
+
+.ProseMirror ul[data-type="taskList"] li.task-item-dragging {
+	opacity: 0.45;
+	background-color: var(--hover-sidebar);
+	border-radius: 4px;
+}
+
+.ProseMirror ul[data-type="taskList"] li.task-item-drop-above::before {
+	content: '';
+	position: absolute;
+	top: -3px;
+	left: 0;
+	right: 0;
+	height: 2px;
+	background-color: var(--accent-color);
+	border-radius: 2px;
+	pointer-events: none;
+	z-index: 10;
+}
+
+.ProseMirror ul[data-type="taskList"] li.task-item-drop-below::after {
+	content: '';
+	position: absolute;
+	bottom: -3px;
+	left: 0;
+	right: 0;
+	height: 2px;
+	background-color: var(--accent-color);
+	border-radius: 2px;
+	pointer-events: none;
+	z-index: 10;
+}
+
+.ProseMirror[contenteditable="false"] .task-item-drag-handle,
+.editor-container.locked .task-item-drag-handle {
+	display: none !important;
 }
 
 .ProseMirror ul[data-type="taskList"] input[type="checkbox"] {

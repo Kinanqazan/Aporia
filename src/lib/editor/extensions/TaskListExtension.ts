@@ -49,11 +49,112 @@ function deleteTaskItem(editor: any, taskItemDepth: number): boolean {
 	return true;
 }
 
+export const TASK_INTERACTION_META = 'aporia-task-interaction';
+
+let activeDraggedTask: { editor: any; pos: number } | null = null;
+
+function clearAllTaskDropIndicators() {
+	if (typeof document !== 'undefined') {
+		document.querySelectorAll('.task-item-drop-above, .task-item-drop-below, .task-item-dragging').forEach((el) => {
+			el.classList.remove('task-item-drop-above', 'task-item-drop-below', 'task-item-dragging');
+		});
+	}
+}
+
+function parentTaskListPos(doc: ProseMirrorNode, itemPos: number): number | null {
+	try {
+		const $item = doc.resolve(itemPos);
+		for (let depth = $item.depth; depth > 0; depth--) {
+			if ($item.node(depth).type.name === 'taskList') return $item.before(depth);
+		}
+	} catch {
+		// A stale node-view position is treated as a cancelled drag.
+	}
+	return null;
+}
+
+function taskItemsShareParentList(doc: ProseMirrorNode, sourcePos: number, targetPos: number) {
+	const sourceListPos = parentTaskListPos(doc, sourcePos);
+	return sourceListPos !== null && sourceListPos === parentTaskListPos(doc, targetPos);
+}
+
+type OrderedTaskItem = { attrs?: { checked?: boolean; order?: number | null } };
+
+export function sortTaskItemsByCompletionAndOrder<T extends OrderedTaskItem>(items: T[]): T[] {
+	return [...items].sort((left, right) => {
+		const completionDifference = Number(!!left.attrs?.checked) - Number(!!right.attrs?.checked);
+		if (completionDifference !== 0) return completionDifference;
+
+		const leftOrder = typeof left.attrs?.order === 'number' ? left.attrs.order : 0;
+		const rightOrder = typeof right.attrs?.order === 'number' ? right.attrs.order : 0;
+		return leftOrder - rightOrder;
+	});
+}
+
+function reindexTaskListOrders(tr: any, listPos: number) {
+	const listNode = tr.doc.nodeAt(listPos);
+	if (!listNode || listNode.type.name !== 'taskList') return;
+
+	listNode.forEach((child: ProseMirrorNode, offset: number) => {
+		tr.setNodeMarkup(listPos + 1 + offset, undefined, {
+			...child.attrs,
+			order: offset
+		});
+	});
+}
+
+export function moveTaskItem(
+	editor: any,
+	sourcePos: number,
+	targetPos: number,
+	placeAfter: boolean
+): boolean {
+	const { state } = editor;
+	const sourceNode = state.doc.nodeAt(sourcePos);
+	const targetNode = state.doc.nodeAt(targetPos);
+	if (!sourceNode || !targetNode || sourceNode.type.name !== 'taskItem' || targetNode.type.name !== 'taskItem') {
+		return false;
+	}
+
+	if (!taskItemsShareParentList(state.doc, sourcePos, targetPos)) return false;
+
+	const originalInsertPos = placeAfter ? targetPos + targetNode.nodeSize : targetPos;
+	const tr = state.tr.delete(sourcePos, sourcePos + sourceNode.nodeSize);
+	const insertPos = tr.mapping.map(originalInsertPos);
+	tr.insert(insertPos, sourceNode);
+	const listPos = parentTaskListPos(tr.doc, insertPos);
+	if (listPos !== null) reindexTaskListOrders(tr, listPos);
+	tr.setMeta(TASK_INTERACTION_META, true);
+
+	const selectionPos = Math.min(insertPos + 1, tr.doc.content.size);
+	tr.setSelection(Selection.near(tr.doc.resolve(selectionPos)));
+	editor.view.dispatch(tr);
+	editor.view.focus();
+	return true;
+}
+
 /**
  * Extended TaskItem extension that ensures checkbox checking works identically
- * and reliably in BOTH Edit Mode and Locked/Read-Only Mode without stale node references.
+ * and reliably in BOTH Edit Mode and Locked/Read-Only Mode without stale node references,
+ * and supports reordering items via drag and drop.
  */
 export const EnhancedTaskItem = TaskItem.extend({
+	addAttributes() {
+		return {
+			...this.parent?.(),
+			order: {
+				default: null,
+				parseHTML: (element) => {
+					const value = element.getAttribute('data-order');
+					const parsed = value === null ? NaN : Number(value);
+					return Number.isFinite(parsed) ? parsed : null;
+				},
+				renderHTML: (attributes) =>
+					typeof attributes.order === 'number' ? { 'data-order': attributes.order } : {}
+			}
+		};
+	},
+
 	addKeyboardShortcuts() {
 		return {
 			Enter: ({ editor }) => {
@@ -209,6 +310,14 @@ export const EnhancedTaskItem = TaskItem.extend({
 			const label = document.createElement('label');
 			label.contentEditable = 'false';
 
+			// Drag handle icon for reordering items
+			const dragHandle = document.createElement('span');
+			dragHandle.className = 'task-item-drag-handle';
+			dragHandle.contentEditable = 'false';
+			dragHandle.draggable = true;
+			dragHandle.title = 'Drag to reorder item';
+			dragHandle.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg>`;
+
 			const checkbox = document.createElement('input');
 			checkbox.type = 'checkbox';
 			checkbox.checked = !!currentNode.attrs.checked;
@@ -220,7 +329,7 @@ export const EnhancedTaskItem = TaskItem.extend({
 
 			checkbox.addEventListener('mousedown', (event) => {
 				blurActiveSearchInput();
-				event.preventDefault();
+				event.stopPropagation();
 			});
 
 			const toggleCheck = (e: Event) => {
@@ -259,35 +368,190 @@ export const EnhancedTaskItem = TaskItem.extend({
 							editor.state.tr.setNodeMarkup(pos, undefined, {
 								...liveNode.attrs,
 								checked: newChecked
-							})
+							}).setMeta(TASK_INTERACTION_META, true)
 						);
 					}
 					return;
 				}
 
-				// Handle edit mode checkbox toggles using live position
-				const applied = editor.chain()
-					.focus(undefined, { scrollIntoView: false })
-					.command(({ tr }) => {
-						const livePos = getPos();
-						if (typeof livePos !== 'number') return false;
-
-						const nodeAtPos = tr.doc.nodeAt(livePos);
-						if (!nodeAtPos || nodeAtPos.type.name !== 'taskItem') return false;
-
-						tr.setNodeMarkup(livePos, undefined, {
-							...nodeAtPos.attrs,
-							checked: newChecked
-						});
-						return true;
-					})
-					.run();
-
-				if (!applied) checkbox.checked = !newChecked;
+				// Fast atomic transaction for edit mode (identical instant performance to read-only mode)
+				const tr = editor.state.tr.setNodeMarkup(pos, undefined, {
+					...liveNode.attrs,
+					checked: newChecked
+				}).setMeta(TASK_INTERACTION_META, true);
+				editor.view.dispatch(tr);
 			};
 
 			checkbox.addEventListener('change', toggleCheck);
 
+			// Attach Drag & Drop event listeners to dragHandle & dom (HTML5 Mouse Drag)
+			dragHandle.addEventListener('dragstart', (e: DragEvent) => {
+				if (!editor || !editor.isEditable) {
+					e.preventDefault();
+					return;
+				}
+				if (typeof getPos !== 'function') return;
+				const pos = getPos();
+				if (typeof pos !== 'number') return;
+
+				clearAllTaskDropIndicators();
+				activeDraggedTask = { editor, pos };
+				dom.classList.add('task-item-dragging');
+				if (e.dataTransfer) {
+					e.dataTransfer.effectAllowed = 'move';
+					e.dataTransfer.setData('text/plain', '');
+				}
+				e.stopPropagation();
+			});
+
+			dragHandle.addEventListener('dragend', (e: DragEvent) => {
+				activeDraggedTask = null;
+				clearAllTaskDropIndicators();
+				e.stopPropagation();
+			});
+
+			// Touch Drag & Drop support for mobile phone mode & touch screens
+			let touchStartPos: number | null = null;
+
+			dragHandle.addEventListener('touchstart', (e: TouchEvent) => {
+				if (!editor || !editor.isEditable) return;
+				if (typeof getPos !== 'function') return;
+				const pos = getPos();
+				if (typeof pos !== 'number') return;
+
+				touchStartPos = pos;
+				clearAllTaskDropIndicators();
+				dom.classList.add('task-item-dragging');
+
+				const onTouchMove = (moveEv: TouchEvent) => {
+					if (touchStartPos === null) return;
+					const touch = moveEv.touches[0];
+					if (!touch) return;
+
+					if (moveEv.cancelable) {
+						moveEv.preventDefault();
+					}
+
+					const targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
+					if (!targetElement) return;
+
+					const targetLi = targetElement.closest('li[data-type="taskItem"]') as HTMLElement | null;
+					clearAllTaskDropIndicators();
+					dom.classList.add('task-item-dragging');
+
+					if (targetLi && targetLi !== dom) {
+						const targetPos = editor.view.posAtDOM(targetLi, 0);
+						if (!taskItemsShareParentList(editor.state.doc, touchStartPos, targetPos)) return;
+						const rect = targetLi.getBoundingClientRect();
+						const isTopHalf = touch.clientY < rect.top + rect.height / 2;
+						if (isTopHalf) {
+							targetLi.classList.add('task-item-drop-above');
+						} else {
+							targetLi.classList.add('task-item-drop-below');
+						}
+					}
+				};
+
+				const onTouchEnd = (endEv: TouchEvent) => {
+					window.removeEventListener('touchmove', onTouchMove);
+					window.removeEventListener('touchend', onTouchEnd);
+					window.removeEventListener('touchcancel', onTouchEnd);
+
+					const sourcePos = touchStartPos;
+					touchStartPos = null;
+
+					const touch = endEv.changedTouches[0];
+					if (!touch || sourcePos === null || !editor || !editor.isEditable) {
+						clearAllTaskDropIndicators();
+						return;
+					}
+
+					const targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
+					const targetLi = targetElement ? (targetElement.closest('li[data-type="taskItem"]') as HTMLElement | null) : null;
+
+					if (!targetLi) {
+						clearAllTaskDropIndicators();
+						return;
+					}
+
+					try {
+						const targetPos = editor.view.posAtDOM(targetLi, 0);
+						if (typeof targetPos !== 'number' || targetPos === sourcePos) {
+							clearAllTaskDropIndicators();
+							return;
+						}
+
+						const rect = targetLi.getBoundingClientRect();
+						const isTopHalf = touch.clientY < rect.top + rect.height / 2;
+						moveTaskItem(editor, sourcePos, targetPos, !isTopHalf);
+					} catch (err) {
+						console.error('Error during touch drop:', err);
+					} finally {
+						clearAllTaskDropIndicators();
+						requestAnimationFrame(clearAllTaskDropIndicators);
+					}
+				};
+
+				window.addEventListener('touchmove', onTouchMove, { passive: false });
+				window.addEventListener('touchend', onTouchEnd, { passive: false });
+				window.addEventListener('touchcancel', onTouchEnd, { passive: false });
+			}, { passive: true });
+
+			dom.addEventListener('dragover', (e: DragEvent) => {
+				if (!activeDraggedTask || activeDraggedTask.editor !== editor || !editor.isEditable) return;
+				if (typeof getPos !== 'function') return;
+				const pos = getPos();
+				if (
+					typeof pos !== 'number' ||
+					pos === activeDraggedTask.pos ||
+					!taskItemsShareParentList(editor.state.doc, activeDraggedTask.pos, pos)
+				) return;
+
+				e.preventDefault();
+				if (e.dataTransfer) {
+					e.dataTransfer.dropEffect = 'move';
+				}
+
+				const rect = dom.getBoundingClientRect();
+				const isTopHalf = e.clientY < rect.top + rect.height / 2;
+				if (isTopHalf) {
+					dom.classList.add('task-item-drop-above');
+					dom.classList.remove('task-item-drop-below');
+				} else {
+					dom.classList.add('task-item-drop-below');
+					dom.classList.remove('task-item-drop-above');
+				}
+				e.stopPropagation();
+			});
+
+			dom.addEventListener('dragleave', (e: DragEvent) => {
+				const related = e.relatedTarget as Node | null;
+				if (!related || !dom.contains(related)) {
+					dom.classList.remove('task-item-drop-above', 'task-item-drop-below');
+				}
+			});
+
+			dom.addEventListener('drop', (e: DragEvent) => {
+				const draggedTask = activeDraggedTask;
+				activeDraggedTask = null;
+				clearAllTaskDropIndicators();
+
+				if (!draggedTask || draggedTask.editor !== editor || !editor.isEditable) return;
+				if (typeof getPos !== 'function') return;
+				const targetPos = getPos();
+				if (typeof targetPos !== 'number') return;
+
+				if (draggedTask.pos === targetPos) return;
+				e.preventDefault();
+				e.stopPropagation();
+
+				const rect = dom.getBoundingClientRect();
+				const isTopHalf = e.clientY < rect.top + rect.height / 2;
+				moveTaskItem(editor, draggedTask.pos, targetPos, !isTopHalf);
+				requestAnimationFrame(clearAllTaskDropIndicators);
+			});
+
+			dom.appendChild(dragHandle);
 			label.appendChild(checkbox);
 			dom.appendChild(label);
 
@@ -299,7 +563,7 @@ export const EnhancedTaskItem = TaskItem.extend({
 				contentDOM,
 				stopEvent(event: Event) {
 					const target = event.target as HTMLElement | null;
-					return !!target?.closest('label, input[type="checkbox"]');
+					return !!target?.closest('.task-item-drag-handle, label, input[type="checkbox"]');
 				},
 				ignoreMutation(mutation: ViewMutationRecord) {
 					return mutation.type === 'attributes' &&
@@ -311,6 +575,7 @@ export const EnhancedTaskItem = TaskItem.extend({
 					currentNode = updatedNode;
 					dom.setAttribute('data-checked', updatedNode.attrs.checked ? 'true' : 'false');
 					checkbox.checked = !!updatedNode.attrs.checked;
+					clearAllTaskDropIndicators();
 					return true;
 				}
 			};
@@ -329,58 +594,46 @@ export const EnhancedTaskList = TaskList.extend({
 			...(this.parent?.() || []),
 			new Plugin({
 				key: new PluginKey('taskListAutoSort'),
-				appendTransaction(transactions, oldState, newState) {
-					if (!transactions.some((tr) => tr.docChanged)) return null;
+				appendTransaction(transactions, _oldState, newState) {
+					const tr = newState.tr;
+					let initializedOrder = false;
 
-					// Check if any taskItem's checked attribute changed between oldState and newState
-					let checkboxStateChanged = false;
-					const oldCheckedMap = new Map<string, boolean>();
-
-					oldState.doc.descendants((node, pos) => {
-						if (node.type.name === 'taskItem') {
-							oldCheckedMap.set(`${pos}`, !!node.attrs?.checked);
+					newState.doc.descendants((node: ProseMirrorNode, pos: number) => {
+						if (
+							node.type.name === 'taskList' &&
+							node.childCount > 0 &&
+							Array.from({ length: node.childCount }, (_, index) => node.child(index)).some(
+								(child) => typeof child.attrs?.order !== 'number'
+							)
+						) {
+							reindexTaskListOrders(tr, pos);
+							initializedOrder = true;
 						}
 					});
 
-					newState.doc.descendants((node, pos) => {
-						if (node.type.name === 'taskItem') {
-							const wasChecked = oldCheckedMap.get(`${pos}`);
-							const isChecked = !!node.attrs?.checked;
-							if (wasChecked !== undefined && wasChecked !== isChecked) {
-								checkboxStateChanged = true;
-							}
-						}
-					});
+					const shouldSort = transactions.some(
+						(tr) => tr.docChanged && tr.getMeta(TASK_INTERACTION_META)
+					);
+					if (!shouldSort) return initializedOrder ? tr : null;
 
-					// Only reorder when a checkbox was toggled, not on normal typing
-					if (!checkboxStateChanged) return null;
-
+					// Keep completed items below incomplete items while preserving the
+					// document order established by typing, insertion, or dragging.
 					const toReorder: Array<{ pos: number; node: ProseMirrorNode; sorted: ProseMirrorNode[] }> = [];
 
-					newState.doc.descendants((node, pos) => {
+					tr.doc.descendants((node: ProseMirrorNode, pos: number) => {
 						if (node.type.name === 'taskList' && node.childCount > 1) {
 							const children: ProseMirrorNode[] = [];
-							node.forEach((child) => children.push(child));
+							node.forEach((child: ProseMirrorNode) => children.push(child));
 
-							let seenChecked = false;
-							let needsSort = false;
-							for (const child of children) {
-								const isChecked = !!child.attrs?.checked;
-								if (isChecked) {
-									seenChecked = true;
-								} else if (seenChecked) {
-									needsSort = true;
-									break;
-								}
-							}
+							const sorted = sortTaskItemsByCompletionAndOrder(children);
+
+							const needsSort = children.some((child, idx) => child !== sorted[idx]);
 
 							if (needsSort) {
-								const unchecked = children.filter((c) => !c.attrs?.checked);
-								const checked = children.filter((c) => !!c.attrs?.checked);
 								toReorder.push({
 									pos,
 									node,
-									sorted: [...unchecked, ...checked]
+									sorted
 								});
 							}
 						}
@@ -389,8 +642,6 @@ export const EnhancedTaskList = TaskList.extend({
 					if (toReorder.length === 0) return null;
 
 					toReorder.sort((a, b) => b.pos - a.pos);
-
-					const tr = newState.tr;
 					for (const item of toReorder) {
 						const start = item.pos + 1;
 						const end = item.pos + item.node.nodeSize - 1;

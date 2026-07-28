@@ -21,7 +21,11 @@
 	import Details, { DetailsContent, DetailsSummary } from '@tiptap/extension-details';
 	import { BubbleMenu } from '@tiptap/extension-bubble-menu';
 	import { Link as TiptapLink } from '@tiptap/extension-link';
-	import { EnhancedTaskList as TaskList, EnhancedTaskItem as TaskItem } from '$lib/editor/extensions/TaskListExtension';
+	import {
+		EnhancedTaskList as TaskList,
+		EnhancedTaskItem as TaskItem,
+		TASK_INTERACTION_META
+	} from '$lib/editor/extensions/TaskListExtension';
 	import { Table as TiptapTable } from '@tiptap/extension-table';
 	import { TableRow } from '@tiptap/extension-table-row';
 	import { TableHeader } from '@tiptap/extension-table-header';
@@ -983,6 +987,7 @@
 			extensions: [
 				StarterKit.configure({
 					link: false,
+					dropcursor: false,
 					heading: {
 						levels: [1, 2, 3]
 					}
@@ -1054,7 +1059,7 @@
 						editor.view.dispatch(editor.state.tr.setNodeMarkup(position, undefined, {
 							...currentNode.attrs,
 							checked
-						}));
+						}).setMeta(TASK_INTERACTION_META, true));
 						triggerAutosave(JSON.stringify(editor.getJSON()), { allowWhenLocked: true });
 						void flushPendingSave();
 
@@ -1196,11 +1201,15 @@
 					return false;
 				}
 			},
-			onUpdate: ({ editor }) => {
+			onUpdate: ({ editor, transaction }) => {
 				const jsonContent = editor.getJSON();
 				const jsonStr = JSON.stringify(jsonContent);
 				updateToggleCount(editor.state.doc);
 				triggerAutosave(jsonStr);
+
+				if (transaction?.getMeta(TASK_INTERACTION_META)) {
+					void flushPendingSave();
+				}
 			}
 		});
 		updateToggleCount(editor.state.doc);
@@ -1362,6 +1371,7 @@
 		window.addEventListener('click', handleGlobalClick);
 		window.addEventListener('dragover', handleDragOver, { capture: true });
 		window.addEventListener('drop', handleDrop, { capture: true });
+		window.addEventListener('dragend', handleDragEnd, { capture: true });
 		
 		handleResize();
 		editorElement?.addEventListener('dblclick', handleEditorImageClick);
@@ -1385,6 +1395,7 @@
 			window.removeEventListener('click', handleGlobalClick);
 			window.removeEventListener('dragover', handleDragOver, { capture: true });
 			window.removeEventListener('drop', handleDrop, { capture: true });
+			window.removeEventListener('dragend', handleDragEnd, { capture: true });
 			editorElement?.removeEventListener('dblclick', handleEditorImageClick);
 			window.removeEventListener('keydown', handleImageViewerKeydown);
 			window.removeEventListener('resize', handleResize);
@@ -2197,7 +2208,7 @@
 				onclick={() => isIconPickerOpen = !isIconPickerOpen}
 				title="Change page icon"
 			>
-				<PageIcon icon={icon} color={iconColor} size={48} className="main-page-icon" />
+				<PageIcon icon={icon} color={iconColor} size={28} className="main-page-icon" />
 			</button>
 
 			<form 
@@ -2566,6 +2577,7 @@
 					type="button"
 					class="bubble-btn" 
 					class:active={editor!.isActive('bold')} 
+					onmousedown={(e) => e.preventDefault()}
 					onclick={() => editor!.chain().focus().toggleBold().run()}
 					title="Bold"
 				>
@@ -2575,6 +2587,7 @@
 					type="button"
 					class="bubble-btn" 
 					class:active={editor!.isActive('italic')} 
+					onmousedown={(e) => e.preventDefault()}
 					onclick={() => editor!.chain().focus().toggleItalic().run()}
 					title="Italic"
 				>
@@ -2584,6 +2597,7 @@
 					type="button"
 					class="bubble-btn" 
 					class:active={editor!.isActive('strike')} 
+					onmousedown={(e) => e.preventDefault()}
 					onclick={() => editor!.chain().focus().toggleStrike().run()}
 					title="Strikethrough"
 				>
@@ -2593,6 +2607,7 @@
 					type="button"
 					class="bubble-btn" 
 					class:active={editor!.isActive('code')} 
+					onmousedown={(e) => e.preventDefault()}
 					onclick={() => editor!.chain().focus().toggleCode().run()}
 					title="Inline Code"
 				>
@@ -2602,6 +2617,7 @@
 					type="button"
 					class="bubble-btn" 
 					class:active={editor.isActive('link')} 
+					onmousedown={(e) => e.preventDefault()}
 					onclick={setLink}
 					title="Link"
 				>
@@ -2616,6 +2632,7 @@
 						<button 
 							type="button"
 							class="bubble-btn bubble-color-btn" 
+							onmousedown={(e) => e.preventDefault()}
 							onclick={() => isColorMenuOpen = !isColorMenuOpen}
 							title="Text Color & Highlights"
 						>
@@ -2623,19 +2640,20 @@
 						</button>
 
 						{#if isColorMenuOpen}
-							<div class="color-picker-dropdown">
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div class="color-picker-dropdown" onmousedown={(e) => e.preventDefault()}>
 								<div class="color-dropdown-section">Text Color</div>
 								{#each colors as color}
 									<button 
 										type="button"
 										class="color-dropdown-item" 
+										onmousedown={(e) => e.preventDefault()}
 										onclick={() => {
 											if (color.value === 'var(--text-main)') {
 												editor!.chain().focus().unsetColor().run();
 											} else {
 												editor!.chain().focus().setColor(color.value).run();
 											}
-											isColorMenuOpen = false;
 										}}
 									>
 										<span class="color-swatch" style="color: {color.value};">A</span>
@@ -2648,13 +2666,13 @@
 									<button 
 										type="button"
 										class="color-dropdown-item" 
+										onmousedown={(e) => e.preventDefault()}
 										onclick={() => {
 											if (hl.value === 'transparent') {
 												editor!.chain().focus().unsetHighlight().run();
 											} else {
 												editor!.chain().focus().setHighlight({ color: hl.value }).run();
 											}
-											isColorMenuOpen = false;
 										}}
 									>
 										<span class="color-swatch-highlight" style="background-color: {hl.value === 'transparent' ? 'transparent' : hl.value}; border: {hl.value === 'transparent' ? '1px dashed var(--text-muted)' : 'none'};">A</span>
@@ -2966,7 +2984,7 @@
 	.page-header-row {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		gap: 6px;
 		margin-bottom: 24px;
 	}
 
@@ -2986,9 +3004,9 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 56px;
-		height: 56px;
-		border-radius: 8px;
+		width: 38px;
+		height: 38px;
+		border-radius: 6px;
 		background: transparent;
 		cursor: pointer;
 		transition: background var(--transition-speed);
@@ -3000,7 +3018,7 @@
 	}
 
 	:global(.main-page-icon) {
-		font-size: 48px;
+		font-size: 28px;
 		color: var(--text-main);
 	}
 
@@ -3218,14 +3236,14 @@
 
 	.page-title-input {
 		width: 100%;
-		font-size: 40px;
+		font-size: 28px;
 		font-weight: 700;
 		color: var(--text-main);
 		border: none;
 		background: transparent;
 		outline: none;
 		line-height: 1.3;
-		padding: 4px 0 8px;
+		padding: 2px 0 4px;
 	}
 
 	.page-title-input.arabic-text-input,

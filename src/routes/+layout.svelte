@@ -29,13 +29,14 @@
 		Archive
 	} from 'lucide-svelte';
 	import type { PageNode } from '$lib/server/pages';
+	import { parseExpandedSidebarState, serializeExpandedSidebarState } from '$lib/sidebar-state.js';
 
 	// SvelteKit Props
 	let { data, children } = $props();
 
 	// App Layout States
 	let isSidebarOpen = $state(true);
-	let isDarkMode = $state(false);
+	let isDarkMode = $state(initialDarkMode());
 	let editorTextSize = $state(16);
 	let isMobile = $state(false);
 	let isTrashOpen = $state(false);
@@ -100,6 +101,18 @@
 		return data.sidebarWidth ?? 240;
 	}
 
+	function initialDarkMode() {
+		return data.isDarkMode ?? false;
+	}
+
+	function initialExpandedNodes() {
+		return new Set<string>(data.expandedSidebarPageIds ?? []);
+	}
+
+	function initialExpandedNodesRevision() {
+		return data.expandedSidebarStateUpdatedAt ?? 0;
+	}
+
 	function initialSectionTitle() {
 		return data.sectionTitle ?? 'Private';
 	}
@@ -108,8 +121,10 @@
 	let isResizing = $state(false);
 	
 	// Track expanded nodes in the page tree sidebar
-	let expandedNodes = $state(new Set<string>());
+	let expandedNodes = $state(initialExpandedNodes());
 	const expandedNodesStorageKey = 'aporia-expanded-sidebar-pages';
+	let expandedNodesSaveQueue = Promise.resolve();
+	let expandedNodesRevision = initialExpandedNodesRevision();
 	const editorTextSizeStorageKey = 'aporia-editor-text-size';
 	const editorTextSizeOptions = [
 		{ value: 14, label: 'Small' },
@@ -152,6 +167,30 @@
 
 	function editorTextSizeStorageKeyForPage(pageId: string) {
 		return `${editorTextSizeStorageKey}:${pageId}`;
+	}
+
+	function persistExpandedNodes(nodes: Set<string>) {
+		expandedNodesRevision = Math.max(Date.now(), expandedNodesRevision + 1);
+		const serializedNodes = serializeExpandedSidebarState(nodes, expandedNodesRevision);
+		localStorage.setItem(expandedNodesStorageKey, serializedNodes);
+		const encodedCookieState = encodeURIComponent(serializedNodes);
+		if (encodedCookieState.length <= 3800) {
+			document.cookie = `${expandedNodesStorageKey}=${encodedCookieState}; path=/; max-age=31536000; SameSite=Lax`;
+		} else {
+			document.cookie = `${expandedNodesStorageKey}=; path=/; max-age=0; SameSite=Lax`;
+		}
+		expandedNodesSaveQueue = expandedNodesSaveQueue
+			.catch(() => undefined)
+			.then(async () => {
+				const response = await fetch('/api/settings', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ key: expandedNodesStorageKey, value: serializedNodes }),
+					keepalive: true
+				});
+				if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			})
+			.catch((error) => console.error('Failed to persist expanded sidebar pages:', error));
 	}
 
 	$effect(() => {
@@ -260,15 +299,26 @@
 		}
 
 		const savedExpandedNodes = localStorage.getItem(expandedNodesStorageKey);
-		if (savedExpandedNodes) {
-			try {
-				const savedIds = JSON.parse(savedExpandedNodes);
-				if (Array.isArray(savedIds)) {
-					expandedNodes = new Set(savedIds.filter((id): id is string => typeof id === 'string'));
-				}
-			} catch {
-				localStorage.removeItem(expandedNodesStorageKey);
-			}
+		const localExpandedState = parseExpandedSidebarState(savedExpandedNodes);
+		const localStateDiffersAtSameRevision =
+			localExpandedState.updatedAt === expandedNodesRevision &&
+			JSON.stringify(localExpandedState.ids) !== JSON.stringify([...expandedNodes]);
+		if (
+			savedExpandedNodes &&
+			(
+				!data.hasExpandedSidebarState ||
+				localExpandedState.updatedAt > expandedNodesRevision ||
+				localStateDiffersAtSameRevision
+			)
+		) {
+			expandedNodes = new Set(localExpandedState.ids);
+			expandedNodesRevision = Math.max(expandedNodesRevision, localExpandedState.updatedAt);
+			persistExpandedNodes(expandedNodes);
+		} else if (data.hasExpandedSidebarState) {
+			localStorage.setItem(
+				expandedNodesStorageKey,
+				serializeExpandedSidebarState(expandedNodes, expandedNodesRevision)
+			);
 		}
 
 		// Dark Mode Initialization
@@ -278,9 +328,11 @@
 		) {
 			isDarkMode = true;
 			document.documentElement.classList.add('dark');
+			document.cookie = 'theme=dark; path=/; max-age=31536000; SameSite=Lax';
 		} else {
 			isDarkMode = false;
 			document.documentElement.classList.remove('dark');
+			document.cookie = 'theme=light; path=/; max-age=31536000; SameSite=Lax';
 		}
 
 		return () => {
@@ -368,9 +420,11 @@
 		if (isDarkMode) {
 			document.documentElement.classList.add('dark');
 			localStorage.theme = 'dark';
+			document.cookie = 'theme=dark; path=/; max-age=31536000; SameSite=Lax';
 		} else {
 			document.documentElement.classList.remove('dark');
 			localStorage.theme = 'light';
+			document.cookie = 'theme=light; path=/; max-age=31536000; SameSite=Lax';
 		}
 	}
 
@@ -383,7 +437,7 @@
 			next.add(id);
 		}
 		expandedNodes = next;
-		localStorage.setItem(expandedNodesStorageKey, JSON.stringify([...next]));
+		persistExpandedNodes(next);
 	}
 
 	async function toggleFullWidth() {
@@ -608,7 +662,7 @@
 				if (placement === 'inside') {
 					const nextExpandedNodes = new Set(expandedNodes).add(node.id);
 					expandedNodes = nextExpandedNodes;
-					localStorage.setItem(expandedNodesStorageKey, JSON.stringify([...nextExpandedNodes]));
+					persistExpandedNodes(nextExpandedNodes);
 				}
 				await invalidateAll();
 			}
@@ -868,11 +922,12 @@
 						title={isDarkMode ? 'Use light mode' : 'Use dark mode'}
 						aria-label={isDarkMode ? 'Use light mode' : 'Use dark mode'}
 					>
-						{#if isDarkMode}
-							<Sun size={18} />
-						{:else}
+						<span class="theme-icon theme-icon-light-mode" aria-hidden="true">
 							<Moon size={18} />
-						{/if}
+						</span>
+						<span class="theme-icon theme-icon-dark-mode" aria-hidden="true">
+							<Sun size={18} />
+						</span>
 					</button>
 					<div class="editor-text-size-menu" bind:this={editorTextSizeMenuEl}>
 						<button
@@ -1262,6 +1317,22 @@
 </script>
 
 <style>
+	.theme-icon {
+		display: inline-flex;
+	}
+
+	.theme-icon-dark-mode {
+		display: none;
+	}
+
+	:global(html.dark) .theme-icon-light-mode {
+		display: none;
+	}
+
+	:global(html.dark) .theme-icon-dark-mode {
+		display: inline-flex;
+	}
+
 	.auth-route-shell {
 		min-height: 100vh;
 		width: 100%;

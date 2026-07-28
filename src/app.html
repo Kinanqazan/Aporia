@@ -9,14 +9,18 @@
 		<link rel="manifest" href="/manifest.webmanifest" />
 		<link rel="apple-touch-icon" href="/aporia-icon-apple-touch.png" />
 		<script>
-			if (
-				localStorage.theme === 'dark' || 
-				(!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)
-			) {
-				document.documentElement.classList.add('dark');
-			} else {
-				document.documentElement.classList.remove('dark');
-			}
+			(() => {
+				let storedTheme = null;
+				try {
+					storedTheme = localStorage.getItem('theme');
+				} catch {
+					// Storage can be unavailable in privacy-restricted browser contexts.
+				}
+				const isDark = storedTheme === 'dark' ||
+					(storedTheme === null && window.matchMedia('(prefers-color-scheme: dark)').matches);
+				document.documentElement.classList.toggle('dark', isDark);
+				document.cookie = `theme=${isDark ? 'dark' : 'light'}; path=/; max-age=31536000; SameSite=Lax`;
+			})();
 		</script>
 		%sveltekit.head%
 	</head>
