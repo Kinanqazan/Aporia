@@ -357,6 +357,50 @@
 		{ name: 'Red background', value: 'var(--bg-red)' }
 	];
 
+	function safeUnsetColor(ed: any) {
+		if (!ed) return;
+		const { state } = ed;
+		const { selection, schema } = state;
+		const textStyleType = schema.marks.textStyle;
+		if (!textStyleType) return;
+
+		if (selection.empty) {
+			const fromPos = selection.$from;
+			const styleMark = state.tr.storedMarks?.find((m: any) => m.type === textStyleType) || fromPos.marks().find((m: any) => m.type === textStyleType);
+			if (styleMark) {
+				const newAttrs = { ...styleMark.attrs, color: null };
+				const hasOtherAttrs = Object.entries(newAttrs).some(([k, v]) => k !== 'color' && !!v);
+				if (hasOtherAttrs) {
+					ed.chain().focus().setMark('textStyle', newAttrs).run();
+				} else {
+					ed.chain().focus().unsetMark('textStyle', { extendEmptyMarkRange: true }).run();
+				}
+			}
+		} else {
+			const { from, to } = selection;
+			const tr = state.tr;
+			tr.doc.nodesBetween(from, to, (node: any, pos: number) => {
+				if (node.isText) {
+					const trimmedFrom = Math.max(pos, from);
+					const trimmedTo = Math.min(pos + node.nodeSize, to);
+					const mark = node.marks.find((m: any) => m.type === textStyleType);
+					if (mark) {
+						const newAttrs = { ...mark.attrs, color: null };
+						const hasOtherAttrs = Object.entries(newAttrs).some(([k, v]) => k !== 'color' && !!v);
+						if (hasOtherAttrs) {
+							tr.addMark(trimmedFrom, trimmedTo, textStyleType.create(newAttrs));
+						} else {
+							tr.removeMark(trimmedFrom, trimmedTo, textStyleType);
+						}
+					}
+				}
+			});
+			ed.view.dispatch(tr);
+			ed.commands.focus();
+		}
+	}
+
+
 	// Details is Tiptap's MIT-licensed toggle node. The summary remains a native
 	// <summary> for accessibility while this attribute gives us Notion-style H1-H3
 	// visual variants.
@@ -2650,7 +2694,7 @@
 										onmousedown={(e) => e.preventDefault()}
 										onclick={() => {
 											if (color.value === 'var(--text-main)') {
-												editor!.chain().focus().unsetColor().run();
+												safeUnsetColor(editor);
 											} else {
 												editor!.chain().focus().setColor(color.value).run();
 											}
