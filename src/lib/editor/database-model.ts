@@ -32,7 +32,7 @@ export interface DatabaseAttributes {
 
 export type DatabaseAction =
 	| { type: 'update-cell'; rowId: string; colId: string; value: DatabaseCellValue }
-	| { type: 'add-row'; afterRowId?: string | null }
+	| { type: 'add-row'; afterRowId?: string | null; prepend?: boolean }
 	| { type: 'insert-row-above'; rowId: string }
 	| { type: 'delete-row'; rowId: string }
 	| { type: 'duplicate-rows'; rowIds: string[] }
@@ -46,6 +46,7 @@ export type DatabaseAction =
 	| { type: 'resize-column'; colId: string; width: number }
 	| { type: 'add-option'; colId: string; option: string }
 	| { type: 'remove-option'; colId: string; option: string }
+	| { type: 'move-option'; colId: string; option: string; delta: number }
 	| { type: 'set-option'; rowId: string; colId: string; option: string; multi: boolean };
 
 export function generateDatabaseId(prefix = 'id'): string {
@@ -170,6 +171,7 @@ export function applyDatabaseAction(input: DatabaseAttributes, action: DatabaseA
 			return { ...database, rows: rows.map(row => row.id === action.rowId ? { ...row, [action.colId]: action.value } : row) };
 		case 'add-row': {
 			const row = createRow(columns);
+			if (action.prepend) return { ...database, rows: [row, ...rows] };
 			if (!action.afterRowId) return { ...database, rows: [...rows, row] };
 			const index = rows.findIndex(item => item.id === action.afterRowId);
 			if (index < 0) return database;
@@ -258,6 +260,17 @@ export function applyDatabaseAction(input: DatabaseAttributes, action: DatabaseA
 			});
 			return { ...database, rows: nextRows, options: { ...options, [action.colId]: (options[action.colId] || []).filter(option => option !== action.option) } };
 		}
+		case 'move-option': {
+			const current = options[action.colId] || [];
+			const index = current.indexOf(action.option);
+			if (index < 0) return database;
+			const targetIndex = index + action.delta;
+			if (targetIndex < 0 || targetIndex >= current.length) return database;
+			const nextOptionsList = [...current];
+			const [moved] = nextOptionsList.splice(index, 1);
+			nextOptionsList.splice(targetIndex, 0, moved);
+			return { ...database, options: { ...options, [action.colId]: nextOptionsList } };
+		}
 		case 'set-option': {
 			const row = rows.find(item => item.id === action.rowId);
 			if (!row) return database;
@@ -270,4 +283,55 @@ export function applyDatabaseAction(input: DatabaseAttributes, action: DatabaseA
 			return { ...database, rows: rows.map(item => item.id === action.rowId ? { ...item, [action.colId]: next } : item) };
 		}
 	}
+}
+
+export function sortDatabaseRows(
+	rows: DatabaseRow[],
+	column: DatabaseColumn | undefined,
+	direction: 'asc' | 'desc',
+	columnOptions: string[] = []
+): DatabaseRow[] {
+	if (!column) return [...rows];
+	const colId = column.id;
+	const isNum = column.type === 'number';
+	const isStatusOrSelect = column.type === 'status' || column.type === 'multi-select';
+
+	return [...rows].sort((a, b) => {
+		let valA = a[colId];
+		let valB = b[colId];
+
+		if (valA === undefined || valA === null) valA = '';
+		if (valB === undefined || valB === null) valB = '';
+
+		if (isNum) {
+			const numA = Number(valA) || 0;
+			const numB = Number(valB) || 0;
+			return direction === 'asc' ? numA - numB : numB - numA;
+		}
+
+		if (isStatusOrSelect) {
+			const getRank = (val: any) => {
+				if (!val || (Array.isArray(val) && val.length === 0)) return -1;
+				const target = Array.isArray(val) ? val[0] : String(val);
+				const idx = columnOptions.indexOf(target);
+				return idx !== -1 ? idx : 999999;
+			};
+
+			const rankA = getRank(valA);
+			const rankB = getRank(valB);
+
+			// Rows with no status assigned appear at the beginning
+			if (rankA === -1 && rankB === -1) return 0;
+			if (rankA === -1) return -1;
+			if (rankB === -1) return 1;
+
+			return direction === 'asc' ? rankA - rankB : rankB - rankA;
+		}
+
+		const strA = String(valA).toLowerCase();
+		const strB = String(valB).toLowerCase();
+		if (strA < strB) return direction === 'asc' ? -1 : 1;
+		if (strA > strB) return direction === 'asc' ? 1 : -1;
+		return 0;
+	});
 }

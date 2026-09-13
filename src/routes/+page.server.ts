@@ -22,11 +22,12 @@ export const actions: Actions = {
 		const parentIdStr = data.get('parentId') as string | null;
 		const title = (data.get('title') as string) || 'Untitled';
 		const icon = data.get('icon') as string | null;
+		const iconColor = data.get('iconColor') as string | null;
 		const parentId = parentIdStr && parentIdStr !== 'null' ? parentIdStr : null;
 
 		let page;
 		try {
-			page = await createPage(parentId, title, icon);
+			page = await createPage(parentId, title, icon, iconColor);
 		} catch (err: any) {
 			return fail(500, { message: err.message });
 		}

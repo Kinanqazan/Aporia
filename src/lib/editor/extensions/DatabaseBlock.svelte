@@ -2,7 +2,7 @@
 	import { 
 		Plus, Trash2, ArrowUp, ArrowDown, ArrowUpDown, ArrowLeft, ArrowRight,
 		Settings, Search, Calendar, Hash, Type, CheckSquare, 
-		ChevronDown, PlusCircle, X, Copy, Filter
+		ChevronDown, ChevronUp, PlusCircle, X, Copy, Filter
 	} from 'lucide-svelte';
 	import { generateDatabaseId, renameDatabaseOption } from '$lib/editor/database-model';
 
@@ -19,6 +19,8 @@
 	let summary = $derived(tiptapNode.node.attrs.summary || {});
 
 	// Local UI states
+	const ROW_LIMIT = 50;
+	let showAllRows = $state(false);
 	let searchQuery = $state('');
 	let isFilterOpen = $state(false);
 	let filterColumnId = $state('');
@@ -28,6 +30,7 @@
 	let sortDirection = $state<'asc' | 'desc' | null>(null);
 	let sortInitialized = $state(false);
 	let selectedRowIds = $state<string[]>([]);
+	let hoveredRowId = $state<string | null>(null);
 	
 	// Popovers & Resizing
 	let activeColumnMenu = $state<string | null>(null); // columnId
@@ -37,11 +40,32 @@
 	let previewColumnWidth = $state<{ colId: string; width: number } | null>(null);
 
 	// Multi-row Selection & Bulk Actions
-	function toggleRowSelection(rowId: string) {
+	let lastSelectedRowId = $state<string | null>(null);
+
+	function toggleRowSelection(rowId: string, isShift = false) {
+		const visible = visibleRows();
+		if (isShift && lastSelectedRowId && lastSelectedRowId !== rowId) {
+			const fromIdx = visible.findIndex((r: any) => r.id === lastSelectedRowId);
+			const toIdx = visible.findIndex((r: any) => r.id === rowId);
+
+			if (fromIdx !== -1 && toIdx !== -1) {
+				const start = Math.min(fromIdx, toIdx);
+				const end = Math.max(fromIdx, toIdx);
+				const rangeIds = visible.slice(start, end + 1).map((r: any) => r.id);
+				selectedRowIds = [...new Set([...selectedRowIds, ...rangeIds])];
+				lastSelectedRowId = rowId;
+				return;
+			}
+		}
+
 		if (selectedRowIds.includes(rowId)) {
 			selectedRowIds = selectedRowIds.filter(id => id !== rowId);
+			if (lastSelectedRowId === rowId) {
+				lastSelectedRowId = selectedRowIds.length > 0 ? selectedRowIds[selectedRowIds.length - 1] : null;
+			}
 		} else {
 			selectedRowIds = [...selectedRowIds, rowId];
+			lastSelectedRowId = rowId;
 		}
 	}
 
@@ -50,14 +74,17 @@
 		const allSelected = allIds.length > 0 && allIds.every((id: string) => selectedRowIds.includes(id));
 		if (allSelected) {
 			selectedRowIds = selectedRowIds.filter(id => !allIds.includes(id));
+			lastSelectedRowId = null;
 		} else {
 			selectedRowIds = [...new Set([...selectedRowIds, ...allIds])];
+			lastSelectedRowId = null;
 		}
 	}
 
 
 	function clearSelection() {
 		selectedRowIds = [];
+		lastSelectedRowId = null;
 	}
 
 	function bulkDeleteSelectedRows() {
@@ -84,6 +111,66 @@
 	let newOptionText = $state('');
 	let containerElement = $state<HTMLDivElement>();
 	let filterWrapperElement = $state<HTMLDivElement>();
+
+	// Precise row & checkbox alignment
+	let tableElement = $state<HTMLTableElement>();
+	let gutterElement = $state<HTMLDivElement>();
+	let headerTop = $state<number | null>(null);
+	let headerHeight = $state<number>(34);
+	let rowTops = $state<number[]>([]);
+	let rowHeights = $state<number[]>([]);
+	let gutterHeight = $state<number | null>(null);
+
+	function syncRowHeights() {
+		if (!tableElement || !gutterElement) return;
+		const gutterRect = gutterElement.getBoundingClientRect();
+		const theadTr = tableElement.querySelector('thead tr');
+		if (theadTr) {
+			const trRect = theadTr.getBoundingClientRect();
+			headerTop = Math.round((trRect.top - gutterRect.top) * 100) / 100;
+			headerHeight = Math.round(trRect.height * 100) / 100;
+		}
+
+		const trs = tableElement.querySelectorAll('tbody tr');
+		const nextTops: number[] = [];
+		const nextHeights: number[] = [];
+		for (let i = 0; i < trs.length; i++) {
+			const r = trs[i].getBoundingClientRect();
+			nextTops.push(Math.round((r.top - gutterRect.top) * 100) / 100);
+			nextHeights.push(Math.round(r.height * 100) / 100);
+		}
+		rowTops = nextTops;
+		rowHeights = nextHeights;
+		gutterHeight = Math.round(tableElement.offsetHeight * 100) / 100;
+	}
+
+	$effect(() => {
+		// Track visibleRows so any row changes (search, filter, pagination, add/delete) re-sync
+		const _ = visibleRows();
+		if (!editable) return;
+
+		let rafId: number | null = null;
+		rafId = requestAnimationFrame(() => {
+			syncRowHeights();
+		});
+
+		let observer: ResizeObserver | null = null;
+		if (tableElement && typeof ResizeObserver !== 'undefined') {
+			observer = new ResizeObserver(() => {
+				syncRowHeights();
+			});
+			observer.observe(tableElement);
+		}
+
+		const handleResize = () => syncRowHeights();
+		window.addEventListener('resize', handleResize);
+
+		return () => {
+			if (rafId) cancelAnimationFrame(rafId);
+			if (observer) observer.disconnect();
+			window.removeEventListener('resize', handleResize);
+		};
+	});
 
 	// Click outside detection & custom event listeners using standard Svelte 5 $effect
 	$effect(() => {
@@ -117,6 +204,9 @@
 		const nextSelectedRowIds = selectedRowIds.filter(id => validIds.has(id));
 		if (nextSelectedRowIds.length !== selectedRowIds.length) {
 			selectedRowIds = nextSelectedRowIds;
+		}
+		if (lastSelectedRowId && !validIds.has(lastSelectedRowId)) {
+			lastSelectedRowId = null;
 		}
 	});
 
@@ -227,6 +317,8 @@
 		if (sortColumn && sortDirection) {
 			const col = columns.find((c: any) => c.id === sortColumn);
 			const isNum = col?.type === 'number';
+			const isStatusOrSelect = col?.type === 'status' || col?.type === 'multi-select';
+			const colOptions = options[sortColumn as string] || [];
 			
 			result.sort((a: any, b: any) => {
 				let valA = a[sortColumn as string];
@@ -241,6 +333,25 @@
 					return sortDirection === 'asc' ? numA - numB : numB - numA;
 				}
 
+				if (isStatusOrSelect) {
+					const getRank = (val: any) => {
+						if (!val || (Array.isArray(val) && val.length === 0)) return -1;
+						const target = Array.isArray(val) ? val[0] : String(val);
+						const idx = colOptions.indexOf(target);
+						return idx !== -1 ? idx : 999999;
+					};
+
+					const rankA = getRank(valA);
+					const rankB = getRank(valB);
+
+					// Rows with no status assigned appear at the beginning
+					if (rankA === -1 && rankB === -1) return 0;
+					if (rankA === -1) return -1;
+					if (rankB === -1) return 1;
+
+					return sortDirection === 'asc' ? rankA - rankB : rankB - rankA;
+				}
+
 				const strA = String(valA).toLowerCase();
 				const strB = String(valB).toLowerCase();
 				if (strA < strB) return sortDirection === 'asc' ? -1 : 1;
@@ -252,6 +363,27 @@
 		return result;
 	});
 
+	// Svelte 5 derived state for visible rows capped at ROW_LIMIT
+	let visibleRows = $derived(() => {
+		const all = processedRows();
+		if (showAllRows || all.length <= ROW_LIMIT) {
+			return all;
+		}
+		return all.slice(0, ROW_LIMIT);
+	});
+
+	// Row Actions
+	function addRow() {
+		if (!editable) return;
+		const newRow = {
+			id: generateId(),
+			...Object.fromEntries(columns.map((column: any) => [column.id, column.type === 'multi-select' ? [] : '']))
+		};
+		if (searchQuery.trim()) searchQuery = '';
+		if (filterValue.trim()) clearFilter();
+		updateAttributes({ rows: [newRow, ...rows] });
+	}
+
 	// Column Actions
 	function addColumn() {
 		if (!editable) return;
@@ -262,8 +394,6 @@
 	}
 
 	function deleteColumn(colId: string) {
-		if (!editable || columns.length <= 1) return;
-
 		const updatedColumns = columns.filter((column: any) => column.id !== colId);
 		const updatedRows = rows.map((row: any) => {
 			const nextRow = { ...row };
@@ -435,6 +565,19 @@
 		return true;
 	}
 
+	function moveOption(colId: string, option: string, delta: number) {
+		if (!editable) return;
+		const current = options[colId] || [];
+		const index = current.indexOf(option);
+		if (index < 0) return;
+		const targetIndex = index + delta;
+		if (targetIndex < 0 || targetIndex >= current.length) return;
+		const next = [...current];
+		const [moved] = next.splice(index, 1);
+		next.splice(targetIndex, 0, moved);
+		updateAttributes({ options: { ...options, [colId]: next } });
+	}
+
 	// Sorting helpers
 	function toggleSort(colId: string) {
 		let nextColumn: string | null = colId;
@@ -588,6 +731,19 @@
 			{/if}
 		</div>
 
+		{#if editable}
+			<button
+				type="button"
+				class="db-add-row-btn"
+				aria-label="Add row"
+				title="Add new row at the top"
+				onclick={addRow}
+			>
+				<Plus size={14} />
+				<span>New row</span>
+			</button>
+		{/if}
+
 		{#if selectedRowIds.length > 0 && editable}
 			<div class="db-bulk-toolbar">
 				<span class="bulk-count">{selectedRowIds.length} selected</span>
@@ -610,28 +766,66 @@
 
 	<!-- Scrollable Table -->
 	<div class="db-table-layout">
-		<div class="db-table-wrapper" class:has-gutter={editable} class:has-open-popover={activeSelectDropdown !== null || activeColumnMenu !== null}>
-		<table class="db-table">
+		{#if editable}
+			<div
+				class="db-checkbox-gutter"
+				bind:this={gutterElement}
+				style={gutterHeight ? `height: ${gutterHeight}px;` : ''}
+				aria-label="Row selectors"
+			>
+				<div
+					class="db-checkbox-header-cell"
+					style={headerTop !== null ? `position: absolute; top: ${headerTop}px; height: ${headerHeight}px;` : ''}
+				>
+					<button
+						type="button"
+						class="row-checkbox-floating"
+						role="checkbox"
+						aria-checked={visibleRows().length > 0 && visibleRows().every((row: any) => selectedRowIds.includes(row.id))}
+						class:checked={visibleRows().length > 0 && visibleRows().every((row: any) => selectedRowIds.includes(row.id))}
+						onclick={(e) => { e.stopPropagation(); toggleSelectAll(visibleRows()); }}
+						title="Select All Visible"
+					>
+						{#if visibleRows().length > 0 && visibleRows().every((row: any) => selectedRowIds.includes(row.id))}
+							<span class="check-mark-icon">✓</span>
+						{/if}
+					</button>
+				</div>
+				{#each visibleRows() as row, rowIdx (row.id)}
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div
+						class="db-checkbox-row-cell"
+						style={rowTops[rowIdx] !== undefined ? `position: absolute; top: ${rowTops[rowIdx]}px; height: ${rowHeights[rowIdx]}px;` : ''}
+						class:row-hovered={hoveredRowId === row.id}
+						class:row-selected={selectedRowIds.includes(row.id)}
+						onmouseenter={() => (hoveredRowId = row.id)}
+						onmouseleave={() => (hoveredRowId = null)}
+						onclick={(e) => { e.stopPropagation(); toggleRowSelection(row.id, e.shiftKey); }}
+					>
+						<button
+							type="button"
+							class="row-checkbox-floating"
+							class:checked={selectedRowIds.includes(row.id)}
+							onclick={(e) => { e.stopPropagation(); toggleRowSelection(row.id, e.shiftKey); }}
+							title="Select Row"
+						>
+							{#if selectedRowIds.includes(row.id)}
+								<span class="check-mark-icon">✓</span>
+							{/if}
+						</button>
+					</div>
+				{/each}
+			</div>
+		{/if}
+
+		<div class="db-table-wrapper" class:has-open-popover={activeSelectDropdown !== null || activeColumnMenu !== null}>
+		<table class="db-table" class:has-summary={showSummary} bind:this={tableElement}>
 			<thead>
 				<tr>
 					<!-- Column headers -->
 					{#each columns as col, colIdx (col.id)}
-						<th class="db-th" class:first-col={colIdx === 0 && editable} class:last-col={colIdx === columns.length - 1} data-col-id={col.id} style="width: {getColumnWidth(col)}; min-width: 90px;">
-							{#if colIdx === 0 && editable}
-								<button
-									type="button"
-									class="row-checkbox-floating"
-									role="checkbox"
-									aria-checked={processedRows().length > 0 && processedRows().every((row: any) => selectedRowIds.includes(row.id))}
-									class:checked={processedRows().length > 0 && processedRows().every((row: any) => selectedRowIds.includes(row.id))}
-									onclick={(e) => { e.stopPropagation(); toggleSelectAll(processedRows()); }}
-									title="Select All Visible"
-								>
-									{#if processedRows().length > 0 && processedRows().every((row: any) => selectedRowIds.includes(row.id))}
-										<span class="check-mark-icon">✓</span>
-									{/if}
-								</button>
-							{/if}
+						<th class="db-th" class:last-col={colIdx === columns.length - 1} data-col-id={col.id} style="width: {getColumnWidth(col)}; min-width: 90px;">
 							<div class="th-content">
 								<button class="th-sort-btn" onclick={() => toggleSort(col.id)} title="Sort Column">
 									<span class="th-type-icon">
@@ -700,8 +894,28 @@
 											<span class="popover-section-label">Status options</span>
 											{#if (options[col.id] || []).length > 0}
 												<div class="status-option-editor-list">
-													{#each options[col.id] || [] as option (option)}
+													{#each options[col.id] || [] as option, optIdx (option)}
 														<div class="status-option-editor-row">
+															<div class="option-reorder-btns">
+																<button
+																	type="button"
+																	class="option-move-btn"
+																	disabled={optIdx === 0}
+																	onclick={(e) => { e.stopPropagation(); moveOption(col.id, option, -1); }}
+																	title="Move up"
+																>
+																	<ChevronUp size={11} />
+																</button>
+																<button
+																	type="button"
+																	class="option-move-btn"
+																	disabled={optIdx === (options[col.id] || []).length - 1}
+																	onclick={(e) => { e.stopPropagation(); moveOption(col.id, option, 1); }}
+																	title="Move down"
+																>
+																	<ChevronDown size={11} />
+																</button>
+															</div>
 															<input
 																type="text"
 																value={option}
@@ -801,23 +1015,17 @@
 			</thead>
 			
 			<tbody>
-					{#each processedRows() as row, rowIdx (row.id)}
-					<tr data-row-id={row.id} class:row-selected={selectedRowIds.includes(row.id)}>
+				{#each visibleRows() as row, rowIdx (row.id)}
+					<tr
+						data-row-id={row.id}
+						class:row-selected={selectedRowIds.includes(row.id)}
+						class:row-hovered={hoveredRowId === row.id}
+						onmouseenter={() => (hoveredRowId = row.id)}
+						onmouseleave={() => (hoveredRowId = null)}
+					>
 						<!-- Cell inputs -->
 						{#each columns as col, colIdx (col.id)}
-							<td class="db-td" class:first-col={colIdx === 0 && editable} data-col-id={col.id}>
-								{#if colIdx === 0 && editable}
-									<button
-										type="button"
-										class="row-checkbox-floating"
-										class:checked={selectedRowIds.includes(row.id)}
-										onclick={(e) => { e.stopPropagation(); toggleRowSelection(row.id); }}
-									>
-										{#if selectedRowIds.includes(row.id)}
-											<span class="check-mark-icon">✓</span>
-										{/if}
-									</button>
-								{/if}
+							<td class="db-td" data-col-id={col.id}>
 								{#if col.type === 'text'}
 									<input 
 										type="text" 
@@ -897,11 +1105,11 @@
 								<!-- Options Popover (Status / Multi-Select) -->
 								{#if activeSelectDropdown?.rowId === row.id && activeSelectDropdown?.colId === col.id}
 									{@const isMulti = col.type === 'multi-select'}
-									{@const isBottomRow = rowIdx >= processedRows().length - 2}
+									{@const isBottomRow = rowIdx >= visibleRows().length - 2}
 									{@const isRightCol = colIdx >= columns.length - 1}
 									<div class="tag-select-popover" class:open-up={isBottomRow} class:open-left={isRightCol}>
 										<div class="options-list">
-											{#each options[col.id] || [] as option (option)}
+											{#each options[col.id] || [] as option, optIdx (option)}
 												{@const isSel = isOptionSelected(row, col.id, option, isMulti)}
 												{@const style = getTagColor(option)}
 												<div 
@@ -911,7 +1119,7 @@
 													role="button"
 													onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleOptionSelection(row, col.id, option, isMulti); } }}
 												>
-															<span class="tag-pill" style="background-color: {style.bg}; color: {style.text}; border-color: {style.text};">
+													<span class="tag-pill" style="background-color: {style.bg}; color: {style.text}; border-color: {style.text};">
 														{option}
 													</span>
 													<div class="option-actions">
@@ -920,6 +1128,25 @@
 														{/if}
 														{#if editable}
 															<button 
+																type="button"
+																class="option-move-btn"
+																disabled={optIdx === 0}
+																onclick={(e) => { e.stopPropagation(); moveOption(col.id, option, -1); }}
+																title="Move up"
+															>
+																<ChevronUp size={11} />
+															</button>
+															<button 
+																type="button"
+																class="option-move-btn"
+																disabled={optIdx === (options[col.id] || []).length - 1}
+																onclick={(e) => { e.stopPropagation(); moveOption(col.id, option, 1); }}
+																title="Move down"
+															>
+																<ChevronDown size={11} />
+															</button>
+															<button 
+																type="button"
 																class="option-delete-btn" 
 																onclick={(e) => { e.stopPropagation(); removeOption(col.id, option); }}
 																title="Remove Option"
@@ -956,13 +1183,19 @@
 				<tfoot>
 					<tr class="db-summary-row">
 						{#each columns as col, colIdx (col.id)}
-							<td class="db-summary-cell" class:first-col={colIdx === 0 && editable}>
+							<td class="db-summary-cell">
 								{#if col.type === 'number'}
 									{@const mode = getSummaryMode(col.id)}
 									<span class="summary-value-label">{summaryLabel(mode)}</span>
 									<strong>{getSummaryValue(col.id, mode)}</strong>
 								{:else if colIdx === 0}
-									<span class="summary-row-count">{processedRows().length} {processedRows().length === 1 ? 'row' : 'rows'}</span>
+									<span class="summary-row-count">
+										{#if !showAllRows && processedRows().length > ROW_LIMIT}
+											Showing {visibleRows().length} of {processedRows().length} rows
+										{:else}
+											{processedRows().length} {processedRows().length === 1 ? 'row' : 'rows'}
+										{/if}
+									</span>
 								{:else}
 									<span class="summary-empty">—</span>
 								{/if}
@@ -979,15 +1212,30 @@
 			</button>
 		{/if}
 	</div>
-	{#if editable}
-		<button type="button" class="add-row-btn" aria-label="Add row" title="Add row" onclick={() => updateAttributes({ rows: [...rows, { id: generateId(), ...Object.fromEntries(columns.map((column: any) => [column.id, column.type === 'multi-select' ? [] : ''])) }] })}>
-			<Plus size={14} />
-		</button>
-	{/if}
-	{#if editable}
-		<button type="button" class="db-summary-btn bottom-summary-btn" class:active={showSummary} aria-label="Toggle summary row" aria-pressed={showSummary} onclick={toggleSummary} title="Toggle summary row">
-			<span class="summary-symbol" aria-hidden="true">Σ</span>
-		</button>
+	{#if processedRows().length > ROW_LIMIT}
+		<div class="db-pagination-bar" class:has-gutter={editable}>
+			{#if !showAllRows}
+				<button
+					type="button"
+					class="see-more-btn"
+					onclick={() => (showAllRows = true)}
+				>
+					<ChevronDown size={14} />
+					<span>See more ({processedRows().length - ROW_LIMIT} remaining)</span>
+				</button>
+				<span class="see-more-info">Showing {visibleRows().length} of {processedRows().length} rows</span>
+			{:else}
+				<button
+					type="button"
+					class="see-more-btn collapse"
+					onclick={() => (showAllRows = false)}
+				>
+					<ChevronUp size={14} />
+					<span>Show less</span>
+				</button>
+				<span class="see-more-info">All {processedRows().length} rows shown</span>
+			{/if}
+		</div>
 	{/if}
 </div>
 
@@ -1151,43 +1399,33 @@
 		background: color-mix(in srgb, var(--accent-color) 8%, var(--bg-canvas));
 	}
 
-	.db-summary-btn {
+
+	.db-add-row-btn {
 		display: inline-flex;
 		align-items: center;
-		gap: 5px;
+		gap: 6px;
 		height: 34px;
 		box-sizing: border-box;
-		padding: 0 10px;
-		border: 1px solid var(--border-color);
+		padding: 0 11px;
+		border: 1px solid color-mix(in srgb, var(--accent-color) 45%, var(--border-color));
 		border-radius: 6px;
 		font-size: 12px;
-		color: var(--text-muted);
-		background: var(--bg-canvas);
-	}
-
-	.db-summary-btn:hover,
-	.db-summary-btn:focus-visible,
-	.db-summary-btn.active {
-		color: var(--text-main);
-		border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+		font-weight: 500;
+		color: var(--accent-color);
 		background: color-mix(in srgb, var(--accent-color) 8%, var(--bg-canvas));
+		transition: all 0.15s ease;
+		cursor: pointer;
+		white-space: nowrap;
 	}
 
-	.bottom-summary-btn {
-		position: absolute;
-		left: 56px;
-		bottom: 0;
-		width: 28px;
-		height: 28px;
-		padding: 0;
-		justify-content: center;
+	.db-add-row-btn:hover,
+	.db-add-row-btn:focus-visible {
+		color: #ffffff;
+		background: var(--accent-color);
+		border-color: var(--accent-color);
+		box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 	}
 
-	.summary-symbol {
-		font-size: 15px;
-		line-height: 1;
-		font-weight: 600;
-	}
 
 	.db-filter-popover {
 		position: absolute;
@@ -1382,28 +1620,59 @@
 		overflow-y: hidden;
 		width: fit-content;
 		max-width: 100%;
+		align-self: flex-start;
 		border: 1px solid var(--border-color);
-		border-radius: 8px;
+		border-radius: 6px;
 		background-color: var(--bg-canvas);
 		box-sizing: border-box;
-		transition: padding-left 0.15s ease;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 	}
 
-	.db-table-wrapper.has-gutter {
-		padding-left: 28px;
+	.db-checkbox-gutter {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		flex: 0 0 22px;
+		width: 22px;
+		margin-right: 4px;
+		user-select: none;
+	}
+
+	.db-checkbox-header-cell {
+		left: 0;
+		width: 22px;
+		height: 34px;
+		min-height: 34px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		box-sizing: border-box;
+	}
+
+	.db-checkbox-row-cell {
+		left: 0;
+		width: 22px;
+		height: 38px;
+		min-height: 38px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		box-sizing: border-box;
 	}
 
 	.db-table {
 		width: max-content;
-		border-collapse: collapse;
+		border-collapse: separate;
+		border-spacing: 0;
 		table-layout: fixed;
 		font-size: 13px;
-		overflow: visible;
 	}
 
 	/* Table Headers */
 	.db-th {
 		position: relative;
+		border-bottom: 1px solid var(--border-color);
+		border-right: 1px solid var(--border-color);
 	}
 
 	.db-table .db-th {
@@ -1415,68 +1684,97 @@
 		background-color: color-mix(in srgb, var(--bg-canvas) 88%, var(--border-color));
 	}
 
-	.db-th.first-col,
-	.db-td.first-col {
-		position: relative;
-		overflow: visible !important;
-		border-left: 1px solid var(--border-color);
+	.db-table thead tr th:first-child {
+		border-top-left-radius: 5px;
+	}
+
+	.db-table thead tr th:last-child {
+		border-top-right-radius: 5px;
+		border-right: none;
 	}
 
 	.row-checkbox-floating {
-		position: absolute;
-		left: -24px;
-		top: 50%;
-		transform: translateY(-50%);
-		width: 18px;
-		height: 18px;
-		min-width: 18px;
-		min-height: 18px;
+		width: 16px;
+		height: 16px;
+		min-width: 16px;
+		min-height: 16px;
 		border-radius: 4px;
-		border: 1px solid var(--border-color);
-		background-color: transparent;
+		border: 1.5px solid color-mix(in srgb, var(--text-muted) 85%, var(--text-main));
+		background-color: var(--bg-canvas, #ffffff);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		cursor: pointer;
 		padding: 0;
 		transition: all 0.15s ease;
-		opacity: 1;
-		z-index: 25;
+		opacity: 0.85;
 		margin: 0;
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 	}
 
-	.db-th.first-col:hover .row-checkbox-floating,
-	tr:hover .row-checkbox-floating,
+	.row-checkbox-floating:hover,
 	.row-checkbox-floating.checked,
-	.row-checkbox-floating:hover {
+	.db-checkbox-header-cell:hover .row-checkbox-floating,
+	.db-checkbox-row-cell:hover .row-checkbox-floating,
+	.db-checkbox-row-cell.row-hovered .row-checkbox-floating,
+	.db-checkbox-row-cell.row-selected .row-checkbox-floating {
 		opacity: 1;
 	}
 
-	.db-td.first-col > input,
-	.db-td.first-col > .tag-trigger-btn {
-		width: 100%;
-	}
-
 	.row-checkbox-floating:hover {
-		border-color: var(--text-muted);
+		border-color: var(--text-main);
 		background-color: var(--hover-icon);
+		transform: scale(1.06);
 	}
 
 	.row-checkbox-floating.checked {
 		background-color: var(--accent-color);
-		border-color: var(--accent-color);
+		border: 1.5px solid #ffffff;
+		box-shadow: 0 0 0 1.5px var(--accent-color), 0 2px 4px rgba(0, 0, 0, 0.25);
+		opacity: 1;
+	}
+
+	/* Dark mode and high-contrast / blue mode visibility */
+	:global(html.dark) .row-checkbox-floating,
+	:global(.dark) .row-checkbox-floating {
+		border: 1.5px solid rgba(255, 255, 255, 0.6);
+		background-color: #252525;
+		opacity: 0.9;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.12);
+	}
+
+	:global(html.dark) .row-checkbox-floating:hover,
+	:global(.dark) .row-checkbox-floating:hover {
+		border-color: #ffffff;
+		background-color: #383838;
+		box-shadow: 0 2px 5px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.25);
+	}
+
+	:global(html.dark) .row-checkbox-floating.checked,
+	:global(.dark) .row-checkbox-floating.checked {
+		background-color: var(--accent-color);
+		border: 1.5px solid #ffffff;
+		box-shadow: 0 0 0 1.5px var(--accent-color), 0 2px 5px rgba(0, 0, 0, 0.7);
 	}
 
 	.check-mark-icon {
 		color: #ffffff;
-		font-size: 10px;
-		font-weight: 700;
+		font-size: 11px;
+		font-weight: 800;
 		line-height: 1;
 		user-select: none;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
 	}
 
 	tr.row-selected {
 		background-color: color-mix(in srgb, var(--accent-color) 14%, transparent) !important;
+	}
+
+	tr.row-hovered {
+		background-color: color-mix(in srgb, var(--accent-color) 5%, transparent);
 	}
 
 	.col-resizer {
@@ -1651,6 +1949,38 @@
 		gap: 4px;
 	}
 
+	.option-reorder-btns {
+		display: inline-flex;
+		flex-direction: column;
+		gap: 1px;
+		flex-shrink: 0;
+	}
+
+	.option-move-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--text-muted);
+		padding: 1px 2px;
+		border-radius: 3px;
+		cursor: pointer;
+		opacity: 0.65;
+		transition: all 0.15s ease;
+		background: transparent;
+		line-height: 1;
+	}
+
+	.option-move-btn:hover:not(:disabled) {
+		opacity: 1;
+		color: var(--text-main);
+		background-color: var(--hover-icon);
+	}
+
+	.option-move-btn:disabled {
+		opacity: 0.2;
+		cursor: not-allowed;
+	}
+
 	.status-option-editor-row input {
 		min-width: 0;
 		flex: 1;
@@ -1760,6 +2090,22 @@
 		height: 38px;
 	}
 
+	.db-table tbody tr td:last-child {
+		border-right: none;
+	}
+
+	.db-table:not(.has-summary) tbody tr:last-child td {
+		border-bottom: none;
+	}
+
+	.db-table:not(.has-summary) tbody tr:last-child td:first-child {
+		border-bottom-left-radius: 5px;
+	}
+
+	.db-table:not(.has-summary) tbody tr:last-child td:last-child {
+		border-bottom-right-radius: 5px;
+	}
+
 	.db-summary-row {
 		background: color-mix(in srgb, var(--bg-canvas) 88%, var(--border-color));
 	}
@@ -1769,14 +2115,24 @@
 		padding: 6px 10px;
 		border-top: 1px solid var(--border-color);
 		border-right: 1px solid var(--border-color);
+		border-bottom: none;
 		color: var(--text-muted);
 		font-size: 12px;
 		white-space: nowrap;
 	}
 
-	.db-summary-cell.first-col {
-		border-left: 1px solid var(--border-color);
+	.db-summary-row td:last-child {
+		border-right: none;
 	}
+
+	.db-summary-row td:first-child {
+		border-bottom-left-radius: 5px;
+	}
+
+	.db-summary-row td:last-child {
+		border-bottom-right-radius: 5px;
+	}
+
 
 	.summary-row-count {
 		font-weight: 600;
@@ -1815,23 +2171,55 @@
 		background: var(--hover-icon);
 	}
 
-	.add-row-btn {
-		display: inline-flex;
+	.db-pagination-bar {
+		display: flex;
 		align-items: center;
-		justify-content: center;
+		gap: 12px;
+		margin-top: 8px;
+		padding: 2px 0;
 		align-self: flex-start;
-		margin: 8px 0 0 28px;
-		width: 28px;
-		height: 28px;
-		padding: 0;
-		border-radius: 5px;
-		color: var(--text-muted);
 	}
 
-	.add-row-btn:hover,
-	.add-row-btn:focus-visible {
+	.db-pagination-bar.has-gutter {
+		margin-left: 26px;
+	}
+
+	.see-more-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 5px 12px;
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--accent-color);
+		background: var(--bg-canvas);
+		border: 1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+		border-radius: 6px;
+		cursor: pointer;
+		transition: all 0.15s ease;
+	}
+
+	.see-more-btn:hover,
+	.see-more-btn:focus-visible {
+		background: color-mix(in srgb, var(--accent-color) 12%, var(--bg-canvas));
+		border-color: var(--accent-color);
+	}
+
+	.see-more-btn.collapse {
+		color: var(--text-muted);
+		border-color: var(--border-color);
+	}
+
+	.see-more-btn.collapse:hover,
+	.see-more-btn.collapse:focus-visible {
 		color: var(--text-main);
 		background: var(--hover-icon);
+		border-color: color-mix(in srgb, var(--border-color) 80%, var(--text-main));
+	}
+
+	.see-more-info {
+		font-size: 12px;
+		color: var(--text-muted);
 	}
 
 	.db-td input {

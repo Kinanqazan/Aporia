@@ -66,7 +66,12 @@ export async function getPageById(id: string): Promise<PageNode | null> {
 }
 
 // Create a new page
-export async function createPage(parentId: string | null = null, title: string = 'Untitled', emoji: string | null = null): Promise<PageNode> {
+export async function createPage(
+	parentId: string | null = null,
+	title: string = 'Untitled',
+	emoji: string | null = null,
+	iconColor: string | null = null
+): Promise<PageNode> {
 	const now = new Date().toISOString();
 	
 	// Determine the next position among siblings
@@ -91,6 +96,7 @@ export async function createPage(parentId: string | null = null, title: string =
 		position: nextPosition,
 		title,
 		icon: emoji || 'lucide:file-text',
+		iconColor: normalizeIconColor(iconColor),
 		createdAt: now,
 		updatedAt: now,
 		contentJson: '{"type":"doc","content":[]}',
@@ -416,8 +422,8 @@ export async function seedDemoWorkspace(): Promise<PageNode[]> {
 	const active = await getActivePages();
 	if (active.length > 0) return active;
 
-	// 1. Getting Started
-	const page1 = await createPage(null, 'Getting Started', 'lucide:rocket');
+	// 1. Getting Started (Yellow icon)
+	const page1 = await createPage(null, 'Getting Started', 'lucide:rocket', '#eab308');
 	const content1 = {
 		type: 'doc',
 		content: [
@@ -431,7 +437,87 @@ export async function seedDemoWorkspace(): Promise<PageNode[]> {
 				content: [
 					{
 						type: 'text',
-						text: 'Aporia is your private, local-first workspace for notes, task checklists, and database views. Everything stays fast, clean, and 100% under your control.'
+						text: 'Aporia is your '
+					},
+					{
+						type: 'text',
+						text: 'private, local-first workspace',
+						marks: [
+							{ type: 'textStyle', attrs: { color: 'var(--color-yellow)' } },
+							{ type: 'bold' }
+						]
+					},
+					{
+						type: 'text',
+						text: ' for notes, task checklists, and database views. Everything stays '
+					},
+					{
+						type: 'text',
+						text: 'fast, clean, and 100% under your control',
+						marks: [
+							{ type: 'highlight', attrs: { color: 'var(--bg-green)' } },
+							{ type: 'textStyle', attrs: { color: 'var(--color-green)' } },
+							{ type: 'bold' }
+						]
+					},
+					{
+						type: 'text',
+						text: '.'
+					}
+				]
+			},
+			{
+				type: 'details',
+				attrs: { open: false, level: 2 },
+				content: [
+					{
+						type: 'detailsSummary',
+						content: [{ type: 'text', text: 'Quick Tips & Shortcuts (Click to expand)' }]
+					},
+					{
+						type: 'detailsContent',
+						content: [
+							{
+								type: 'paragraph',
+								content: [
+									{ type: 'text', text: 'Press ' },
+									{ type: 'text', text: '/', marks: [{ type: 'code' }] },
+									{ type: 'text', text: ' anywhere on an empty line to insert headings, toggle headings, database tables, or checklists.' }
+								]
+							},
+							{
+								type: 'paragraph',
+								content: [
+									{ type: 'text', text: 'Highlight text to customize it with ' },
+									{
+										type: 'text',
+										text: 'rich colors',
+										marks: [
+											{ type: 'textStyle', attrs: { color: 'var(--color-purple)' } },
+											{ type: 'bold' }
+										]
+									},
+									{ type: 'text', text: ' and ' },
+									{
+										type: 'text',
+										text: 'vibrant highlights',
+										marks: [
+											{ type: 'highlight', attrs: { color: 'var(--bg-yellow)' } },
+											{ type: 'bold' }
+										]
+									},
+									{ type: 'text', text: ' from the floating bubble menu.' }
+								]
+							},
+							{
+								type: 'paragraph',
+								content: [
+									{ type: 'text', text: 'Use ' },
+									{ type: 'text', text: 'Ctrl + K', marks: [{ type: 'code' }] },
+									{ type: 'text', text: ' (or Cmd + K) to search across all pages instantly.' }
+								]
+							}
+						]
 					}
 				]
 			},
@@ -446,17 +532,96 @@ export async function seedDemoWorkspace(): Promise<PageNode[]> {
 					{
 						type: 'taskItem',
 						attrs: { checked: true },
-						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Type / anywhere in the editor to open the block command menu' }] }]
+						content: [
+							{
+								type: 'paragraph',
+								content: [
+									{ type: 'text', text: 'Type ' },
+									{ type: 'text', text: '/', marks: [{ type: 'code' }] },
+									{ type: 'text', text: ' anywhere in the editor to open the block command menu' }
+								]
+							}
+						]
 					},
 					{
 						type: 'taskItem',
 						attrs: { checked: true },
-						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Explore the starter pages in the sidebar (Shopping List, Book Tracker, Ideas)' }] }]
+						content: [
+							{
+								type: 'paragraph',
+								content: [
+									{ type: 'text', text: 'Explore the starter pages in the sidebar (' },
+									{
+										type: 'text',
+										text: 'Shopping',
+										marks: [{ type: 'textStyle', attrs: { color: 'var(--color-green)' } }, { type: 'bold' }]
+									},
+									{ type: 'text', text: ', ' },
+									{
+										type: 'text',
+										text: 'Book Tracker',
+										marks: [{ type: 'textStyle', attrs: { color: 'var(--color-blue)' } }, { type: 'bold' }]
+									},
+									{ type: 'text', text: ', and ' },
+									{
+										type: 'text',
+										text: 'Project Ideas',
+										marks: [{ type: 'textStyle', attrs: { color: 'var(--color-purple)' } }, { type: 'bold' }]
+									},
+									{ type: 'text', text: ')' }
+								]
+							}
+						]
 					},
 					{
 						type: 'taskItem',
 						attrs: { checked: false },
-						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Create your own custom page using the + button in the sidebar' }] }]
+						content: [
+							{
+								type: 'paragraph',
+								content: [
+									{ type: 'text', text: 'Create your own custom page using the ' },
+									{ type: 'text', text: '+', marks: [{ type: 'bold' }] },
+									{ type: 'text', text: ' button in the sidebar' }
+								]
+							}
+						]
+					},
+					{
+						type: 'taskItem',
+						attrs: { checked: false },
+						content: [
+							{
+								type: 'paragraph',
+								content: [
+									{ type: 'text', text: 'Click on any page icon to choose a custom icon and color theme' }
+								]
+							}
+						]
+					}
+				]
+			},
+			{
+				type: 'details',
+				attrs: { open: false, level: 3 },
+				content: [
+					{
+						type: 'detailsSummary',
+						content: [{ type: 'text', text: 'Deep Dive: Collapsible Headings & Nested Toggles' }]
+					},
+					{
+						type: 'detailsContent',
+						content: [
+							{
+								type: 'paragraph',
+								content: [
+									{
+										type: 'text',
+										text: 'Toggle headings let you keep long documents structured and clean. You can toggle them open or closed with a single click, or use the Expand/Collapse all button in the top action bar.'
+									}
+								]
+							}
+						]
 					}
 				]
 			},
@@ -470,15 +635,67 @@ export async function seedDemoWorkspace(): Promise<PageNode[]> {
 				content: [
 					{
 						type: 'listItem',
-						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Block-Based Editor: Headings, checklists, code blocks, and custom tables.' }] }]
+						content: [
+							{
+								type: 'paragraph',
+								content: [
+									{
+										type: 'text',
+										text: 'Block-Based Editor: ',
+										marks: [{ type: 'bold' }, { type: 'textStyle', attrs: { color: 'var(--color-blue)' } }]
+									},
+									{ type: 'text', text: 'Headings, checklists, code blocks, toggle headings, and custom database tables.' }
+								]
+							}
+						]
 					},
 					{
 						type: 'listItem',
-						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'SQLite Full-Text Search: Fast search across page titles and body content.' }] }]
+						content: [
+							{
+								type: 'paragraph',
+								content: [
+									{
+										type: 'text',
+										text: 'Color-Coded Icons: ',
+										marks: [{ type: 'bold' }, { type: 'textStyle', attrs: { color: 'var(--color-yellow)' } }]
+									},
+									{ type: 'text', text: 'Give every document a distinct visual identity with curated accent colors.' }
+								]
+							}
+						]
 					},
 					{
 						type: 'listItem',
-						content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Notion Import & Data Export: Backup and restore your workspace as ZIP archives.' }] }]
+						content: [
+							{
+								type: 'paragraph',
+								content: [
+									{
+										type: 'text',
+										text: 'SQLite Full-Text Search: ',
+										marks: [{ type: 'bold' }, { type: 'textStyle', attrs: { color: 'var(--color-green)' } }]
+									},
+									{ type: 'text', text: 'Instant, blazing fast search across all your document titles and body content.' }
+								]
+							}
+						]
+					},
+					{
+						type: 'listItem',
+						content: [
+							{
+								type: 'paragraph',
+								content: [
+									{
+										type: 'text',
+										text: 'Notion Import & Data Export: ',
+										marks: [{ type: 'bold' }, { type: 'textStyle', attrs: { color: 'var(--color-purple)' } }]
+									},
+									{ type: 'text', text: 'Backup and restore your workspace as ZIP archives or import directly from Notion.' }
+								]
+							}
+						]
 					}
 				]
 			}
@@ -489,8 +706,8 @@ export async function seedDemoWorkspace(): Promise<PageNode[]> {
 		contentText: extractTextFromJson(JSON.stringify(content1))
 	});
 
-	// 2. Shopping & To-Do List
-	const page2 = await createPage(null, 'Shopping & To-Do List', 'lucide:shopping-cart');
+	// 2. Shopping (Green icon)
+	const page2 = await createPage(null, 'Shopping', 'lucide:shopping-cart', '#22c55e');
 	const content2 = {
 		type: 'doc',
 		content: [
@@ -561,8 +778,8 @@ export async function seedDemoWorkspace(): Promise<PageNode[]> {
 		contentText: extractTextFromJson(JSON.stringify(content2))
 	});
 
-	// 3. Book Tracker
-	const page3 = await createPage(null, 'Book Tracker', 'lucide:book-open');
+	// 3. Book Tracker (Blue icon)
+	const page3 = await createPage(null, 'Book Tracker', 'lucide:book-open', '#3b82f6');
 	const content3 = {
 		type: 'doc',
 		content: [
@@ -611,8 +828,8 @@ export async function seedDemoWorkspace(): Promise<PageNode[]> {
 		contentText: extractTextFromJson(JSON.stringify(content3))
 	});
 
-	// 4. Project Ideas
-	const page4 = await createPage(null, 'Project Ideas', 'lucide:lightbulb');
+	// 4. Project Ideas (Purple icon)
+	const page4 = await createPage(null, 'Project Ideas', 'lucide:lightbulb', '#8b5cf6');
 	const content4 = {
 		type: 'doc',
 		content: [
