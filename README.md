@@ -81,7 +81,7 @@ Create `/opt/aporia/docker-compose.yml` with the following contents:
 ```yaml
 services:
   aporia:
-    image: ghcr.io/kinanqaz/aporia:latest
+    image: ghcr.io/kinanqazan/aporia:latest
     container_name: aporia
     restart: unless-stopped
     ports:
@@ -137,7 +137,7 @@ systemctl reload caddy
 
 1. **Clone the repository:**
    ```sh
-   git clone https://github.com/kinanqaz/aporia.git
+   git clone https://github.com/kinanqazan/aporia.git
    cd aporia
    ```
 

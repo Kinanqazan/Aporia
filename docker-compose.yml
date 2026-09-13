@@ -1,6 +1,6 @@
 services:
   aporia:
-    image: ${APORIA_IMAGE:-ghcr.io/kinanqaz/aporia}:latest
+    image: ${APORIA_IMAGE:-ghcr.io/kinanqazan/aporia}:latest
     container_name: aporia
     restart: unless-stopped
     ports:
