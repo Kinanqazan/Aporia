@@ -6,13 +6,14 @@
 	import { Editor, Extension, ResizableNodeView, mergeAttributes } from '@tiptap/core';
 	import type { ResizableNodeViewDirection } from '@tiptap/core';
 	import { Selection, Plugin, TextSelection } from '@tiptap/pm/state';
-	import { DOMSerializer } from '@tiptap/pm/model';
 	import { Decoration, DecorationSet } from '@tiptap/pm/view';
 	import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 	import StarterKit from '@tiptap/starter-kit';
 	import { ColumnLayout } from '$lib/editor/extensions/ColumnLayout';
 	import { Column } from '$lib/editor/extensions/Column';
 	import { Commands } from '$lib/editor/extensions/Commands';
+	import { DetailsClipboard } from '$lib/editor/extensions/DetailsClipboard';
+	import { PreserveDetailsLevel } from '$lib/editor/extensions/PreserveDetailsLevel';
 	import { DatabaseBlock } from '$lib/editor/extensions/DatabaseBlockExtension.svelte';
 	import { TextStyle } from '@tiptap/extension-text-style';
 	import { Color } from '@tiptap/extension-color';
@@ -35,7 +36,7 @@
 		Heading1, Heading2, Heading3, Type, Quote, Code, 
 		List, ListOrdered, Bold, Italic, Link as LinkIcon, Palette,
 		CheckSquare, Minus, Table as TableIcon, ChevronRight, Lock, Unlock,
-		ChevronDown, Database, Image as ImageIcon, X, ZoomIn, ZoomOut, RotateCcw
+		ChevronDown, Database, Image as ImageIcon, X, ZoomIn, ZoomOut, RotateCcw, Undo2
 	} from 'lucide-svelte';
 
 	import { CURATED_ICONS } from '$lib/icons';
@@ -141,6 +142,7 @@
 	// Tiptap states
 	let editorElement = $state<HTMLDivElement>();
 	let editor = $state<Editor>();
+	let canUndo = $state(false);
 	let editorPageId = $state<string | null>(null);
 	let autosaveStatus = $state<'idle' | 'saving' | 'error'>('idle');
 	const autosaveController = createAutosaveController({
@@ -416,86 +418,84 @@
 			};
 		},
 		addNodeView() {
-			const createDetailsNodeView = this.parent?.();
-			if (!createDetailsNodeView) return null;
+			return ({ editor, getPos, node, HTMLAttributes }) => {
+				const dom = document.createElement('div');
+				const attributes = mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, {
+					'data-type': this.name
+				});
+				Object.entries(attributes).forEach(([name, value]) => dom.setAttribute(name, String(value)));
 
-			return (props) => {
-				const detailsNodeView = createDetailsNodeView(props);
-				if (!detailsNodeView) return detailsNodeView;
-				let currentNode = props.node;
+				const toggle = document.createElement('button');
+				toggle.type = 'button';
+				const content = document.createElement('div');
+				dom.append(toggle, content);
+
+				let currentNode = node;
 				let openStateSyncTimeout: ReturnType<typeof setTimeout> | null = null;
-				
-				const updateHeadingLevel = (node: typeof props.node) => {
-					detailsNodeView.dom.setAttribute('data-heading-level', String(node.attrs.level));
+				const renderToggleButton = (isOpen: boolean) => {
+					this.options.renderToggleButton({ element: toggle, isOpen, node: currentNode });
+					toggle.setAttribute('aria-expanded', String(isOpen));
+				};
+				const syncOpenState = (isOpen: boolean) => {
+					synchronizeDetailsElement(dom, isOpen);
+					renderToggleButton(isOpen);
+					const detailsContent = content.querySelector(':scope > div[data-type="detailsContent"]');
+					detailsContent?.dispatchEvent(new Event('toggleDetailsContent'));
 				};
 				const scheduleOpenStateSync = () => {
 					if (openStateSyncTimeout !== null) clearTimeout(openStateSyncTimeout);
 					openStateSyncTimeout = setTimeout(() => {
 						openStateSyncTimeout = null;
-						synchronizeDetailsElement(detailsNodeView.dom, Boolean(currentNode.attrs.open));
+						syncOpenState(Boolean(currentNode.attrs.open));
 					}, 0);
 				};
-				updateHeadingLevel(props.node);
-				scheduleOpenStateSync();
 
-				const parentUpdate = detailsNodeView.update?.bind(detailsNodeView);
-				const parentDestroy = detailsNodeView.destroy?.bind(detailsNodeView);
+				dom.setAttribute('data-heading-level', String(node.attrs.level));
+				renderToggleButton(Boolean(node.attrs.open));
+				scheduleOpenStateSync();
+				toggle.addEventListener('click', (event) => {
+					event.stopPropagation();
+					const isOpen = !dom.classList.contains('is-open');
+					if (editor.isEditable && typeof getPos === 'function') {
+						const position = getPos();
+						if (typeof position !== 'number') return;
+						const current = editor.state.doc.nodeAt(position);
+						if (current?.type !== this.type) return;
+						const transaction = editor.state.tr.setNodeMarkup(position, undefined, {
+							...current.attrs,
+							open: isOpen
+						});
+						editor.view.dispatch(transaction);
+						return;
+					}
+					// Locked pages can expand for reading without changing saved content.
+					syncOpenState(isOpen);
+				});
 
 				return {
-					...detailsNodeView,
-					update: (updatedNode, decorations, innerDecorations) => {
-						const didUpdate = parentUpdate?.(updatedNode, decorations, innerDecorations) ?? true;
-						if (didUpdate) {
-							currentNode = updatedNode;
-							updateHeadingLevel(updatedNode);
-							scheduleOpenStateSync();
-							}
-							return didUpdate;
-						},
-						destroy: () => {
-							if (openStateSyncTimeout !== null) clearTimeout(openStateSyncTimeout);
-							parentDestroy?.();
+					dom,
+					contentDOM: content,
+					ignoreMutation(mutation) {
+						if (mutation.type === 'selection') return false;
+						const target = mutation.target;
+						return toggle.contains(target) || !dom.contains(target) || dom === target;
+					},
+					update: (updatedNode) => {
+						if (updatedNode.type !== this.type) return false;
+						currentNode = updatedNode;
+						dom.setAttribute('data-heading-level', String(updatedNode.attrs.level));
+						if (updatedNode.attrs.open !== undefined) {
+							syncOpenState(Boolean(updatedNode.attrs.open));
+						} else {
+							renderToggleButton(dom.classList.contains('is-open'));
 						}
-					};
-			};
-		}
-	});
-
-	const PreserveDetailsLevel = Extension.create({
-		name: 'preserveDetailsLevel',
-		addProseMirrorPlugins() {
-			return [
-				new Plugin({
-					appendTransaction(transactions, oldState, newState) {
-						// A user-initiated level change must win over the compatibility
-						// preservation below. Without this guard, H3 -> H1 is immediately
-						// changed back to H3.
-						if (transactions.some((transaction) => transaction.getMeta('toggleHeadingLevelChange'))) {
-							return null;
-						}
-
-						let tr = newState.tr;
-						let modified = false;
-
-						newState.doc.descendants((node, pos) => {
-							if (node.type.name === 'details') {
-								const oldNode = oldState.doc.nodeAt(pos);
-								if (oldNode && oldNode.type.name === 'details') {
-									if (node.attrs.level !== oldNode.attrs.level && node.attrs.level === 1) {
-										tr = tr.setNodeMarkup(pos, undefined, {
-											...node.attrs,
-											level: oldNode.attrs.level
-										});
-										modified = true;
-									}
-								}
-							}
-						});
-
-						return modified ? tr : null;
+						return true;
+					},
+					destroy: () => {
+						if (openStateSyncTimeout !== null) clearTimeout(openStateSyncTimeout);
 					}
-				})
-			];
+				};
+			};
 		}
 	});
 
@@ -540,8 +540,24 @@
 			.chain()
 			.focus()
 			.deleteRange(range)
-			.setDetails()
-			.updateAttributes('details', { level })
+			.command(({ tr }) => {
+				const selectionFrom = tr.selection.$from;
+				if (!selectionFrom.parent.isTextblock || selectionFrom.depth === 0) return false;
+
+				const blockPos = selectionFrom.before(selectionFrom.depth);
+				const block = tr.doc.nodeAt(blockPos);
+				if (!block?.isTextblock) return false;
+
+				const { schema } = tr.doc.type;
+				const summary = schema.nodes.detailsSummary.create(null, block.content);
+				const body = schema.nodes.detailsContent.create(null, schema.nodes.paragraph.create());
+				const toggle = schema.nodes.details.create({ level }, [summary, body]);
+				const summaryCursor = blockPos + 2 + summary.content.size;
+
+				tr.replaceWith(blockPos, blockPos + block.nodeSize, toggle);
+				tr.setSelection(TextSelection.create(tr.doc, summaryCursor));
+				return true;
+			})
 			.run();
 	}
 
@@ -883,6 +899,22 @@
 	let isActionMenuOpen = $state(false);
 	let openUpward = $state(false);
 	const GUTTER_HIT_SLOP = 36;
+	let gutterHideTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	function cancelGutterHide() {
+		if (gutterHideTimeout === null) return;
+		clearTimeout(gutterHideTimeout);
+		gutterHideTimeout = null;
+	}
+
+	function scheduleGutterHide() {
+		if (gutterHideTimeout !== null) return;
+		gutterHideTimeout = setTimeout(() => {
+			gutterHideTimeout = null;
+			isGutterVisible = false;
+			activeBlockNode = null;
+		}, 180);
+	}
 	
 	// Drag state
 	let dragExpandTimeout: any = null;
@@ -896,6 +928,12 @@
 	/** JSON path to a block. Each entry is an index into the current node's content. */
 	type BlockPath = { nodePath: number[] };
 	let draggedBlockPath = $state<BlockPath | null>(null);
+	let dropTargetToggle: HTMLElement | null = null;
+
+	function clearToggleDropTarget() {
+		dropTargetToggle?.classList.remove('drag-drop-inside');
+		dropTargetToggle = null;
+	}
 
 	let isMobile = $state(false);
 
@@ -1055,6 +1093,7 @@
 					persist: true
 				}),
 				PreserveDetailsLevel,
+				DetailsClipboard,
 				ArabicTextDirection,
 				DetailsSummary,
 				DetailsContent,
@@ -1246,6 +1285,7 @@
 				}
 			},
 			onUpdate: ({ editor, transaction }) => {
+				canUndo = editor.can().undo();
 				const jsonContent = editor.getJSON();
 				const jsonStr = JSON.stringify(jsonContent);
 				updateToggleCount(editor.state.doc);
@@ -1256,17 +1296,8 @@
 				}
 			}
 		});
+		canUndo = editor.can().undo();
 		updateToggleCount(editor.state.doc);
-
-		// Override the clipboard serializer so copy/cut uses the schema's
-		// toDOM (renderHTML) instead of the node views. The DetailsContent node
-		// view starts with hidden="hidden", which causes the browser to skip
-		// the nested content during clipboard serialization. By using a
-		// schema-based serializer, all content (including collapsed toggle
-		// bodies) is always included in the clipboard payload.
-		editor.view.setProps({
-			clipboardSerializer: DOMSerializer.fromSchema(editor.schema)
-		});
 
 		editorPageId = data.pageRecord.id;
 	}
@@ -1429,6 +1460,7 @@
 	});
 
 	onDestroy(() => {
+		cancelGutterHide();
 		void flushPendingSave({ keepalive: true });
 		autosaveController.destroy();
 		if (editor) {
@@ -1450,6 +1482,7 @@
 	function handleMouseMove(e: MouseEvent) {
 		if (!editorElement || !editor || isActionMenuOpen) return;
 		if (isLocked) {
+			cancelGutterHide();
 			isGutterVisible = false;
 			activeBlockNode = null;
 			isTableHovered = false;
@@ -1462,10 +1495,15 @@
 
 		const editorRect = editorElement.getBoundingClientRect();
 		const target = e.target as HTMLElement;
+		if (target.closest('.block-gutter')) {
+			cancelGutterHide();
+			return;
+		}
 
 		// Ignore database tables for simple table handles
 		const dbBlock = target.closest('.database-block-nodeview, .database-block') || target.closest('table.database-table');
 		if (dbBlock) {
+			cancelGutterHide();
 			isGutterVisible = false;
 			isTableHovered = false;
 			activeTableNode = null;
@@ -1485,6 +1523,7 @@
 				e.clientY <= rect.bottom + 30;
 			
 			if (isNearTable) {
+				cancelGutterHide();
 				isGutterVisible = false;
 				// Update handles to currently hovered cell inside table
 				const cell = target.closest('td, th') as HTMLElement | null;
@@ -1534,6 +1573,7 @@
 			activeTableNode = null;
 			activeCellNode = null;
 			if (target.closest('table')) {
+				cancelGutterHide();
 				isGutterVisible = false;
 				return;
 			}
@@ -1562,12 +1602,27 @@
 			return node.parentElement?.matches('[data-type="detailsContent"]') &&
 				e.clientX >= rect.left && e.clientX <= rect.right;
 		});
-		const block = nestedBlockAtPointer ?? blockAtPointer ?? blocksAtY
-			.map(node => ({ node, distance: Math.abs(e.clientX - (node.getBoundingClientRect().left - 28)) }))
+		// A nested block's gutter sits outside its own rectangle, where an
+		// enclosing toggle can still contain the pointer. Prefer the closest
+		// gutter anchor there so moving onto the six dots keeps the nested target.
+		const blockAtGutter = blocksAtY
+			.map(node => {
+				const anchor = node.matches('[data-type="details"]')
+					? node.querySelector<HTMLElement>('summary')
+					: node.matches('.task-list-wrapper')
+					? node.querySelector<HTMLElement>('.task-list-header')
+					: node;
+				return {
+					node,
+					distance: Math.abs(e.clientX - ((anchor ?? node).getBoundingClientRect().left - 28))
+				};
+			})
 			.filter(({ distance }) => distance <= GUTTER_HIT_SLOP)
 			.sort((a, b) => a.distance - b.distance)[0]?.node;
+		const block = nestedBlockAtPointer ?? blockAtGutter ?? blockAtPointer ?? blocksAtY[0];
 
 		if (block && block instanceof HTMLElement) {
+			cancelGutterHide();
 			activeBlockNode = block;
 			const headerAnchor = block.matches('[data-type="details"]')
 				? block.querySelector<HTMLElement>('summary')
@@ -1581,7 +1636,7 @@
 			gutterLeft = handleAnchorRect.left - editorRect.left - 28;
 			isGutterVisible = true;
 		} else {
-			isGutterVisible = false;
+			scheduleGutterHide();
 		}
 	}
 
@@ -2005,6 +2060,7 @@
 		dropLineTop = null;
 		dropLineVertical = null;
 		dropMode = 'vertical';
+		clearToggleDropTarget();
 		isGutterVisible = false;
 		clearTimeout(dragExpandTimeout);
 		lastDragTargetDetails = null;
@@ -2024,6 +2080,7 @@
 		const targetBlock = getDragTargetBlock(e);
 		
 		if (!targetBlock) { 
+			clearToggleDropTarget();
 			dropLineTop = null; 
 			dropLineVertical = null; 
 			clearTimeout(dragExpandTimeout);
@@ -2051,10 +2108,24 @@
 
 		const targetPath = getBlockPathForElement(targetBlock);
 		if (!targetPath || !draggedBlockPath || sameBlockPath(targetPath, draggedBlockPath)) {
+			clearToggleDropTarget();
 			dropLineTop = null;
 			dropLineVertical = null;
 			return;
 		}
+
+		// Dropping directly on a toggle heading means "put this block inside".
+		// The normal above/below line here makes it too easy to create a sibling.
+		if (targetBlock.matches('[data-type="details"]')) {
+			clearToggleDropTarget();
+			dropTargetToggle = targetBlock;
+			dropTargetToggle.classList.add('drag-drop-inside');
+			dropMode = 'vertical';
+			dropLineTop = null;
+			dropLineVertical = null;
+			return;
+		}
+		clearToggleDropTarget();
 		const rect = targetBlock.getBoundingClientRect();
 		const relativeX = e.clientX - rect.left;
 		const relativeY = e.clientY - rect.top;
@@ -2193,18 +2264,23 @@
 			editor.commands.setContent(docJson, { emitUpdate: true });
 		} else {
 			// === VERTICAL DROP: Standard above/below reorder ===
-			const rect = targetBlock.getBoundingClientRect();
-			const relativeY = e.clientY - rect.top;
-			const isInsertBefore = relativeY < rect.height / 2;
-
 			const targetLocation = getJsonLocation(docJson.content, adjustedTargetPath);
 			if (!targetLocation) { handleDragEnd(); return; }
-			let insertIndex = targetLocation.index;
-			if (!isInsertBefore) {
-				insertIndex += 1;
-			}
+			const targetNode = targetLocation.container[targetLocation.index];
 
-			targetLocation.container.splice(insertIndex, 0, draggedBlock);
+			if (targetNode?.type === 'details') {
+				const detailsContent = targetNode.content?.find((node: any) => node.type === 'detailsContent');
+				if (!detailsContent) { handleDragEnd(); return; }
+				detailsContent.content ??= [];
+				detailsContent.content.push(draggedBlock);
+				targetNode.attrs = { ...targetNode.attrs, open: true };
+			} else {
+				const rect = targetBlock.getBoundingClientRect();
+				const relativeY = e.clientY - rect.top;
+				const isInsertBefore = relativeY < rect.height / 2;
+				const insertIndex = targetLocation.index + (isInsertBefore ? 0 : 1);
+				targetLocation.container.splice(insertIndex, 0, draggedBlock);
+			}
 			docJson.content = normalizeColumnLayouts(docJson.content);
 
 			editor.commands.setContent(docJson, { emitUpdate: true });
@@ -2238,6 +2314,18 @@
 		>
 			{#if isLocked}<Lock size={isMobile ? 22 : 18} />{:else}<Unlock size={isMobile ? 22 : 18} />{/if}
 		</button>
+		{#if isMobile && !isLocked}
+			<button
+				type="button"
+				class="page-undo-btn"
+				disabled={!canUndo}
+				onclick={() => editor?.chain().focus().undo().run()}
+				title="Undo"
+				aria-label="Undo"
+			>
+				<Undo2 size={22} />
+			</button>
+		{/if}
 	</div>
 
 	<!-- Header row: Icon + Title inline -->
@@ -2965,7 +3053,8 @@
 	}
 
 	.autosave-indicator,
-	.page-lock-btn {
+	.page-lock-btn,
+	.page-undo-btn {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
@@ -2990,6 +3079,23 @@
 		cursor: pointer;
 		border: none;
 		background: transparent;
+	}
+
+	.page-undo-btn {
+		color: var(--text-muted);
+		cursor: pointer;
+		border: none;
+		background: transparent;
+	}
+
+	.page-undo-btn:hover:not(:disabled) {
+		color: var(--text-main);
+		background: transparent;
+	}
+
+	.page-undo-btn:disabled {
+		cursor: default;
+		opacity: 0.4;
 	}
 
 	.page-lock-btn:hover {
@@ -3019,7 +3125,8 @@
 	}
 
 	:global(.mobile) .autosave-indicator,
-	:global(.mobile) .page-lock-btn {
+	:global(.mobile) .page-lock-btn,
+	:global(.mobile) .page-undo-btn {
 		width: 40px;
 		height: 40px;
 		border-radius: 6px;

@@ -2,7 +2,7 @@
 	import { 
 		Plus, Trash2, ArrowUp, ArrowDown, ArrowUpDown, ArrowLeft, ArrowRight,
 		Settings, Search, Calendar, Hash, Type, CheckSquare, 
-		ChevronDown, ChevronUp, PlusCircle, X, Copy, Filter
+		ChevronDown, ChevronUp, PlusCircle, X, Copy, Filter, Rows3, Columns3
 	} from 'lucide-svelte';
 	import { generateDatabaseId, renameDatabaseOption } from '$lib/editor/database-model';
 
@@ -663,11 +663,11 @@
 				class="db-filter-btn"
 				class:active={isFilterOpen || filterColumnId !== ''}
 				aria-label="Filter table"
+				title="Filter table"
 				aria-expanded={isFilterOpen}
 				onclick={(e) => { e.stopPropagation(); isFilterOpen = !isFilterOpen; activeColumnMenu = null; activeSelectDropdown = null; }}
 			>
 				<Filter size={14} />
-				<span>Filter</span>
 			</button>
 			{#if isFilterOpen}
 				<!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -732,16 +732,20 @@
 		</div>
 
 		{#if editable}
-			<button
-				type="button"
-				class="db-add-row-btn"
-				aria-label="Add row"
-				title="Add new row at the top"
-				onclick={addRow}
-			>
-				<Plus size={14} />
-				<span>New row</span>
-			</button>
+			<div class="db-add-controls" role="group" aria-label="Add to database">
+				<button type="button" class="db-add-action-btn" aria-label="Add row" title="Add row" onclick={addRow}>
+					<span class="add-action-icon">
+						<Rows3 size={16} />
+						<Plus size={9} class="add-action-plus" />
+					</span>
+				</button>
+				<button type="button" class="db-add-action-btn" aria-label="Add column" title="Add column" onclick={addColumn}>
+					<span class="add-action-icon">
+						<Columns3 size={16} />
+						<Plus size={9} class="add-action-plus" />
+					</span>
+				</button>
+			</div>
 		{/if}
 
 		{#if selectedRowIds.length > 0 && editable}
@@ -1206,11 +1210,6 @@
 			{/if}
 		</table>
 		</div>
-		{#if editable}
-			<button type="button" class="add-column-btn" aria-label="Add column" title="Add column" onclick={addColumn}>
-				<Plus size={14} />
-			</button>
-		{/if}
 	</div>
 	{#if processedRows().length > ROW_LIMIT}
 		<div class="db-pagination-bar" class:has-gutter={editable}>
@@ -1380,10 +1379,11 @@
 	.db-filter-btn {
 		display: inline-flex;
 		align-items: center;
-		gap: 6px;
+		justify-content: center;
+		width: 34px;
 		height: 34px;
 		box-sizing: border-box;
-		padding: 0 10px;
+		padding: 0;
 		border: 1px solid var(--border-color);
 		border-radius: 6px;
 		font-size: 12px;
@@ -1400,30 +1400,61 @@
 	}
 
 
-	.db-add-row-btn {
+	.db-add-controls {
 		display: inline-flex;
 		align-items: center;
-		gap: 6px;
-		height: 34px;
-		box-sizing: border-box;
-		padding: 0 11px;
-		border: 1px solid color-mix(in srgb, var(--accent-color) 45%, var(--border-color));
-		border-radius: 6px;
-		font-size: 12px;
-		font-weight: 500;
-		color: var(--accent-color);
-		background: color-mix(in srgb, var(--accent-color) 8%, var(--bg-canvas));
-		transition: all 0.15s ease;
-		cursor: pointer;
-		white-space: nowrap;
+		gap: 2px;
+		padding: 2px;
+		flex: 0 0 auto;
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+		background: var(--bg-canvas);
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 	}
 
-	.db-add-row-btn:hover,
-	.db-add-row-btn:focus-visible {
-		color: #ffffff;
-		background: var(--accent-color);
-		border-color: var(--accent-color);
-		box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+	.db-add-action-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 29px;
+		height: 28px;
+		box-sizing: border-box;
+		padding: 0;
+		border: 0;
+		border-radius: 5px;
+		color: var(--text-muted);
+		background: transparent;
+		transition: all 0.15s ease;
+		cursor: pointer;
+	}
+
+	.db-add-action-btn:hover,
+	.db-add-action-btn:focus-visible {
+		color: var(--accent-color);
+		background: color-mix(in srgb, var(--accent-color) 10%, var(--bg-canvas));
+		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 20%, transparent);
+	}
+
+	.add-action-icon {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	:global(.add-action-plus) {
+		position: absolute;
+		right: -5px;
+		bottom: -4px;
+		border-radius: 50%;
+		background: var(--bg-canvas);
+		color: var(--accent-color);
+		stroke-width: 3;
+	}
+
+	:global(.db-add-action-btn:hover .add-action-plus),
+	:global(.db-add-action-btn:focus-visible .add-action-plus) {
+		background: color-mix(in srgb, var(--accent-color) 10%, var(--bg-canvas));
 	}
 
 
@@ -1607,6 +1638,7 @@
 
 	/* Table Wrapper */
 	.db-table-layout {
+		position: relative;
 		display: flex;
 		align-items: flex-start;
 		gap: 4px;
@@ -1629,12 +1661,13 @@
 	}
 
 	.db-checkbox-gutter {
-		position: relative;
+		position: absolute;
+		top: 0;
+		left: -26px;
+		z-index: 2;
 		display: flex;
 		flex-direction: column;
-		flex: 0 0 22px;
 		width: 22px;
-		margin-right: 4px;
 		user-select: none;
 	}
 
@@ -1707,13 +1740,14 @@
 		cursor: pointer;
 		padding: 0;
 		transition: all 0.15s ease;
-		opacity: 0.85;
+		opacity: 0;
 		margin: 0;
 		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 	}
 
 	.row-checkbox-floating:hover,
 	.row-checkbox-floating.checked,
+	.row-checkbox-floating:focus-visible,
 	.db-checkbox-header-cell:hover .row-checkbox-floating,
 	.db-checkbox-row-cell:hover .row-checkbox-floating,
 	.db-checkbox-row-cell.row-hovered .row-checkbox-floating,
@@ -1739,15 +1773,18 @@
 	:global(.dark) .row-checkbox-floating {
 		border: 1.5px solid rgba(255, 255, 255, 0.6);
 		background-color: #252525;
-		opacity: 0.9;
+		opacity: 0;
 		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.12);
 	}
 
 	:global(html.dark) .row-checkbox-floating:hover,
-	:global(.dark) .row-checkbox-floating:hover {
+	:global(.dark) .row-checkbox-floating:hover,
+	:global(html.dark) .row-checkbox-floating:focus-visible,
+	:global(.dark) .row-checkbox-floating:focus-visible {
 		border-color: #ffffff;
 		background-color: #383838;
 		box-shadow: 0 2px 5px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.25);
+		opacity: 1;
 	}
 
 	:global(html.dark) .row-checkbox-floating.checked,
@@ -2150,25 +2187,6 @@
 
 	.summary-empty {
 		opacity: 0.55;
-	}
-
-	.add-column-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		flex: 0 0 auto;
-		margin-top: 8px;
-		width: 28px;
-		height: 28px;
-		padding: 0;
-		border-radius: 5px;
-		color: var(--text-muted);
-	}
-
-	.add-column-btn:hover,
-	.add-column-btn:focus-visible {
-		color: var(--text-main);
-		background: var(--hover-icon);
 	}
 
 	.db-pagination-bar {

@@ -1887,7 +1887,7 @@
 		align-items: center;
 		background-color: var(--hover-sidebar);
 		border: 1px solid var(--border-color);
-		border-radius: 6px;
+		border-radius: 8px;
 		padding: 6px 10px;
 		gap: 8px;
 		width: 100%;

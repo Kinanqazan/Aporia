@@ -4,7 +4,7 @@
 	/* Light Mode (Notion Aesthetic) */
 	--bg-canvas: #ffffff;
 	--bg-sidebar: #ffffff;
-	--sidebar-surface: #ffffff;
+	--sidebar-surface: #f7f6f2;
 	--text-main: #37352f;
 	--text-muted: #7c7b77;
 	--border-color: #b3b3b3;
@@ -46,7 +46,7 @@
 	/* Dark Mode (Notion Aesthetic) */
 	--bg-canvas: #191919;
 	--bg-sidebar: #202020;
-	--sidebar-surface: #202020;
+	--sidebar-surface: #242424;
 	--text-main: #e3e3e3;
 	--text-muted: #8f8f8f;
 	--border-color: #2d2d2d;
@@ -187,7 +187,6 @@ textarea {
 	height: 100%;
 	min-height: 0;
 	background-color: var(--sidebar-surface);
-	border-right: 1px solid var(--border-color);
 	display: flex;
 	flex-direction: column;
 	transition: transform var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1), margin-left var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1);
@@ -228,12 +227,17 @@ textarea {
 	flex-shrink: 0;
 }
 
+.toggle-sidebar-btn {
+	transform: translateY(10px);
+}
+
 .user-workspace {
 	display: flex;
 	align-items: center;
 	gap: 8px;
 	font-weight: 500;
 	font-size: 14px;
+	transform: translateY(10px);
 }
 
 .avatar {
@@ -289,9 +293,8 @@ textarea {
 .sidebar-actions {
 	display: flex;
 	flex-direction: column;
-	padding: 8px 4px;
+	padding: 18px 4px 8px;
 	gap: 2px;
-	border-bottom: 1px solid var(--border-color);
 }
 
 .action-item,
@@ -483,9 +486,8 @@ textarea {
 .sidebar-actions {
 	display: flex;
 	flex-direction: column;
-	padding: 8px 4px;
+	padding: 18px 4px 8px;
 	gap: 2px;
-	border-bottom: 1px solid var(--border-color);
 }
 
 .action-item,
@@ -1027,6 +1029,12 @@ textarea {
 
 .ProseMirror [data-type='details']>button:hover {
 	background: var(--hover-sidebar);
+}
+
+.ProseMirror [data-type='details'].drag-drop-inside {
+	outline: 2px dashed var(--accent-color);
+	outline-offset: 4px;
+	border-radius: 6px;
 }
 
 .ProseMirror [data-type='details'] summary {
