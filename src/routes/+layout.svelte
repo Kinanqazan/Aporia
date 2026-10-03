@@ -1106,7 +1106,7 @@
 			<div class="left-controls">
 				{#if !isSidebarOpen || isMobile}
 					<button class="icon-btn menu-btn" onclick={toggleSidebar} title="Open sidebar">
-						<Menu size={isMobile ? 22 : 19} />
+						<Menu size={isMobile ? 26 : 19} />
 					</button>
 				{/if}
 				{#if !isMobile}
@@ -1183,17 +1183,17 @@
 						aria-label={expandedNodes.has(node.id) ? 'Collapse' : 'Expand'}
 					>
 						{#if expandedNodes.has(node.id)}
-							<ChevronDown size={13} />
+							<ChevronDown size={15} />
 						{:else}
-							<ChevronRight size={13} />
+							<ChevronRight size={15} />
 						{/if}
 					</button>
 					<span class="page-emoji">
-						<PageIcon icon={node.icon} color={node.iconColor} size={18} />
+						<PageIcon icon={node.icon} color={node.iconColor} size={20} />
 					</span>
 				{:else}
 					<span class="page-emoji">
-						<PageIcon icon={node.icon} color={node.iconColor} size={18} />
+						<PageIcon icon={node.icon} color={node.iconColor} size={20} />
 					</span>
 				{/if}
 			</div>

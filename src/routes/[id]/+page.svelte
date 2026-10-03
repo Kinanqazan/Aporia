@@ -46,7 +46,8 @@
 	import { createAutosaveController } from '$lib/editor/autosave-controller.js';
 	import {
 		restorePersistedDetailsOpenState,
-		synchronizeDetailsElement
+		synchronizeDetailsElement,
+		synchronizeDetailsNodeView
 	} from '$lib/editor/details-open-state.js';
 
 	let { data } = $props();
@@ -437,10 +438,8 @@
 					toggle.setAttribute('aria-expanded', String(isOpen));
 				};
 				const syncOpenState = (isOpen: boolean) => {
-					synchronizeDetailsElement(dom, isOpen);
+					synchronizeDetailsNodeView(dom, isOpen);
 					renderToggleButton(isOpen);
-					const detailsContent = content.querySelector(':scope > div[data-type="detailsContent"]');
-					detailsContent?.dispatchEvent(new Event('toggleDetailsContent'));
 				};
 				const scheduleOpenStateSync = () => {
 					if (openStateSyncTimeout !== null) clearTimeout(openStateSyncTimeout);
@@ -449,12 +448,7 @@
 						syncOpenState(Boolean(currentNode.attrs.open));
 					}, 0);
 				};
-
-				dom.setAttribute('data-heading-level', String(node.attrs.level));
-				renderToggleButton(Boolean(node.attrs.open));
-				scheduleOpenStateSync();
-				toggle.addEventListener('click', (event) => {
-					event.stopPropagation();
+				const toggleOpenState = () => {
 					const isOpen = !dom.classList.contains('is-open');
 					if (editor.isEditable && typeof getPos === 'function') {
 						const position = getPos();
@@ -470,6 +464,24 @@
 					}
 					// Locked pages can expand for reading without changing saved content.
 					syncOpenState(isOpen);
+				};
+				const handleLockedSummaryClick = (event: MouseEvent) => {
+					if (editor.isEditable) return;
+					const target = event.target;
+					if (!(target instanceof Element) || !target.closest('summary')) return;
+					if (target.closest('a, button, [role="button"]')) return;
+					event.preventDefault();
+					event.stopPropagation();
+					toggleOpenState();
+				};
+
+				dom.setAttribute('data-heading-level', String(node.attrs.level));
+				renderToggleButton(Boolean(node.attrs.open));
+				scheduleOpenStateSync();
+				content.addEventListener('click', handleLockedSummaryClick);
+				toggle.addEventListener('click', (event) => {
+					event.stopPropagation();
+					toggleOpenState();
 				});
 
 				return {
@@ -492,6 +504,7 @@
 						return true;
 					},
 					destroy: () => {
+						content.removeEventListener('click', handleLockedSummaryClick);
 						if (openStateSyncTimeout !== null) clearTimeout(openStateSyncTimeout);
 					}
 				};
@@ -2312,7 +2325,7 @@
 			title={isLocked ? 'Unlock page' : 'Lock page'}
 			aria-label={isLocked ? 'Unlock page' : 'Lock page'}
 		>
-			{#if isLocked}<Lock size={isMobile ? 22 : 18} />{:else}<Unlock size={isMobile ? 22 : 18} />{/if}
+			{#if isLocked}<Lock size={isMobile ? 26 : 18} />{:else}<Unlock size={isMobile ? 26 : 18} />{/if}
 		</button>
 		{#if isMobile && !isLocked}
 			<button
@@ -3387,7 +3400,7 @@
 
 	.page-title-input {
 		width: 100%;
-		font-size: 28px;
+		font-size: 32px;
 		font-weight: 700;
 		color: var(--text-main);
 		border: none;

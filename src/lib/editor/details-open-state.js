@@ -14,6 +14,21 @@ export function synchronizeDetailsElement(dom, isOpen) {
 }
 
 /**
+ * Synchronizes an editable Details node view and notifies DetailsContent.
+ *
+ * @param {any} dom
+ * @param {boolean} isOpen
+ */
+export function synchronizeDetailsNodeView(dom, isOpen) {
+	synchronizeDetailsElement(dom, isOpen);
+	const detailsContent = dom.querySelector?.(':scope > div > [data-type="detailsContent"]');
+	detailsContent?.dispatchEvent?.(new Event('toggleDetailsContent'));
+	// DetailsContent toggles its hidden attribute in response to the event, so
+	// reapply the requested state after its listener has run.
+	detailsContent?.toggleAttribute?.('hidden', !isOpen);
+}
+
+/**
  * Restores persisted toggle state after view-only interactions on a locked page.
  *
  * @param {{

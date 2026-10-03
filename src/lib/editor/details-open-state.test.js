@@ -1,15 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { synchronizeDetailsElement } from './details-open-state.js';
+import { synchronizeDetailsElement, synchronizeDetailsNodeView } from './details-open-state.js';
 
 /** @param {boolean} open */
 function fixture(open) {
 	const classes = new Set();
 	const content = {
 		hidden: true,
-		/** @param {string} name @param {boolean} force */
+		/** @param {string} name @param {boolean} [force] */
 		toggleAttribute(name, force) {
-			if (name === 'hidden') this.hidden = force;
+			if (name !== 'hidden') return;
+			if (force === undefined) this.hidden = !this.hidden;
+			else this.hidden = force;
+		},
+		/** @param {{type: string}} event */
+		dispatchEvent(event) {
+			if (event.type === 'toggleDetailsContent') this.toggleAttribute('hidden');
 		}
 	};
 	const dom = {
@@ -40,6 +46,17 @@ test('an open details node cannot retain hidden nested content', () => {
 test('a closed details node keeps its nested content hidden', () => {
 	const { dom, classes, content } = fixture(false);
 	synchronizeDetailsElement(dom, false);
+	assert.equal(classes.has('is-open'), false);
+	assert.equal(content.hidden, true);
+});
+
+test('a details node view keeps nested content in sync after its toggle event', () => {
+	const { dom, classes, content } = fixture(false);
+	synchronizeDetailsNodeView(dom, true);
+	assert.equal(classes.has('is-open'), true);
+	assert.equal(content.hidden, false);
+
+	synchronizeDetailsNodeView(dom, false);
 	assert.equal(classes.has('is-open'), false);
 	assert.equal(content.hidden, true);
 });

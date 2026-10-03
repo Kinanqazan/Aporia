@@ -557,7 +557,7 @@ textarea {
 	min-width: 0;
 	text-decoration: none;
 	color: inherit;
-	font-size: 15px;
+	font-size: 16px;
 	cursor: pointer;
 	user-select: none;
 	padding: 4px 0;
@@ -605,7 +605,7 @@ textarea {
 	justify-content: center;
 	width: 100%;
 	height: 100%;
-	font-size: 18px;
+	font-size: 20px;
 	transition: opacity var(--transition-speed);
 }
 
@@ -863,7 +863,7 @@ textarea {
 }
 
 .mobile .page-item-link {
-	font-size: 15px;
+	font-size: 16px;
 }
 
 .mobile .page-symbol-slot {
@@ -949,6 +949,12 @@ textarea {
 	border-top: 7px solid transparent;
 	border-bottom: 7px solid transparent;
 	border-left: 9px solid var(--text-muted);
+}
+
+.mobile .ProseMirror [data-type='details']>button::before {
+	border-top-width: 8px;
+	border-bottom-width: 8px;
+	border-left-width: 10px;
 }
 
 .ProseMirror [data-type='details'].is-open>button {
