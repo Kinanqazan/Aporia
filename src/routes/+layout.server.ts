@@ -15,14 +15,8 @@ export const load: LayoutServerLoad = async ({ cookies }) => {
 	let hasExpandedSidebarState = false;
 	const activePageIds = new Set(activePages.map((page) => page.id));
 	
-	let sectionTitle = 'Private';
 	const editorTextSizes: Record<string, number> = {};
 	try {
-		const row = sqlite.prepare('SELECT value FROM settings WHERE key = ?').get('sidebar-section-title') as { value: string } | undefined;
-		if (row) {
-			sectionTitle = row.value;
-		}
-
 		const expandedSidebarRow = sqlite
 			.prepare('SELECT value FROM settings WHERE key = ?')
 			.get('aporia-expanded-sidebar-pages') as { value: string } | undefined;
@@ -65,7 +59,6 @@ export const load: LayoutServerLoad = async ({ cookies }) => {
 		expandedSidebarPageIds,
 		expandedSidebarStateUpdatedAt,
 		hasExpandedSidebarState,
-		sectionTitle,
 		editorTextSizes
 	};
 };

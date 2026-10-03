@@ -113,10 +113,6 @@
 		return data.expandedSidebarStateUpdatedAt ?? 0;
 	}
 
-	function initialSectionTitle() {
-		return data.sectionTitle ?? 'Private';
-	}
-
 	let sidebarWidth = $state(initialSidebarWidth());
 	let isResizing = $state(false);
 	
@@ -135,6 +131,7 @@
 
 	// Search States
 	let isSearchOpen = $state(false);
+	let preserveSidebarAfterCreate = false;
 	let searchQuery = $state('');
 	let searchResults = $state<any[]>([]);
 	let searchFocusedIndex = $state(0);
@@ -147,10 +144,6 @@
 	let editingTitleText = $state('');
 	let draggedPageId = $state<string | null>(null);
 	let dropTarget = $state<{ id: string; placement: 'before' | 'inside' | 'after' } | null>(null);
-	// Section Title States
-	let sectionTitle = $state(initialSectionTitle());
-	let isEditingSectionTitle = $state(false);
-	
 	// Dropdown menu state
 	let openMenuPageId = $state<string | null>(null);
 
@@ -343,7 +336,10 @@
 
 	afterNavigate(() => {
 		isSearchOpen = false;
-		if (isMobile) {
+		if (preserveSidebarAfterCreate) {
+			preserveSidebarAfterCreate = false;
+			if (isMobile) isSidebarOpen = true;
+		} else if (isMobile) {
 			isSidebarOpen = false;
 		}
 	});
@@ -743,101 +739,76 @@
 
 		<!-- Action items -->
 		<div class="sidebar-actions">
-			<div class="sidebar-search-container" bind:this={searchContainerEl}>
-				<div class="sidebar-search-input-wrapper">
-					<Search size={16} class="sidebar-search-icon" />
-					<input
-						bind:this={sidebarSearchInputEl}
-						type="text"
-						placeholder="Search..."
-						bind:value={searchQuery}
-						oninput={handleSearchInput}
-						onkeydown={handleSearchKeydown}
-						onfocus={() => isSearchOpen = true}
-						onclick={(e) => e.stopPropagation()}
-					/>
-					{#if searchQuery}
-						<button type="button" class="clear-search-btn" onclick={() => { searchQuery = ''; searchResults = []; }}>✕</button>
+			<div class="sidebar-search-row">
+				<div class="sidebar-search-container" bind:this={searchContainerEl}>
+					<div class="sidebar-search-input-wrapper">
+						<Search size={16} class="sidebar-search-icon" />
+						<input
+							bind:this={sidebarSearchInputEl}
+							type="text"
+							placeholder="Search..."
+							bind:value={searchQuery}
+							oninput={handleSearchInput}
+							onkeydown={handleSearchKeydown}
+							onfocus={() => isSearchOpen = true}
+							onclick={(e) => e.stopPropagation()}
+						/>
+						{#if searchQuery}
+							<button type="button" class="clear-search-btn" onclick={() => { searchQuery = ''; searchResults = []; }}>✕</button>
+						{/if}
+					</div>
+
+					{#if isSearchOpen && searchResults.length > 0}
+						<div class="sidebar-search-results">
+							{#each searchResults as result, idx}
+								<a
+									href="/{result.id}?highlight={encodeURIComponent(searchQuery)}"
+									class="sidebar-search-result-item"
+									class:focused={idx === searchFocusedIndex}
+									onclick={() => { isSearchOpen = false; }}
+								>
+									<span class="sidebar-result-icon">
+										<PageIcon icon={result.icon} color={result.iconColor} size={14} />
+									</span>
+									<div class="sidebar-result-body">
+										<span class="sidebar-result-title">{result.title}</span>
+										{#if result.snippet}
+											<span class="sidebar-result-snippet">{@html result.snippet}</span>
+										{/if}
+									</div>
+								</a>
+							{/each}
+						</div>
 					{/if}
 				</div>
-				
-				{#if isSearchOpen && searchResults.length > 0}
-					<div class="sidebar-search-results">
-						{#each searchResults as result, idx}
-							<a
-								href="/{result.id}?highlight={encodeURIComponent(searchQuery)}"
-								class="sidebar-search-result-item"
-								class:focused={idx === searchFocusedIndex}
-								onclick={() => { isSearchOpen = false; }}
-							>
-								<span class="sidebar-result-icon">
-									<PageIcon icon={result.icon} color={result.iconColor} size={14} />
-								</span>
-								<div class="sidebar-result-body">
-									<span class="sidebar-result-title">{result.title}</span>
-									{#if result.snippet}
-										<span class="sidebar-result-snippet">{@html result.snippet}</span>
-									{/if}
-								</div>
-							</a>
-						{/each}
-					</div>
-				{/if}
+				<form
+					method="POST"
+					action="/?/create"
+					use:enhance={() => {
+						preserveSidebarAfterCreate = isMobile;
+						return async ({ result, update }) => {
+							await update();
+							if (result.type !== 'redirect') {
+								preserveSidebarAfterCreate = false;
+							}
+							if (isMobile && result.type === 'redirect') {
+								isSidebarOpen = true;
+							}
+						};
+					}}
+					class="sidebar-create-page-form"
+				>
+					<input type="hidden" name="parentId" value="null" />
+					<input type="hidden" name="title" value="Untitled" />
+					<button type="submit" class="add-section-btn" title="Create new page" aria-label="Create new page">
+						<Plus size={16} />
+					</button>
+				</form>
 			</div>
 		</div>
 
 		<!-- Page list -->
 		<div class="sidebar-nav">
-			<div class="section-header">
-				{#if isEditingSectionTitle}
-					<input
-						type="text"
-						class="section-title-input"
-						bind:value={sectionTitle}
-						onblur={async () => {
-							isEditingSectionTitle = false;
-							if (!sectionTitle.trim()) sectionTitle = 'Private';
-							document.cookie = `sidebar-section-title=${encodeURIComponent(sectionTitle)}; path=/; max-age=31536000; SameSite=Lax`;
-							await fetch('/api/settings', {
-								method: 'POST',
-								headers: { 'Content-Type': 'application/json' },
-								body: JSON.stringify({ key: 'sidebar-section-title', value: sectionTitle })
-							});
-						}}
-						onkeydown={async (e) => {
-							if (e.key === 'Enter') {
-								isEditingSectionTitle = false;
-								if (!sectionTitle.trim()) sectionTitle = 'Private';
-								document.cookie = `sidebar-section-title=${encodeURIComponent(sectionTitle)}; path=/; max-age=31536000; SameSite=Lax`;
-								await fetch('/api/settings', {
-									method: 'POST',
-									headers: { 'Content-Type': 'application/json' },
-									body: JSON.stringify({ key: 'sidebar-section-title', value: sectionTitle })
-								});
-							}
-						}}
-						use:focusOnMount
-					/>
-				{:else}
-					<!-- svelte-ignore a11y_click_events_have_key_events -->
-					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<div 
-						class="section-title editable" 
-						onclick={() => isEditingSectionTitle = true} 
-						title="Click to edit section name"
-					>
-						{sectionTitle}
-					</div>
-				{/if}
-				<form method="POST" action="/?/create" use:enhance style="display: inline-flex;">
-					<input type="hidden" name="parentId" value="null" />
-					<input type="hidden" name="title" value="Untitled" />
-					<button type="submit" class="add-section-btn" title="Create new page">
-						<Plus size={13} />
-					</button>
-				</form>
-			</div>
-			
 			<div class="pages-list">
 				{#each pageTree as pageNode}
 					{@render renderNode(pageNode)}
@@ -1877,7 +1848,10 @@
 	/* Sidebar Search Styles */
 	.sidebar-search-container {
 		position: relative;
-		width: 100%;
+		flex: 1;
+		min-width: 0;
+		width: auto;
+		margin: 0;
 		display: flex;
 		flex-direction: column;
 	}
@@ -1888,7 +1862,7 @@
 		background-color: var(--hover-sidebar);
 		border: 1px solid var(--border-color);
 		border-radius: 8px;
-		padding: 6px 10px;
+		padding: 5px 10px;
 		gap: 8px;
 		width: 100%;
 	}
@@ -1909,7 +1883,7 @@
 	}
 
 	:global(.mobile) .sidebar-search-input-wrapper {
-		padding: 9px 12px;
+		padding: 8px 12px;
 		gap: 10px;
 		border-radius: 8px;
 	}

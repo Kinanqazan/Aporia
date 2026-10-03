@@ -297,6 +297,19 @@ textarea {
 	gap: 2px;
 }
 
+.sidebar-search-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: calc(100% - 12px);
+	margin-inline: auto;
+}
+
+.sidebar-create-page-form {
+	display: flex;
+	flex-shrink: 0;
+}
+
 .action-item,
 .footer-item {
 	display: flex;
@@ -330,64 +343,19 @@ textarea {
 	overflow-y: auto;
 	-ms-overflow-style: none;
 	scrollbar-width: none;
-	padding: 16px 10px;
+	padding: 8px 10px 16px;
 }
 
 .sidebar-nav::-webkit-scrollbar {
 	display: none;
 }
 
-.section-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	padding: 0 6px 6px;
-}
-
-.section-title {
-	font-size: 11px;
-	font-weight: 600;
-	text-transform: uppercase;
-	color: var(--text-muted);
-	letter-spacing: 0.5px;
-	margin: 0;
-	padding: 0;
-}
-
-.section-title.editable {
-	cursor: pointer;
-	border-radius: 3px;
-	padding: 2px 4px;
-	margin-left: -4px;
-	transition: background-color var(--transition-speed), color var(--transition-speed);
-}
-
-.section-title.editable:hover {
-	background-color: var(--hover-sidebar);
-	color: var(--text-main);
-}
-
-.section-title-input {
-	font-size: 11px;
-	font-weight: 600;
-	text-transform: uppercase;
-	color: var(--text-main);
-	letter-spacing: 0.5px;
-	background: transparent;
-	border: 1px solid var(--border-color);
-	border-radius: 4px;
-	outline: none;
-	padding: 2px 4px;
-	margin-left: -4px;
-	width: 120px;
-}
-
 .add-section-btn {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 20px;
-	height: 20px;
+	width: 34px;
+	height: 34px;
 	border-radius: 4px;
 	color: var(--text-muted);
 	background: transparent;
@@ -523,64 +491,19 @@ textarea {
 	overflow-y: auto;
 	-ms-overflow-style: none;
 	scrollbar-width: none;
-	padding: 16px 10px;
+	padding: 8px 10px 16px;
 }
 
 .sidebar-nav::-webkit-scrollbar {
 	display: none;
 }
 
-.section-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	padding: 0 6px 6px;
-}
-
-.section-title {
-	font-size: 11px;
-	font-weight: 600;
-	text-transform: uppercase;
-	color: var(--text-muted);
-	letter-spacing: 0.5px;
-	margin: 0;
-	padding: 0;
-}
-
-.section-title.editable {
-	cursor: pointer;
-	border-radius: 3px;
-	padding: 2px 4px;
-	margin-left: -4px;
-	transition: background-color var(--transition-speed), color var(--transition-speed);
-}
-
-.section-title.editable:hover {
-	background-color: var(--hover-sidebar);
-	color: var(--text-main);
-}
-
-.section-title-input {
-	font-size: 11px;
-	font-weight: 600;
-	text-transform: uppercase;
-	color: var(--text-main);
-	letter-spacing: 0.5px;
-	background: transparent;
-	border: 1px solid var(--border-color);
-	border-radius: 4px;
-	outline: none;
-	padding: 2px 4px;
-	margin-left: -4px;
-	width: 120px;
-}
-
 .add-section-btn {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 20px;
-	height: 20px;
+	width: 34px;
+	height: 34px;
 	border-radius: 4px;
 	color: var(--text-muted);
 	background: transparent;
@@ -915,6 +838,11 @@ textarea {
 }
 
 .mobile .menu-btn {
+	width: 40px;
+	height: 40px;
+}
+
+.mobile .add-section-btn {
 	width: 40px;
 	height: 40px;
 }
