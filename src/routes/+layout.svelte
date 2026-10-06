@@ -393,11 +393,14 @@
 			navigation.from?.url.pathname !== navigation.to?.url.pathname &&
 			!window.matchMedia('(prefers-reduced-motion: reduce)').matches
 		) {
+			const hasViewportAnchoredControls = canvasEl?.querySelector('.page-status-controls');
 			canvasEl?.animate(
-				[
-					{ opacity: 0.96, transform: 'translateY(6px)' },
-					{ opacity: 1, transform: 'translateY(0)' }
-				],
+				hasViewportAnchoredControls
+					? [{ opacity: 0.96 }, { opacity: 1 }]
+					: [
+							{ opacity: 0.96, transform: 'translateY(6px)' },
+							{ opacity: 1, transform: 'translateY(0)' }
+						],
 				{ duration: 180, easing: 'ease-out' }
 			);
 		}
