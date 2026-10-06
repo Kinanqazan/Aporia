@@ -2395,7 +2395,7 @@
 				<CloudLightning size={isMobile ? 22 : 18} />
 			</div>
 		{/if}
-		<div class="page-lock-controls" class:has-undo={isMobile && !isLocked}>
+		<div class="page-lock-controls">
 			{#if isMobile && !isLocked}
 				<button
 					type="button"
@@ -3224,11 +3224,6 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-	}
-
-	.page-lock-controls.has-undo {
-		/* Keep the lock in its previous slot while Undo moves to its left. */
-		margin-right: 46px;
 	}
 
 	.page-lock-btn {
