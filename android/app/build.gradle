@@ -1,0 +1,19 @@
+apply plugin: 'com.android.application'
+
+android {
+	namespace 'com.kinanqazan.aporia'
+	compileSdk 35
+
+	defaultConfig {
+		applicationId 'com.kinanqazan.aporia'
+		minSdk 23
+		targetSdk 35
+		versionCode 4
+		versionName '1.0.3'
+	}
+
+	compileOptions {
+		sourceCompatibility JavaVersion.VERSION_17
+		targetCompatibility JavaVersion.VERSION_17
+	}
+}

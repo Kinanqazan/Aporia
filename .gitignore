@@ -27,3 +27,10 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 data/uploads/
+
+# Android build output and machine-local configuration
+/android/.gradle/
+/android/local.properties
+/android/app/build/
+/android/*.jks
+/android/*.keystore

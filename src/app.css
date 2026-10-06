@@ -935,7 +935,7 @@ textarea {
 	border-radius: 3px;
 	background: transparent;
 	cursor: pointer;
-	transition: transform var(--transition-speed), background var(--transition-speed);
+	transition: transform var(--transition-speed);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -959,10 +959,6 @@ textarea {
 
 .ProseMirror [data-type='details'].is-open>button {
 	transform: rotate(90deg);
-}
-
-.ProseMirror [data-type='details']>button:hover {
-	background: var(--hover-sidebar);
 }
 
 .ProseMirror [data-type='details'].drag-drop-inside {

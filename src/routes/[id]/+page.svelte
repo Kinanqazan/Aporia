@@ -911,8 +911,98 @@
 	let gutterLeft = $state(0);
 	let isActionMenuOpen = $state(false);
 	let openUpward = $state(false);
+	let blockTypeSearchQuery = $state('');
+	let blockTypeSearchInput: HTMLInputElement | null = null;
+	type BlockActionType =
+		| 'paragraph'
+		| 'heading'
+		| 'toggleHeading'
+		| 'blockquote'
+		| 'codeBlock'
+		| 'todoList'
+		| 'bulletList'
+		| 'orderedList'
+		| 'divider'
+		| 'table'
+		| 'image'
+		| 'database';
+	type BlockTypeSearchOption = {
+		label: string;
+		type: BlockActionType;
+		level?: 1 | 2 | 3;
+		searchTerms: string[];
+	};
+	const blockTypeSearchOptions: BlockTypeSearchOption[] = [
+		{ label: 'Text Paragraph', type: 'paragraph', searchTerms: ['text paragraph', 'paragraph', 'text'] },
+		{ label: 'Heading 1', type: 'heading', level: 1, searchTerms: ['heading 1', 'heading1', 'h1'] },
+		{ label: 'Heading 2', type: 'heading', level: 2, searchTerms: ['heading 2', 'heading2', 'h2'] },
+		{ label: 'Heading 3', type: 'heading', level: 3, searchTerms: ['heading 3', 'heading3', 'h3'] },
+		{ label: 'Toggle Heading 1', type: 'toggleHeading', level: 1, searchTerms: ['toggle heading 1', 'toggleheading1', 'toggle 1', 'th1'] },
+		{ label: 'Toggle Heading 2', type: 'toggleHeading', level: 2, searchTerms: ['toggle heading 2', 'toggleheading2', 'toggle 2', 'th2'] },
+		{ label: 'Toggle Heading 3', type: 'toggleHeading', level: 3, searchTerms: ['toggle heading 3', 'toggleheading3', 'toggle 3', 'th3'] },
+		{ label: 'Image', type: 'image', searchTerms: ['image', 'picture'] },
+		{ label: 'Bullet List', type: 'bulletList', searchTerms: ['bullet list', 'bullets'] },
+		{ label: 'Numbered List', type: 'orderedList', searchTerms: ['numbered list', 'ordered list', 'numbered', 'ordered'] },
+		{ label: 'Quote Block', type: 'blockquote', searchTerms: ['quote block', 'quote', 'blockquote'] },
+		{ label: 'Code Block', type: 'codeBlock', searchTerms: ['code block', 'code'] },
+		{ label: 'To-do List', type: 'todoList', searchTerms: ['to-do list', 'todo', 'task list'] },
+		{ label: 'Divider', type: 'divider', searchTerms: ['divider', 'horizontal rule'] },
+		{ label: 'Table', type: 'table', searchTerms: ['table'] },
+		{ label: 'Database Table', type: 'database', searchTerms: ['database table', 'database'] }
+	];
 	const GUTTER_HIT_SLOP = 36;
 	let gutterHideTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	$effect(() => {
+		if (!isActionMenuOpen) {
+			blockTypeSearchQuery = '';
+			return;
+		}
+
+		requestAnimationFrame(() => blockTypeSearchInput?.focus());
+	});
+
+	function normalizeBlockTypeSearch(value: string) {
+		return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+	}
+
+	function getBlockTypeSearchMatches(query = blockTypeSearchQuery) {
+		const normalizedQuery = normalizeBlockTypeSearch(query);
+		if (!normalizedQuery) return [];
+
+		return blockTypeSearchOptions.filter((option) =>
+			option.searchTerms.some((term) => normalizeBlockTypeSearch(term).startsWith(normalizedQuery))
+		);
+	}
+
+	function isBlockTypeSearchMatch(type: BlockActionType, level?: number) {
+		if (!blockTypeSearchQuery.trim()) return true;
+		return getBlockTypeSearchMatches().some((option) => option.type === type && option.level === level);
+	}
+
+	function isFirstBlockTypeSearchMatch(type: BlockActionType, level?: number) {
+		const firstMatch = getBlockTypeSearchMatches()[0];
+		return firstMatch?.type === type && firstMatch.level === level;
+	}
+
+	function handleBlockTypeSearchInput(event: Event) {
+		blockTypeSearchQuery = (event.currentTarget as HTMLInputElement).value;
+	}
+
+	function handleBlockTypeSearchKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape') {
+			e.preventDefault();
+			isActionMenuOpen = false;
+			return;
+		}
+		if (event.key === 'Enter') {
+			const match = getBlockTypeSearchMatches()[0];
+			if (match) {
+				event.preventDefault();
+				convertActiveBlockTo(match.type, match.level);
+			}
+		}
+	}
 
 	function cancelGutterHide() {
 		if (gutterHideTimeout === null) return;
@@ -1957,19 +2047,7 @@
 	}
 
 	function convertActiveBlockTo(
-		type:
-			| 'paragraph'
-			| 'heading'
-			| 'toggleHeading'
-			| 'blockquote'
-			| 'codeBlock'
-			| 'todoList'
-			| 'bulletList'
-			| 'orderedList'
-			| 'divider'
-			| 'table'
-			| 'image'
-			| 'database',
+		type: BlockActionType,
 		level?: number
 	) {
 		if (!editor || !activeBlockNode) return;
@@ -2317,28 +2395,30 @@
 				<CloudLightning size={isMobile ? 22 : 18} />
 			</div>
 		{/if}
-		<button
-			type="button"
-			class="page-lock-btn"
-			disabled={isLockRequestInFlight}
-			onclick={togglePageLock}
-			title={isLocked ? 'Unlock page' : 'Lock page'}
-			aria-label={isLocked ? 'Unlock page' : 'Lock page'}
-		>
-			{#if isLocked}<Lock size={isMobile ? 26 : 18} />{:else}<Unlock size={isMobile ? 26 : 18} />{/if}
-		</button>
-		{#if isMobile && !isLocked}
+		<div class="page-lock-controls" class:has-undo={isMobile && !isLocked}>
+			{#if isMobile && !isLocked}
+				<button
+					type="button"
+					class="page-undo-btn"
+					disabled={!canUndo}
+					onclick={() => editor?.chain().focus().undo().run()}
+					title="Undo"
+					aria-label="Undo"
+				>
+					<Undo2 size={22} />
+				</button>
+			{/if}
 			<button
 				type="button"
-				class="page-undo-btn"
-				disabled={!canUndo}
-				onclick={() => editor?.chain().focus().undo().run()}
-				title="Undo"
-				aria-label="Undo"
+				class="page-lock-btn"
+				disabled={isLockRequestInFlight}
+				onclick={togglePageLock}
+				title={isLocked ? 'Unlock page' : 'Lock page'}
+				aria-label={isLocked ? 'Unlock page' : 'Lock page'}
 			>
-				<Undo2 size={22} />
+				{#if isLocked}<Lock size={isMobile ? 26 : 18} />{:else}<Unlock size={isMobile ? 26 : 18} />{/if}
 			</button>
-		{/if}
+		</div>
 	</div>
 
 	<!-- Header row: Icon + Title inline -->
@@ -2508,8 +2588,8 @@
 						e.stopPropagation();
 						const rect = e.currentTarget.getBoundingClientRect();
 						const spaceBelow = window.innerHeight - rect.bottom;
-						// The block action menu height is about 380px now
-						openUpward = spaceBelow < 380;
+						// Leave room for the full block list when the viewport allows it.
+						openUpward = spaceBelow < 560;
 						isActionMenuOpen = !isActionMenuOpen;
 					}}
 					ondragstart={handleDragStart}
@@ -2522,80 +2602,92 @@
 				<!-- Floating Block Action Options Dropdown -->
 				{#if isActionMenuOpen}
 					<div class="block-action-menu" class:open-upward={openUpward}>
-						<button class="menu-item-action" onclick={deleteActiveBlock}>
+						<input
+							bind:this={blockTypeSearchInput}
+							class="menu-search-input"
+							aria-label="Search block"
+							placeholder="Search block"
+							value={blockTypeSearchQuery}
+							oninput={handleBlockTypeSearchInput}
+							onkeydown={handleBlockTypeSearchKeydown}
+						/>
+						<button class="menu-item-action" hidden={Boolean(blockTypeSearchQuery.trim())} onclick={deleteActiveBlock}>
 							<Trash2 size={13} class="menu-icon" />
 							<span>Delete block</span>
 						</button>
-						<button class="menu-item-action" onclick={duplicateActiveBlock}>
+						<button class="menu-item-action" hidden={Boolean(blockTypeSearchQuery.trim())} onclick={duplicateActiveBlock}>
 							<Copy size={13} class="menu-icon" />
 							<span>Duplicate block</span>
 						</button>
-						<hr class="menu-divider" />
-						<div class="menu-section-label">Turn into</div>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('paragraph')}>
+						<hr class="menu-divider" hidden={Boolean(blockTypeSearchQuery.trim())} />
+						<div class="menu-section-label" hidden={Boolean(blockTypeSearchQuery.trim())}>Turn into</div>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('paragraph')} hidden={!isBlockTypeSearchMatch('paragraph')} onclick={() => convertActiveBlockTo('paragraph')}>
 							<Type size={13} class="menu-icon" />
 							<span>Text Paragraph</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('heading', 1)}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('heading', 1)} hidden={!isBlockTypeSearchMatch('heading', 1)} onclick={() => convertActiveBlockTo('heading', 1)}>
 							<Heading1 size={13} class="menu-icon" />
 							<span>Heading 1</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('heading', 2)}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('heading', 2)} hidden={!isBlockTypeSearchMatch('heading', 2)} onclick={() => convertActiveBlockTo('heading', 2)}>
 							<Heading2 size={13} class="menu-icon" />
 							<span>Heading 2</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('heading', 3)}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('heading', 3)} hidden={!isBlockTypeSearchMatch('heading', 3)} onclick={() => convertActiveBlockTo('heading', 3)}>
 							<Heading3 size={13} class="menu-icon" />
 							<span>Heading 3</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('toggleHeading', 1)}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('toggleHeading', 1)} hidden={!isBlockTypeSearchMatch('toggleHeading', 1)} onclick={() => convertActiveBlockTo('toggleHeading', 1)}>
 							<ChevronRight size={13} class="menu-icon" />
 							<span>Toggle Heading 1</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('toggleHeading', 2)}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('toggleHeading', 2)} hidden={!isBlockTypeSearchMatch('toggleHeading', 2)} onclick={() => convertActiveBlockTo('toggleHeading', 2)}>
 							<ChevronRight size={13} class="menu-icon" />
 							<span>Toggle Heading 2</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('toggleHeading', 3)}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('toggleHeading', 3)} hidden={!isBlockTypeSearchMatch('toggleHeading', 3)} onclick={() => convertActiveBlockTo('toggleHeading', 3)}>
 							<ChevronRight size={13} class="menu-icon" />
 							<span>Toggle Heading 3</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('image')}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('image')} hidden={!isBlockTypeSearchMatch('image')} onclick={() => convertActiveBlockTo('image')}>
 							<ImageIcon size={13} class="menu-icon" />
 							<span>Image</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('bulletList')}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('bulletList')} hidden={!isBlockTypeSearchMatch('bulletList')} onclick={() => convertActiveBlockTo('bulletList')}>
 							<List size={13} class="menu-icon" />
 							<span>Bullet List</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('orderedList')}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('orderedList')} hidden={!isBlockTypeSearchMatch('orderedList')} onclick={() => convertActiveBlockTo('orderedList')}>
 							<ListOrdered size={13} class="menu-icon" />
 							<span>Numbered List</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('blockquote')}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('blockquote')} hidden={!isBlockTypeSearchMatch('blockquote')} onclick={() => convertActiveBlockTo('blockquote')}>
 							<Quote size={13} class="menu-icon" />
 							<span>Quote Block</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('codeBlock')}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('codeBlock')} hidden={!isBlockTypeSearchMatch('codeBlock')} onclick={() => convertActiveBlockTo('codeBlock')}>
 							<Code size={13} class="menu-icon" />
 							<span>Code Block</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('todoList')}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('todoList')} hidden={!isBlockTypeSearchMatch('todoList')} onclick={() => convertActiveBlockTo('todoList')}>
 							<CheckSquare size={13} class="menu-icon" />
 							<span>To-do List</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('divider')}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('divider')} hidden={!isBlockTypeSearchMatch('divider')} onclick={() => convertActiveBlockTo('divider')}>
 							<Minus size={13} class="menu-icon" />
 							<span>Divider</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('table')}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('table')} hidden={!isBlockTypeSearchMatch('table')} onclick={() => convertActiveBlockTo('table')}>
 							<TableIcon size={13} class="menu-icon" />
 							<span>Table</span>
 						</button>
-						<button class="menu-item-action" onclick={() => convertActiveBlockTo('database')}>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('database')} hidden={!isBlockTypeSearchMatch('database')} onclick={() => convertActiveBlockTo('database')}>
 							<Database size={13} class="menu-icon" />
 							<span>Database Table</span>
 						</button>
+						{#if blockTypeSearchQuery.trim() && getBlockTypeSearchMatches().length === 0}
+							<div class="menu-search-empty" role="status">No matching block types</div>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -3000,17 +3092,49 @@
 		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 		padding: 6px 4px;
 		width: 170px;
-		max-height: 380px;
+		max-height: min(560px, calc(100vh - 24px));
 		overflow-y: auto;
+		scrollbar-width: none;
+		-ms-overflow-style: none;
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
 		z-index: 200;
 	}
 
+	.block-action-menu::-webkit-scrollbar {
+		display: none;
+	}
+
 	.block-action-menu.open-upward {
 		top: auto;
 		bottom: 24px;
+	}
+
+	.menu-search-input {
+		box-sizing: border-box;
+		width: calc(100% - 8px);
+		height: 26px;
+		margin: 2px 4px 4px;
+		padding: 3px 7px;
+		border: 1px solid var(--border-color);
+		border-radius: 4px;
+		background: var(--bg-canvas);
+		color: var(--text-main);
+		font: inherit;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.menu-search-input:focus {
+		border-color: var(--accent-color);
+		outline: 1px solid var(--accent-color);
+	}
+
+	.menu-search-empty {
+		padding: 8px;
+		color: var(--text-muted);
+		font-size: 12px;
 	}
 
 	:root.dark .block-action-menu {
@@ -3029,6 +3153,15 @@
 		text-align: left;
 		cursor: pointer;
 		transition: background var(--transition-speed);
+	}
+
+	.menu-item-action[hidden] {
+		display: none;
+	}
+
+	.menu-item-action.search-match {
+		background-color: var(--hover-sidebar);
+		outline: 1px solid var(--accent-color);
 	}
 
 	.menu-item-action:hover {
@@ -3085,6 +3218,17 @@
 	.autosave-indicator {
 		color: var(--text-muted);
 		pointer-events: none;
+	}
+
+	.page-lock-controls {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.page-lock-controls.has-undo {
+		/* Keep the lock in its previous slot while Undo moves to its left. */
+		margin-right: 46px;
 	}
 
 	.page-lock-btn {
@@ -3339,13 +3483,11 @@
 
 	.subpages-item-text {
 		font-weight: 550;
-		border-bottom: 1px solid rgba(120, 120, 120, 0.15);
 		line-height: 1.25;
-		transition: border-color var(--transition-speed), color var(--transition-speed);
+		transition: color var(--transition-speed);
 	}
 
 	.subpages-item:hover .subpages-item-text {
-		border-bottom-color: rgba(120, 120, 120, 0.6);
 		color: var(--text-main);
 	}
 

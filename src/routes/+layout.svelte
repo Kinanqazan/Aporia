@@ -39,6 +39,7 @@
 	let isDarkMode = $state(initialDarkMode());
 	let editorTextSize = $state(16);
 	let isMobile = $state(false);
+	let isNativeAndroidApp = $state(false);
 	let isTrashOpen = $state(false);
 	let isSettingsOpen = $state(false);
 	let isEditorTextSizeOpen = $state(false);
@@ -62,6 +63,45 @@
 
 	let backupRestoreInput = $state<HTMLInputElement | null>(null);
 	let isBackupRestoring = $state(false);
+	type NativeSharedContent = { id: string; title?: string; text?: string; url?: string };
+	type NativeShareWindow = Window & { __APORIA_NATIVE_SHARE_QUEUE__?: NativeSharedContent[] };
+	let isProcessingNativeShare = false;
+
+	async function processNativeShares() {
+		if (typeof window === 'undefined' || isProcessingNativeShare) return;
+		if (window.location.pathname === '/login' || window.location.pathname === '/setup') return;
+
+		const shareWindow = window as NativeShareWindow;
+		const queue = shareWindow.__APORIA_NATIVE_SHARE_QUEUE__;
+		if (!queue?.length) return;
+
+		isProcessingNativeShare = true;
+		try {
+			while (queue.length > 0) {
+				const shared = queue[0];
+				const response = await fetch('/api/share-target', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(shared)
+				});
+				const result = await response.json();
+				if (!response.ok || !result.success || typeof result.pageId !== 'string') {
+					throw new Error(result.error || 'Aporia could not save this shared item.');
+				}
+
+				queue.shift();
+				if (shared.id) {
+					window.location.href = `aporia-native://share-ack?id=${encodeURIComponent(shared.id)}`;
+				}
+				await goto(`/${encodeURIComponent(result.pageId)}`);
+			}
+		} catch (error) {
+			console.error('Failed to save Android shared content:', error);
+			alert(error instanceof Error ? error.message : 'Aporia could not save this shared item.');
+		} finally {
+			isProcessingNativeShare = false;
+		}
+	}
 
 	async function selectBackupRestore(event: Event) {
 		const input = event.target as HTMLInputElement;
@@ -151,6 +191,7 @@
 	let currentPageId = $derived($page.params.id || null);
 	let currentPage = $derived(data.activePages?.find((page) => page.id === currentPageId));
 	let isCurrentPageFullWidth = $state(false);
+	let canvasEl = $state<HTMLDivElement | null>(null);
 	let isFullWidthRequestInFlight = $state(false);
 	let isAuthRoute = $derived($page.url.pathname === '/login' || $page.url.pathname === '/setup' || $page.url.pathname === '/change-password');
 
@@ -267,7 +308,11 @@
 		};
 		
 		handleResize();
+		isNativeAndroidApp = /AporiaAndroid/i.test(navigator.userAgent);
 		window.addEventListener('resize', handleResize);
+		const handleNativeShare = () => void processNativeShares();
+		window.addEventListener('aporia-native-share', handleNativeShare);
+		void processNativeShares();
 
 		const handleClickOutside = (e: MouseEvent) => {
 			if (isSearchOpen && searchContainerEl && !searchContainerEl.contains(e.target as Node)) {
@@ -330,11 +375,12 @@
 
 		return () => {
 			window.removeEventListener('resize', handleResize);
+			window.removeEventListener('aporia-native-share', handleNativeShare);
 			window.removeEventListener('click', handleClickOutside);
 		};
 	});
 
-	afterNavigate(() => {
+	afterNavigate((navigation) => {
 		isSearchOpen = false;
 		if (preserveSidebarAfterCreate) {
 			preserveSidebarAfterCreate = false;
@@ -342,6 +388,20 @@
 		} else if (isMobile) {
 			isSidebarOpen = false;
 		}
+		if (
+			navigation.type !== 'enter' &&
+			navigation.from?.url.pathname !== navigation.to?.url.pathname &&
+			!window.matchMedia('(prefers-reduced-motion: reduce)').matches
+		) {
+			canvasEl?.animate(
+				[
+					{ opacity: 0.96, transform: 'translateY(6px)' },
+					{ opacity: 1, transform: 'translateY(0)' }
+				],
+				{ duration: 180, easing: 'ease-out' }
+			);
+		}
+		void processNativeShares();
 	});
 
 	async function handleSearchInput() {
@@ -972,6 +1032,20 @@
 					<button type="button" class="close-settings-btn" onclick={() => isSettingsOpen = false} aria-label="Close settings">×</button>
 				</div>
 
+				{#if isNativeAndroidApp}
+					<div class="settings-section">
+						<span class="settings-section-title">App</span>
+						<a
+							href="aporia-native://change-server"
+							class="settings-action"
+							onclick={() => isSettingsOpen = false}
+						>
+							<Settings size={16} />
+							<span>Change server address</span>
+						</a>
+					</div>
+				{/if}
+
 				<div class="settings-section">
 					<span class="settings-section-title">Backup &amp; Export</span>
 					<a href="/api/backup/export" download class="settings-action" onclick={() => isSettingsOpen = false}>
@@ -1144,7 +1218,7 @@
 
 		<!-- Canvas Area -->
 		<div class="canvas-wrapper">
-			<div class="canvas" class:full-width={isCurrentPageFullWidth}>
+			<div class="canvas" class:full-width={isCurrentPageFullWidth} bind:this={canvasEl}>
 				{@render children()}
 			</div>
 		</div>
