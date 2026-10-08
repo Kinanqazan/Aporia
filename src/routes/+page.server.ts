@@ -1,6 +1,13 @@
 import { redirect, fail } from '@sveltejs/kit';
 import type { PageServerLoad, Actions } from './$types';
-import { getActivePages, getTrashPages, createPage, seedDemoWorkspace, sendToTrash, restoreFromTrash, deletePermanently, emptyTrash, movePage, updatePage } from '$lib/server/pages';
+import { getActivePages, seedDemoWorkspace, createPage, deletePermanently, emptyTrash } from '$lib/server/pages';
+import { updatePageAtVersion } from '$lib/server/pages';
+import { moveMcpPage, restoreMcpPage, trashMcpPage } from '$lib/server/mcp/page-operations';
+
+function mutationFailure(error: any) {
+	const status = error?.code === 'CONFLICT' ? 409 : error?.code === 'LOCKED' ? 423 : error?.code === 'NOT_FOUND' ? 404 : 400;
+	return fail(status, { message: error?.message || 'Page operation failed.' });
+}
 
 export const load: PageServerLoad = async () => {
 	let active = await getActivePages();
@@ -45,14 +52,17 @@ export const actions: Actions = {
 		const data = await request.formData();
 		const id = data.get('id') as string;
 		const title = data.get('title') as string;
+		const expectedVersion = data.get('expectedVersion') as string;
 
 		if (!id) return fail(400, { message: 'Invalid page ID' });
 
 		try {
-			const page = await updatePage(id, { title });
+			if (!expectedVersion) return fail(400, { message: 'Page version is required; reload before saving.' });
+			const page = await updatePageAtVersion(id, expectedVersion, { title });
+			if (!page) return fail(409, { message: 'Page changed. Reload before saving.' });
 			return { success: true, page };
 		} catch (err: any) {
-			return fail(500, { message: err.message });
+			return mutationFailure(err);
 		}
 	},
 	move: async ({ request }) => {
@@ -61,17 +71,17 @@ export const actions: Actions = {
 		const parentIdValue = data.get('parentId') as string | null;
 		const parentId = parentIdValue && parentIdValue !== 'null' ? parentIdValue : null;
 		const position = parseInt(data.get('position') as string, 10);
+		const expectedVersion = data.get('expectedVersion') as string;
 
-		if (!id || isNaN(position) || position < 0) {
+		if (!id || !expectedVersion || isNaN(position) || position < 0) {
 			return fail(400, { message: 'Invalid page move' });
 		}
 
 		try {
-			const moved = await movePage(id, parentId, position);
-			if (!moved) return fail(400, { message: 'Invalid page move' });
+			moveMcpPage({ id, parentId, position, expectedVersion });
 			return { success: true };
 		} catch (err: any) {
-			return fail(500, { message: err.message });
+			return mutationFailure(err);
 		}
 	},
 	updateIcon: async ({ request }) => {
@@ -79,28 +89,34 @@ export const actions: Actions = {
 		const id = data.get('id') as string;
 		const icon = data.get('icon') as string | null;
 		const iconColor = data.get('iconColor') as string | null;
+		const expectedVersion = data.get('expectedVersion') as string;
 
 		if (!id) return fail(400, { message: 'Invalid page ID' });
 
 		try {
-			const page = await updatePage(id, { icon, iconColor });
+			if (!expectedVersion) return fail(400, { message: 'Page version is required; reload before saving.' });
+			const page = await updatePageAtVersion(id, expectedVersion, { icon, iconColor });
+			if (!page) return fail(409, { message: 'Page changed. Reload before saving.' });
 			return { success: true, page };
 		} catch (err: any) {
-			return fail(500, { message: err.message });
+			return mutationFailure(err);
 		}
 	},
 	trash: async ({ request }) => {
 		const data = await request.formData();
 		const id = data.get('id') as string;
 		const returnToWorkspace = data.get('returnToWorkspace') === 'true';
+		const expectedVersion = data.get('expectedVersion') as string;
 
 		if (!id) return fail(400, { message: 'Invalid page ID' });
 
 		let trashed: boolean;
 		try {
-			trashed = await sendToTrash(id);
+			if (!expectedVersion) return fail(400, { message: 'Page version is required; reload before moving it to Trash.' });
+			trashMcpPage({ id, expectedVersion });
+			trashed = true;
 		} catch (err: any) {
-			return fail(500, { message: err.message });
+			return mutationFailure(err);
 		}
 		if (!trashed) return fail(404, { message: 'Page not found' });
 		if (returnToWorkspace) throw redirect(303, '/');
@@ -109,14 +125,16 @@ export const actions: Actions = {
 	restore: async ({ request }) => {
 		const data = await request.formData();
 		const id = data.get('id') as string;
+		const expectedVersion = data.get('expectedVersion') as string;
 
 		if (!id) return fail(400, { message: 'Invalid page ID' });
 
 		try {
-			await restoreFromTrash(id);
+			if (!expectedVersion) return fail(400, { message: 'Page version is required; reload before restoring.' });
+			restoreMcpPage({ id, expectedVersion });
 			return { success: true };
 		} catch (err: any) {
-			return fail(500, { message: err.message });
+			return mutationFailure(err);
 		}
 	},
 	delete: async ({ request }) => {

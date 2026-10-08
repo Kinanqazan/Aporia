@@ -1,6 +1,7 @@
 import { error, fail } from '@sveltejs/kit';
 import type { PageServerLoad, Actions } from './$types';
-import { getPageById, updatePage } from '$lib/server/pages';
+import { getPageById, updatePageAtVersion } from '$lib/server/pages';
+import { pageVersion } from '$lib/server/mcp/versions';
 
 export const load: PageServerLoad = async ({ params }) => {
 	const id = params.id;
@@ -11,9 +12,7 @@ export const load: PageServerLoad = async ({ params }) => {
 		throw error(404, 'Page not found');
 	}
 
-	return {
-		pageRecord
-	};
+	return { pageRecord: { ...pageRecord, version: pageVersion(pageRecord.revision) } };
 };
 
 export const actions: Actions = {
@@ -23,12 +22,15 @@ export const actions: Actions = {
 
 		const data = await request.formData();
 		const title = data.get('title') as string;
+		const expectedVersion = data.get('expectedVersion') as string;
 		const page = await getPageById(id);
 		if (page?.isLocked) return fail(423, { message: 'This page is locked' });
+		if (!expectedVersion) return fail(400, { message: 'Page version is required; reload before saving.' });
 
 		try {
-			const pageRecord = await updatePage(id, { title });
-			return { success: true, pageRecord };
+			const pageRecord = await updatePageAtVersion(id, expectedVersion, { title });
+			if (!pageRecord) return fail(409, { message: 'Page changed. Reload it before saving.' });
+			return { success: true, pageRecord: { ...pageRecord, version: pageVersion(pageRecord.revision) } };
 		} catch (err: any) {
 			return fail(500, { message: err.message });
 		}
@@ -40,12 +42,15 @@ export const actions: Actions = {
 		const data = await request.formData();
 		const icon = data.get('icon') as string | null;
 		const iconColor = data.get('iconColor') as string | null;
+		const expectedVersion = data.get('expectedVersion') as string;
 		const page = await getPageById(id);
 		if (page?.isLocked) return fail(423, { message: 'This page is locked' });
+		if (!expectedVersion) return fail(400, { message: 'Page version is required; reload before saving.' });
 
 		try {
-			const pageRecord = await updatePage(id, { icon, iconColor });
-			return { success: true, pageRecord };
+			const pageRecord = await updatePageAtVersion(id, expectedVersion, { icon, iconColor });
+			if (!pageRecord) return fail(409, { message: 'Page changed. Reload it before saving.' });
+			return { success: true, pageRecord: { ...pageRecord, version: pageVersion(pageRecord.revision) } };
 		} catch (err: any) {
 			return fail(500, { message: err.message });
 		}
@@ -56,10 +61,12 @@ export const actions: Actions = {
 
 		const data = await request.formData();
 		const isLocked = data.get('isLocked') === 'true';
+		const expectedVersion = data.get('expectedVersion') as string;
+		if (!expectedVersion) return fail(400, { message: 'Page version is required; reload before changing the lock.' });
 		try {
-			const pageRecord = await updatePage(id, { isLocked: isLocked ? 1 : 0 });
-			if (!pageRecord) return fail(404, { message: 'Page not found' });
-			return { success: true, pageRecord };
+			const pageRecord = await updatePageAtVersion(id, expectedVersion, { isLocked: isLocked ? 1 : 0 });
+			if (!pageRecord) return fail(409, { message: 'Page changed. Reload before changing the lock.' });
+			return { success: true, pageRecord: { ...pageRecord, version: pageVersion(pageRecord.revision) } };
 		} catch (err: any) {
 			return fail(500, { message: err.message });
 		}

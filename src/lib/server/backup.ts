@@ -5,6 +5,7 @@ import { readAsset } from './assets';
 import { env } from '$env/dynamic/private';
 import { dirname, join, resolve } from 'path';
 import { mkdir, writeFile } from 'fs/promises';
+import { randomUUID } from 'node:crypto';
 
 const databasePath = env.DATABASE_URL || 'data/app.db';
 const configuredUploadDirectory = env.UPLOAD_DIR || join(dirname(databasePath), 'uploads');
@@ -101,6 +102,7 @@ export async function restoreWorkspaceBackup(archiveBuffer: ArrayBuffer | Uint8A
 			sqlite.prepare('DELETE FROM pages').run();
 			sqlite.prepare('DELETE FROM assets').run();
 			sqlite.prepare('DELETE FROM pages_fts').run();
+			sqlite.prepare('DELETE FROM mcp_requests').run();
 
 			for (const p of restoredPages) {
 				tx.insert(pages).values({
@@ -136,10 +138,11 @@ export async function restoreWorkspaceBackup(archiveBuffer: ArrayBuffer | Uint8A
 
 			const setStmt = sqlite.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
 			for (const s of restoredSettings) {
-				if (s.key && typeof s.value === 'string') {
+				if (s.key && s.key !== 'mcp_workspace_generation' && typeof s.value === 'string') {
 					setStmt.run(s.key, s.value);
 				}
 			}
+			sqlite.prepare("INSERT INTO settings (key, value) VALUES ('mcp_workspace_generation', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(randomUUID());
 
 			sqlite.prepare(`
 				INSERT INTO pages_fts (id, title, content_text)

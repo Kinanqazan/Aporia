@@ -3,6 +3,8 @@ import { pages } from './schema';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
 import { normalizeIconColor } from '$lib/icon-colors';
+import { parsePageVersion } from './mcp/page-version.js';
+import { getWorkspaceGeneration } from './mcp/versions.js';
 
 export function generateId(length: number = 10): string {
 	const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -141,6 +143,33 @@ export async function updatePage(
 	return result[0] || null;
 }
 
+export async function updatePageAtVersion(
+	id: string,
+	expectedVersion: string,
+	updates: Partial<Pick<PageNode, 'title' | 'icon' | 'iconColor' | 'isLocked' | 'isFullWidth'>>
+): Promise<PageNode | null> {
+	const parsed = parsePageVersion(expectedVersion);
+	if (!parsed || parsed.generation !== getWorkspaceGeneration()) return null;
+	const current = await getPageById(id);
+	if (!current || current.isInTrash || current.revision !== parsed.revision) return null;
+	if (current.isLocked && updates.isLocked === undefined) return null;
+	if (updates.iconColor !== undefined) updates.iconColor = normalizeIconColor(updates.iconColor);
+	const changed = (Object.keys(updates) as Array<keyof typeof updates>).some((key) => updates[key] !== current[key]);
+	const now = new Date().toISOString();
+	const result = await db.update(pages)
+		.set({
+			...updates,
+			revision: changed ? sql`${pages.revision} + 1` : pages.revision,
+			updatedAt: changed ? now : current.updatedAt
+		})
+		.where(and(
+			eq(pages.id, id), eq(pages.revision, parsed.revision), eq(pages.isInTrash, 0),
+			sql`EXISTS (SELECT 1 FROM settings WHERE key = 'mcp_workspace_generation' AND value = ${parsed.generation})`
+		))
+		.returning() as PageNode[];
+	return result[0] || null;
+}
+
 // Persist content only if the page still has the same lock state and content
 // observed by the request handler. This closes the check-then-update race
 // between autosave and locking, and prevents concurrent writers from silently
@@ -166,6 +195,35 @@ export async function updatePageContentConditionally(
 		))
 		.returning() as PageNode[];
 
+	return result[0] || null;
+}
+
+export async function updatePageContentAtVersion(
+	id: string,
+	contentJson: string,
+	expectedVersion: string,
+	expected: { isLocked: number; contentJson: string }
+): Promise<PageNode | null> {
+	const parsed = parsePageVersion(expectedVersion);
+	if (!parsed || parsed.generation !== getWorkspaceGeneration()) return null;
+	const now = new Date().toISOString();
+	const contentText = extractTextFromJson(contentJson);
+	const result = await db.update(pages)
+		.set({
+			contentJson,
+			contentText,
+			revision: sql`${pages.revision} + case when ${pages.contentJson} <> ${contentJson} then 1 else 0 end`,
+			updatedAt: now
+		})
+		.where(and(
+			eq(pages.id, id),
+			eq(pages.revision, parsed.revision),
+			eq(pages.isLocked, expected.isLocked),
+			eq(pages.isInTrash, 0),
+			eq(pages.contentJson, expected.contentJson),
+			sql`EXISTS (SELECT 1 FROM settings WHERE key = 'mcp_workspace_generation' AND value = ${parsed.generation})`
+		))
+		.returning() as PageNode[];
 	return result[0] || null;
 }
 

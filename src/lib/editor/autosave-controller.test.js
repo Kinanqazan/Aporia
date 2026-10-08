@@ -73,7 +73,7 @@ test('a failed save remains queued when another page has pending edits', async (
 test('concurrent flush callers all wait for edits queued during an active save', async () => {
 	/** @type {SaveRequest[]} */
 	const requests = [];
-	/** @type {Array<'idle' | 'saving' | 'error'>} */
+	/** @type {Array<'idle' | 'saving' | 'error' | 'conflict'>} */
 	const statuses = [];
 	const controller = createAutosaveController({
 		debounceMs: 60_000,
@@ -121,5 +121,44 @@ test('queueing the already saved lock snapshot does not send a duplicate request
 	assert.equal(await controller.flush(), true);
 	assert.equal(requestCount, 0);
 	assert.equal(status, 'idle');
+	controller.destroy();
+});
+
+test('a queued edit uses the version returned by the preceding successful save', async () => {
+	/** @type {Array<{ expectedVersion?: string }>} */
+	const requests = [];
+	const controller = createAutosaveController({
+		debounceMs: 60_000,
+		onStatusChange: () => {},
+		save: async (payload) => {
+			requests.push(payload);
+			return { success: true, version: `version-${requests.length}` };
+		}
+	});
+	controller.markSaved({ pageId: 'page', contentJson: 'saved' }, 'version-0');
+	controller.queue({ pageId: 'page', contentJson: 'one' });
+	const saving = controller.flush();
+	await Promise.resolve();
+	controller.queue({ pageId: 'page', contentJson: 'two' });
+	assert.equal(await saving, true);
+	assert.deepEqual(requests.map((request) => request.expectedVersion), ['version-0', 'version-1']);
+	controller.destroy();
+});
+
+test('a conflict pauses autosave and keeps the local draft pending', async () => {
+	let calls = 0;
+	const controller = createAutosaveController({
+		debounceMs: 60_000,
+		onStatusChange: () => {},
+		save: async () => { calls += 1; return { success: false, conflict: true }; }
+	});
+	controller.markSaved({ pageId: 'page', contentJson: 'saved' }, 'version-1');
+	controller.queue({ pageId: 'page', contentJson: 'draft' });
+	assert.equal(await controller.flush(), false);
+	assert.equal(controller.hasConflict('page'), true);
+	assert.equal(controller.isDirty('page'), true);
+	controller.queue({ pageId: 'page', contentJson: 'newer draft' });
+	assert.equal(await controller.flush(), true);
+	assert.equal(calls, 1);
 	controller.destroy();
 });

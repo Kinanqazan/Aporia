@@ -716,6 +716,7 @@
 			formData.set('id', String(draggedPage.id));
 			formData.set('parentId', parentId === null ? 'null' : String(parentId));
 			formData.set('position', String(position));
+			formData.set('expectedVersion', String(draggedPage.version));
 			const response = await fetch('/?/move', { method: 'POST', body: formData });
 			if (response.ok) {
 				if (placement === 'inside') {
@@ -905,6 +906,7 @@
 							<div class="trash-item-actions">
 								<form method="POST" action="/?/restore" use:enhance>
 									<input type="hidden" name="id" value={trashPage.id} />
+					<input type="hidden" name="expectedVersion" value={trashPage.version} />
 									<button type="submit" class="trash-action-btn" title="Restore Page">
 										<RotateCcw size={12} />
 									</button>
@@ -1232,7 +1234,7 @@
 
 
 <!-- Snippet: Recursive Node rendering -->
-{#snippet renderNode(node: PageNode & { children?: any[] })}
+{#snippet renderNode(node: PageNode & { version: string; children?: any[] })}
 	<div class="page-tree-node">
 		<!-- Page item row container -->
 		<div 
@@ -1288,6 +1290,7 @@
 					onclick={(e) => e.stopPropagation()}
 				>
 					<input type="hidden" name="id" value={node.id} />
+					<input type="hidden" name="expectedVersion" value={node.version} />
 					<input 
 						type="text" 
 						name="title" 
@@ -1333,6 +1336,7 @@
 						</button>
 						<form method="POST" action="/?/trash" use:enhance={() => { openMenuPageId = null; }}>
 							<input type="hidden" name="id" value={node.id} />
+							<input type="hidden" name="expectedVersion" value={node.version} />
 							{#if isCurrentPageInSubtree(node.id)}
 								<input type="hidden" name="returnToWorkspace" value="true" />
 							{/if}

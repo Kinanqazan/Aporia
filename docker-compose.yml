@@ -11,5 +11,8 @@ services:
       PORT: 3000
       DATABASE_URL: /app/data/app.db
       UPLOAD_DIR: /app/data/uploads
+      APORIA_MCP_ENABLED: ${APORIA_MCP_ENABLED:-false}
+      APORIA_MCP_TOKEN: ${APORIA_MCP_TOKEN:-}
+      APORIA_MCP_ALLOWED_ORIGINS: ${APORIA_MCP_ALLOWED_ORIGINS:-}
     volumes:
       - ./config/aporia:/app/data

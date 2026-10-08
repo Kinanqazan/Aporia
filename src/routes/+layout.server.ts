@@ -2,6 +2,7 @@ import type { LayoutServerLoad } from './$types';
 import { getActivePages, getTrashPages } from '$lib/server/pages';
 import { sqlite } from '$lib/server/database';
 import { parseExpandedSidebarState } from '$lib/sidebar-state.js';
+import { pageVersion } from '$lib/server/mcp/versions';
 
 export const load: LayoutServerLoad = async ({ cookies }) => {
 	const activePages = await getActivePages();
@@ -52,8 +53,8 @@ export const load: LayoutServerLoad = async ({ cookies }) => {
 	}
 
 	return {
-		activePages,
-		trashPages,
+		activePages: activePages.map((page) => ({ ...page, version: pageVersion(page.revision) })),
+		trashPages: trashPages.map((page) => ({ ...page, version: pageVersion(page.revision) })),
 		sidebarWidth,
 		isDarkMode,
 		expandedSidebarPageIds,

@@ -50,6 +50,8 @@ Try Aporia directly in your browser: **[aporia-notes.vercel.app](https://aporia-
 - 🎨 **Svelte 5 & Runes:** Built on Svelte 5 for top-tier performance and fine-grained reactivity.
 - 🐳 **Production Ready:** Ships with a multi-stage Dockerfile and Docker Compose configurations.
 
+For personal AI assistant access, see [the MCP connection guide](docs/mcp.md). It covers the private bearer key, the Hermes container, and desktop Codex.
+
 ---
 
 ## 🛠️ Tech Stack

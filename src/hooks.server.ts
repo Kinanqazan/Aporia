@@ -6,10 +6,22 @@ import {
 	SESSION_COOKIE_NAME,
 	sessionCookieOptions
 } from '$lib/server/auth';
+import { authorizeMcpRequest } from '$lib/server/mcp/auth.js';
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const path = event.url.pathname;
 	const isDemoMode = env.VERCEL === '1' && env.APORIA_DEMO_MODE === 'true';
+	if (path === '/mcp') {
+		const rejection = authorizeMcpRequest(event.request, {
+			enabled: env.APORIA_MCP_ENABLED === 'true',
+			demoMode: isDemoMode,
+			privateWorkspaceReady: isPasswordConfigured(),
+			token: env.APORIA_MCP_TOKEN,
+			allowedOrigins: env.APORIA_MCP_ALLOWED_ORIGINS ?? ''
+		});
+		if (rejection) return rejection;
+		return resolve(event);
+	}
 
 	if (isDemoMode) {
 		if (

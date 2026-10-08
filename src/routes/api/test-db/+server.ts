@@ -1,6 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createPage, getActivePages, getPageById, movePage, sendToTrash, updatePage, getTrashPages } from '$lib/server/pages';
+import { createPage, getActivePages, getPageById, updatePageAtVersion, getTrashPages } from '$lib/server/pages';
+import { moveMcpPage, trashMcpPage } from '$lib/server/mcp/page-operations';
+import { pageVersion } from '$lib/server/mcp/versions';
 
 export const GET: RequestHandler = async () => {
 	const logs: string[] = [];
@@ -33,18 +35,19 @@ export const GET: RequestHandler = async () => {
 
 		// 4. Update page
 		log('4. Updating page title...');
-		const updated = await updatePage(child1.id, { title: 'Best Lasagna 🍝' });
+		const updated = await updatePageAtVersion(child1.id, pageVersion(child1.revision), { title: 'Best Lasagna 🍝' });
 		log(`Updated title: "${updated?.title}" (Revision: ${updated?.revision})`);
 
 		// 5. Move page
 		log('5. Moving child page to root...');
-		await movePage(child1.id, null, 1);
+		if (updated) moveMcpPage({ id: child1.id, parentId: null, position: 1, expectedVersion: pageVersion(updated.revision) });
 		const moved = await getPageById(child1.id);
 		log(`Moved page parent: ${moved?.parentId}, position: ${moved?.position}`);
 
 		// 6. Send page to trash
 		log('6. Trashing page...');
-		await sendToTrash(page2.id);
+		const currentPage2 = await getPageById(page2.id);
+		if (currentPage2) trashMcpPage({ id: page2.id, expectedVersion: pageVersion(currentPage2.revision) });
 		const trash = await getTrashPages();
 		log(`Pages in trash: ${trash.length}`);
 		for (const p of trash) {

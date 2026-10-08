@@ -118,13 +118,14 @@
 			const response = await fetch(`/api/pages/${data.pageRecord.id}/lock`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ isLocked: !isLocked })
+				body: JSON.stringify({ isLocked: !isLocked, expectedVersion: autosaveController.getVersion(data.pageRecord.id) ?? data.pageRecord.version })
 			});
 			const result = await response.json();
 			if (!response.ok || !result.success) {
 				throw new Error(result.error || 'Unable to update page lock');
 			}
 			isLocked = result.isLocked;
+			autosaveController.markSaved({ pageId: data.pageRecord.id, contentJson: editor ? JSON.stringify(editor.getJSON()) : data.pageRecord.contentJson }, result.version);
 			await invalidateAll();
 			if (!isLocked && editor) restorePersistedDetailsOpenState(editor);
 		} catch (err) {
@@ -136,8 +137,17 @@
 
 	function submitIconChange() {
 		setTimeout(() => {
+			setFormExpectedVersion(iconForm);
 			iconForm?.requestSubmit();
 		}, 0);
+	}
+
+	function setFormExpectedVersion(form: HTMLFormElement | undefined) {
+		if (!form) return;
+		const expectedVersion = form.elements.namedItem('expectedVersion');
+		if (expectedVersion instanceof HTMLInputElement) {
+			expectedVersion.value = autosaveController.getVersion(data.pageRecord.id) ?? data.pageRecord.version;
+		}
 	}
 
 	// Tiptap states
@@ -145,7 +155,8 @@
 	let editor = $state<Editor>();
 	let canUndo = $state(false);
 	let editorPageId = $state<string | null>(null);
-	let autosaveStatus = $state<'idle' | 'saving' | 'error'>('idle');
+	let autosaveStatus = $state<'idle' | 'saving' | 'error' | 'conflict'>('idle');
+	const draftsByPage = new Map<string, string>();
 	const autosaveController = createAutosaveController({
 		save: savePageContent,
 		onStatusChange: (status) => autosaveStatus = status,
@@ -991,7 +1002,7 @@
 
 	function handleBlockTypeSearchKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape') {
-			e.preventDefault();
+			event.preventDefault();
 			isActionMenuOpen = false;
 			return;
 		}
@@ -1062,10 +1073,11 @@
 		void flushPendingSave();
 		
 		if (editor && editorPageId !== data.pageRecord.id) {
+			if (editorPageId && autosaveController.isDirty(editorPageId)) draftsByPage.set(editorPageId, JSON.stringify(editor.getJSON()));
 			autosaveController.markSaved({
 				pageId: data.pageRecord.id,
 				contentJson: data.pageRecord.contentJson
-			});
+			}, data.pageRecord.version);
 			editor.destroy();
 			editor = undefined;
 			editorElement?.replaceChildren();
@@ -1074,6 +1086,7 @@
 		}
 
 		if (editor && data.pageRecord) {
+			if (autosaveController.isDirty(data.pageRecord.id)) return;
 			const currentJson = editor.getJSON();
 			const serverJsonStr = data.pageRecord.contentJson;
 			let serverJson = { type: 'doc', content: [] };
@@ -1086,6 +1099,7 @@
 			if (JSON.stringify(currentJson) !== JSON.stringify(serverJson)) {
 				editor.commands.setContent(serverJson, { emitUpdate: false });
 			}
+			autosaveController.markSaved({ pageId: data.pageRecord.id, contentJson: serverJsonStr }, data.pageRecord.version);
 		}
 	});
 
@@ -1159,7 +1173,9 @@
 
 		let initialContent = { type: 'doc', content: [] };
 		try {
-			initialContent = data.pageRecord.contentJson 
+			initialContent = draftsByPage.get(data.pageRecord.id)
+				? JSON.parse(draftsByPage.get(data.pageRecord.id)!)
+				: data.pageRecord.contentJson
 				? JSON.parse(data.pageRecord.contentJson) 
 				: { type: 'doc', content: [] };
 		} catch (e) {
@@ -1538,7 +1554,7 @@
 		autosaveController.markSaved({
 			pageId: data.pageRecord.id,
 			contentJson: data.pageRecord.contentJson
-		});
+		}, data.pageRecord.version);
 		createEditor();
 		const handlePageHide = () => {
 			void flushPendingSave({ keepalive: true });
@@ -1773,24 +1789,28 @@
 	}
 
 	async function savePageContent(
-		save: { pageId: string; contentJson: string },
+		save: { pageId: string; contentJson: string; expectedVersion?: string },
 		options: { keepalive?: boolean } = {}
-	): Promise<boolean> {
+	): Promise<{ success: boolean; version?: string; conflict?: boolean }> {
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), 5000);
 		try {
 			const response = await fetch(`/api/pages/${save.pageId}`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ contentJson: save.contentJson }),
+				body: JSON.stringify({ contentJson: save.contentJson, expectedVersion: save.expectedVersion }),
 				keepalive: options.keepalive,
 				signal: controller.signal
 			});
 			const result = await response.json();
-			return response.ok && result.success === true;
+			if (response.ok && result.success === true) {
+				if (draftsByPage.get(save.pageId) === save.contentJson) draftsByPage.delete(save.pageId);
+				return { success: true, version: result.version };
+			}
+			return { success: false, conflict: [404, 409, 423].includes(response.status) || result.conflict === true };
 		} catch (err) {
 			console.error('Autosave failed:', err);
-			return false;
+			return { success: false };
 		} finally {
 			clearTimeout(timeoutId);
 		}
@@ -1803,7 +1823,18 @@
 			return;
 		}
 		// Capture page ID immediately so a navigation mid-debounce can't corrupt another page.
+		draftsByPage.set(data.pageRecord.id, contentJson);
 		autosaveController.queue({ pageId: data.pageRecord.id, contentJson });
+	}
+
+	async function reloadSavedPage() {
+		await invalidateAll();
+		if (!editor) return;
+		const saved = data.pageRecord.contentJson ? JSON.parse(data.pageRecord.contentJson) : { type: 'doc', content: [] };
+		editor.commands.setContent(saved, { emitUpdate: false });
+		draftsByPage.delete(data.pageRecord.id);
+		autosaveController.markSaved({ pageId: data.pageRecord.id, contentJson: data.pageRecord.contentJson }, data.pageRecord.version);
+		autosaveStatus = 'idle';
 	}
 
 	let titleForm: HTMLFormElement;
@@ -1811,6 +1842,7 @@
 
 	function handleTitleBlur() {
 		if (title !== data.pageRecord.title) {
+			setFormExpectedVersion(titleForm);
 			titleForm.requestSubmit();
 		}
 	}
@@ -2395,6 +2427,12 @@
 				<CloudLightning size={isMobile ? 22 : 18} />
 			</div>
 		{/if}
+		{#if autosaveController.hasConflict(data.pageRecord.id)}
+			<div class="save-conflict" role="alert">
+				<span>This page changed elsewhere. Your draft is still here; copy anything you need before reloading.</span>
+				<button type="button" onclick={reloadSavedPage}>Reload saved page</button>
+			</div>
+		{/if}
 		<div class="page-lock-controls">
 			{#if isMobile && !isLocked}
 				<button
@@ -2445,6 +2483,7 @@
 			>
 				<input type="hidden" name="icon" value={icon} />
 				<input type="hidden" name="iconColor" value={iconColor || ''} />
+				<input type="hidden" name="expectedVersion" value={data.pageRecord.version} />
 			</form>
 
 			{#if isIconPickerOpen && !isLockRequestInFlight}
@@ -2523,6 +2562,7 @@
 					spellcheck="false"
 					disabled={isLocked || isLockRequestInFlight}
 				/>
+				<input type="hidden" name="expectedVersion" value={data.pageRecord.version} />
 			</form>
 			{#if !isLocked && toggleCount > 0}
 				<div class="toggle-page-actions" aria-label="Toggle controls">
@@ -3268,6 +3308,35 @@
 	.autosave-indicator.status-error {
 		color: var(--error-color);
 		border-color: var(--error-color);
+	}
+
+	.save-conflict {
+		position: fixed;
+		top: calc(54px + env(safe-area-inset-top));
+		right: max(20px, env(safe-area-inset-right));
+		z-index: 1001;
+		max-width: min(420px, calc(100vw - 32px));
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 10px 12px;
+		border: 1px solid var(--error-color);
+		border-radius: 8px;
+		background: var(--bg-primary);
+		color: var(--text-primary);
+		box-shadow: 0 6px 24px rgb(0 0 0 / 12%);
+		font-size: 12px;
+	}
+
+	.save-conflict button {
+		flex: 0 0 auto;
+		border: 0;
+		border-radius: 6px;
+		padding: 7px 9px;
+		background: var(--accent-color);
+		color: white;
+		font: inherit;
+		cursor: pointer;
 	}
 
 	:global(.mobile) .page-status-controls {
