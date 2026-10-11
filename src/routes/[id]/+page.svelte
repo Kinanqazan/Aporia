@@ -2433,7 +2433,7 @@
 				<button type="button" onclick={reloadSavedPage}>Reload saved page</button>
 			</div>
 		{/if}
-		<div class="page-lock-controls">
+		<div class="page-lock-controls floating-control-pill">
 			{#if isMobile && !isLocked}
 				<button
 					type="button"
@@ -3340,17 +3340,56 @@
 	}
 
 	:global(.mobile) .page-status-controls {
-		top: calc(14px + env(safe-area-inset-top));
-		right: max(16px, env(safe-area-inset-right));
+		top: calc(var(--mobile-controls-top) + env(safe-area-inset-top));
+		right: max(24px, env(safe-area-inset-right));
 		gap: 6px;
+	}
+
+	@media (max-width: 767px) {
+		:global(.app-container:not(.mobile)) .page-status-controls {
+			top: calc(var(--mobile-controls-top) + env(safe-area-inset-top));
+			right: max(24px, env(safe-area-inset-right));
+			gap: 6px;
+		}
+
+		:global(.app-container:not(.mobile)) .autosave-indicator,
+		:global(.app-container:not(.mobile)) .page-lock-btn,
+		:global(.app-container:not(.mobile)) .page-undo-btn {
+			width: 52px;
+			height: 44px;
+			border-radius: 999px;
+		}
+
+		:global(.app-container:not(.mobile)) .page-lock-controls {
+			gap: 0;
+		}
+
+		:global(.app-container:not(.mobile)) .page-lock-btn,
+		:global(.app-container:not(.mobile)) .page-undo-btn {
+			color: var(--text-main);
+		}
 	}
 
 	:global(.mobile) .autosave-indicator,
 	:global(.mobile) .page-lock-btn,
 	:global(.mobile) .page-undo-btn {
-		width: 40px;
-		height: 40px;
-		border-radius: 6px;
+		width: 52px;
+		height: 44px;
+		border-radius: 999px;
+	}
+
+	:global(.mobile) .page-lock-controls {
+		gap: 0;
+	}
+
+	:global(.mobile) .page-lock-btn,
+	:global(.mobile) .page-undo-btn {
+		color: var(--text-main);
+	}
+
+	:global(.mobile) .page-lock-btn:hover:not(:disabled),
+	:global(.mobile) .page-undo-btn:hover:not(:disabled) {
+		background-color: var(--hover-icon);
 	}
 
 	.page-header-row {

@@ -30,6 +30,8 @@
 	} from 'lucide-svelte';
 	import type { PageNode } from '$lib/server/pages';
 	import { parseExpandedSidebarState, serializeExpandedSidebarState } from '$lib/sidebar-state.js';
+	import { sidebarGesture } from '$lib/sidebar-gesture.js';
+	import { pageLongPress } from '$lib/page-long-press.js';
 
 	// SvelteKit Props
 	let { data, children } = $props();
@@ -186,6 +188,13 @@
 	let dropTarget = $state<{ id: string; placement: 'before' | 'inside' | 'after' } | null>(null);
 	// Dropdown menu state
 	let openMenuPageId = $state<string | null>(null);
+	let isPageMenuAbove = $state(false);
+
+	function openMobilePageMenu(id: string, row: HTMLElement) {
+		const nav = row.closest('.sidebar-nav');
+		isPageMenuAbove = !!nav && nav.getBoundingClientRect().bottom - row.getBoundingClientRect().bottom < 156;
+		openMenuPageId = id;
+	}
 
 	// Active page tracking from route params
 	let currentPageId = $derived($page.params.id || null);
@@ -731,51 +740,11 @@
 		}
 	}
 
-	// Touch swipe gesture handlers for mobile sidebar opening/closing
-	let touchStartX = 0;
-	let touchStartY = 0;
-	let touchEndX = 0;
-	let touchEndY = 0;
-
-	function handleTouchStart(e: TouchEvent) {
-		touchStartX = e.touches[0].clientX;
-		touchStartY = e.touches[0].clientY;
-		touchEndX = touchStartX;
-		touchEndY = touchStartY;
-	}
-
-	function handleTouchMove(e: TouchEvent) {
-		touchEndX = e.touches[0].clientX;
-		touchEndY = e.touches[0].clientY;
-	}
-
-	function handleTouchEnd() {
-		const diffX = touchEndX - touchStartX;
-		const diffY = touchEndY - touchStartY;
-
-		// Ensure swipe is horizontal and exceeds threshold
-		if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 60) {
-			if (isMobile) {
-				// Only open sidebar if swipe starts near the left region of the screen (<= 90px)
-				if (diffX > 0 && !isSidebarOpen && touchStartX <= 90) {
-					isSidebarOpen = true;
-				} else if (diffX < 0 && isSidebarOpen) {
-					isSidebarOpen = false;
-				}
-			}
-		}
-	}
 </script>
 
 <svelte:head>
 	<meta name="theme-color" content={isDarkMode ? '#191919' : '#ffffff'} />
 </svelte:head>
-
-	<svelte:window
-		ontouchstart={handleTouchStart}
-		ontouchmove={handleTouchMove}
-		ontouchend={handleTouchEnd}
-	/>
 
 	{#if isAuthRoute}
 		<div class="auth-route-shell">
@@ -787,7 +756,9 @@
 	class="app-container" 
 	class:sidebar-closed={!isSidebarOpen} 
 	class:mobile={isMobile} 
-	style="--sidebar-width: {sidebarWidth}px; --editor-font-size: {editorTextSize}px;"
+	style:--sidebar-width="{sidebarWidth}px"
+	style:--editor-font-size="{editorTextSize}px"
+	use:sidebarGesture={{ enabled: isMobile, open: isSidebarOpen, onOpenChange: (open) => isSidebarOpen = open }}
 >
 	<!-- Sidebar -->
 	<aside class="sidebar">
@@ -873,6 +844,9 @@
 
 		<!-- Page list -->
 		<div class="sidebar-nav">
+			{#if isMobile}
+				<span id="phone-page-options-hint" hidden>Press and hold for page options, or press Shift+F10.</span>
+			{/if}
 			<div class="pages-list">
 				{#each pageTree as pageNode}
 					{@render renderNode(pageNode)}
@@ -900,7 +874,7 @@
 					{#each data.trashPages || [] as trashPage}
 						<div class="trash-item">
 							<span class="trash-item-emoji">
-								<PageIcon icon={trashPage.icon} color={trashPage.iconColor} size={14} />
+								<PageIcon icon={trashPage.icon} color={trashPage.iconColor} size={18} />
 							</span>
 							<span class="trash-item-title" title={trashPage.title}>{trashPage.title}</span>
 							<div class="trash-item-actions">
@@ -1172,10 +1146,10 @@
 	{/if}
 
 	<!-- Mobile Overlay -->
-	{#if isMobile && isSidebarOpen}
+	{#if isMobile}
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="mobile-overlay" onclick={toggleSidebar}></div>
+		<div class="mobile-overlay" onclick={() => isSidebarOpen = false}></div>
 	{/if}
 
 	<!-- Main Canvas Area -->
@@ -1183,11 +1157,9 @@
 		<!-- Header -->
 		<header class="header">
 			<div class="left-controls">
-				{#if !isSidebarOpen || isMobile}
-					<button class="icon-btn menu-btn" onclick={toggleSidebar} title="Open sidebar">
-						<Menu size={isMobile ? 26 : 19} />
-					</button>
-				{/if}
+				<button class="icon-btn menu-btn floating-control-pill" onclick={toggleSidebar} title="Open sidebar">
+					<Menu size={isMobile ? 26 : 19} />
+				</button>
 				{#if !isMobile}
 					<div class="breadcrumbs">
 						{#if currentPageId}
@@ -1247,7 +1219,8 @@
 			class:drop-before={dropTarget?.id === node.id && dropTarget?.placement === 'before'}
 			class:drop-inside={dropTarget?.id === node.id && dropTarget?.placement === 'inside'}
 			class:drop-after={dropTarget?.id === node.id && dropTarget?.placement === 'after'}
-			draggable={editingPageId !== node.id}
+			draggable={!isMobile && editingPageId !== node.id}
+			use:pageLongPress={{ enabled: isMobile && editingPageId !== node.id, onOpen: (row) => openMobilePageMenu(node.id, row) }}
 			ondragstart={(event) => handleDragStart(event, node)}
 			ondragover={(event) => handleDragOver(event, node)}
 			ondrop={(event) => handleDrop(event, node)}
@@ -1268,11 +1241,11 @@
 						{/if}
 					</button>
 					<span class="page-emoji">
-						<PageIcon icon={node.icon} color={node.iconColor} size={20} />
+						<PageIcon icon={node.icon} color={node.iconColor} size={isMobile ? 24 : 20} />
 					</span>
 				{:else}
 					<span class="page-emoji">
-						<PageIcon icon={node.icon} color={node.iconColor} size={20} />
+						<PageIcon icon={node.icon} color={node.iconColor} size={isMobile ? 24 : 20} />
 					</span>
 				{/if}
 			</div>
@@ -1309,21 +1282,29 @@
 				</form>
 			{:else}
 				<!-- Clickable link containing text title -->
-				<a href="/{node.id}" class="page-item-link">
+				<a href="/{node.id}" class="page-item-link" aria-describedby={isMobile ? 'phone-page-options-hint' : undefined}>
 					<span class="page-title">{node.title}</span>
 				</a>
 			{/if}
 
 			<!-- Gutter Actions (Hover states) -->
-			<div class="page-actions-gutter" class:menu-open={openMenuPageId === node.id}>
-				<button class="gutter-action-btn" title="Options" onclick={(e) => { e.stopPropagation(); openMenuPageId = openMenuPageId === node.id ? null : node.id; }}>
-					<MoreHorizontal size={isMobile ? 20 : 18} />
-				</button>
+			<div class="page-actions-gutter" class:menu-open={openMenuPageId === node.id} class:menu-above={isMobile && isPageMenuAbove}>
+				{#if !isMobile}
+					<button class="gutter-action-btn" title="Options" onclick={(e) => { e.stopPropagation(); openMenuPageId = openMenuPageId === node.id ? null : node.id; }}>
+						<MoreHorizontal size={18} />
+					</button>
+				{/if}
 				
 				{#if openMenuPageId === node.id}
 					<!-- svelte-ignore a11y_click_events_have_key_events -->
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<div class="page-options-dropdown" onclick={(e) => e.stopPropagation()}>
+					<div class="page-options-dropdown" onclick={(e) => e.stopPropagation()} onkeydown={(event) => {
+						if (event.key !== 'Escape') return;
+						event.preventDefault();
+						event.stopPropagation();
+						openMenuPageId = null;
+						event.currentTarget.closest('.page-item-row')?.querySelector<HTMLAnchorElement>('.page-item-link')?.focus();
+					}}>
 						<form method="POST" action="/?/create" use:enhance={() => { openMenuPageId = null; }}>
 							<input type="hidden" name="parentId" value={node.id} />
 							<input type="hidden" name="title" value="Untitled" />
@@ -1417,6 +1398,22 @@
 
 	:global(.mobile) .page-actions-gutter {
 		opacity: 1;
+		position: absolute;
+		right: 4px;
+		top: 100%;
+	}
+
+	:global(.mobile) .page-actions-gutter.menu-above {
+		top: 0;
+	}
+
+	:global(.mobile) .page-item-row {
+		-webkit-touch-callout: none;
+		user-select: none;
+	}
+
+	:global(.mobile) .page-item-row:has(.menu-open) {
+		z-index: 3;
 	}
 
 	.page-item-row[draggable='true'] {
@@ -1517,9 +1514,15 @@
 	}
 
 	:global(.mobile) .page-options-dropdown {
+		right: 0;
 		min-width: 190px;
 		padding: 6px;
 		gap: 3px;
+	}
+
+	:global(.mobile) .menu-above .page-options-dropdown {
+		top: auto;
+		bottom: 0;
 	}
 
 	:global(.mobile) .dropdown-action-btn {
@@ -1553,7 +1556,7 @@
 		bottom: var(--header-height);
 		left: 0;
 		width: 100%;
-		max-height: 240px;
+		max-height: min(42vh, 340px);
 		background: color-mix(in srgb, var(--bg-sidebar) 85%, transparent);
 		backdrop-filter: blur(20px);
 		-webkit-backdrop-filter: blur(20px);
@@ -1579,7 +1582,7 @@
 		border-right: 0;
 		border-radius: 10px 10px 0 0;
 		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
-		padding: 8px;
+		padding: 10px;
 		z-index: 20;
 		scrollbar-width: thin;
 	}
@@ -1588,8 +1591,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 2px 4px 6px;
-		margin-bottom: 2px;
+		padding: 4px 6px 8px;
+		margin-bottom: 4px;
 	}
 
 	.settings-panel-heading {
@@ -1599,7 +1602,7 @@
 	}
 
 	.settings-panel-title {
-		font-size: 14px;
+		font-size: 17px;
 		font-weight: 650;
 		color: var(--text-main);
 	}
@@ -1608,10 +1611,10 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 26px;
-		height: 26px;
-		border-radius: 6px;
-		font-size: 18px;
+		width: 34px;
+		height: 34px;
+		border-radius: 8px;
+		font-size: 22px;
 		line-height: 1;
 		color: var(--text-muted);
 	}
@@ -1622,19 +1625,19 @@
 	}
 
 	.settings-section {
-		padding: 6px;
+		padding: 9px;
 		border-radius: 8px;
 		background: color-mix(in srgb, var(--bg-sidebar) 78%, transparent);
 	}
 
 	.settings-section + .settings-section {
-		margin-top: 6px;
+		margin-top: 8px;
 	}
 
 	.settings-section-title {
 		display: block;
-		padding: 0 4px 4px;
-		font-size: 10px;
+		padding: 0 5px 6px;
+		font-size: 12px;
 		font-weight: 600;
 		letter-spacing: 0.5px;
 		text-transform: uppercase;
@@ -1644,14 +1647,14 @@
 	.settings-action {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 10px;
 		width: 100%;
-		min-height: 30px;
-		padding: 5px 8px;
+		min-height: 38px;
+		padding: 7px 10px;
 		border: 1px solid transparent;
 		border-radius: 6px;
 		color: var(--text-main);
-		font-size: 13px;
+		font-size: 15px;
 		text-align: left;
 		text-decoration: none;
 		transition: background var(--transition-speed);
@@ -1683,6 +1686,9 @@
 
 	.settings-action :global(svg) {
 		color: var(--text-muted);
+		width: 18px;
+		height: 18px;
+		flex: 0 0 auto;
 	}
 
 	.notion-import-input {
@@ -1792,8 +1798,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 8px 12px;
-		font-size: 12px;
+		padding: 10px 14px;
+		font-size: 14px;
 		font-weight: 600;
 		text-transform: uppercase;
 		color: var(--text-muted);
@@ -1804,46 +1810,47 @@
 	.trash-header-actions {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 10px;
 	}
 
 	.empty-trash-btn {
-		font-size: 11px;
+		font-size: 13px;
 		color: var(--error-color);
 		font-weight: 600;
 		text-transform: uppercase;
 	}
 
 	.close-trash-btn {
-		font-size: 14px;
+		font-size: 20px;
+		padding: 2px 4px;
 		color: var(--text-muted);
 	}
 
 	.trash-list {
 		flex: 1;
 		overflow-y: auto;
-		padding: 4px;
+		padding: 6px;
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: 4px;
 	}
 
 	.trash-panel-footer {
-		padding: 7px 8px 8px;
+		padding: 9px 10px 10px;
 		border-top: 1px solid var(--border-color);
 	}
 
 	.trash-cleanup-btn {
 		display: flex;
 		align-items: center;
-		gap: 7px;
+		gap: 9px;
 		width: 100%;
-		min-height: 30px;
-		padding: 6px 7px;
+		min-height: 38px;
+		padding: 8px 9px;
 		border: 1px solid transparent;
 		border-radius: 5px;
 		color: var(--text-main);
-		font-size: 12px;
+		font-size: 14px;
 		text-align: left;
 		transition: background var(--transition-speed), border-color var(--transition-speed);
 	}
@@ -1855,6 +1862,8 @@
 
 	.trash-cleanup-btn :global(svg) {
 		color: var(--text-muted);
+		width: 18px;
+		height: 18px;
 	}
 
 	.trash-cleanup-btn:disabled {
@@ -1863,9 +1872,9 @@
 	}
 
 	.trash-cleanup-message {
-		margin: 3px 5px 0;
-		font-size: 10px;
-		line-height: 1.35;
+		margin: 4px 6px 0;
+		font-size: 12px;
+		line-height: 1.45;
 		color: var(--text-muted);
 	}
 
@@ -1876,10 +1885,10 @@
 	.trash-item {
 		display: flex;
 		align-items: center;
-		gap: 6px;
-		padding: 4px 8px;
-		border-radius: 3px;
-		font-size: 13px;
+		gap: 9px;
+		padding: 7px 10px;
+		border-radius: 5px;
+		font-size: 15px;
 		color: var(--text-main);
 	}
 
@@ -1900,14 +1909,19 @@
 	}
 
 	.trash-action-btn {
-		width: 20px;
-		height: 20px;
-		border-radius: 3px;
+		width: 32px;
+		height: 32px;
+		border-radius: 6px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		color: var(--text-muted);
 		transition: background var(--transition-speed);
+	}
+
+	.trash-action-btn :global(svg) {
+		width: 16px;
+		height: 16px;
 	}
 
 	.trash-action-btn:hover {
@@ -1920,10 +1934,10 @@
 	}
 
 	.empty-trash-message {
-		font-size: 12px;
+		font-size: 14px;
 		color: var(--text-muted);
 		text-align: center;
-		padding: 24px;
+		padding: 28px;
 	}
 
 	/* Sidebar Search Styles */
@@ -2115,7 +2129,7 @@
 
 	.text-size-trigger {
 		font-family: Georgia, serif;
-		font-size: 18px;
+		font-size: 22px;
 		font-weight: 600;
 		font-style: italic;
 	}
@@ -2184,12 +2198,17 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 38px;
-		height: 38px;
+		width: 44px;
+		height: 44px;
 		border-radius: 6px;
 		color: var(--text-muted);
 		transition: background var(--transition-speed), color var(--transition-speed);
 		position: relative;
+	}
+
+	.footer-icon-btn :global(svg) {
+		width: 22px;
+		height: 22px;
 	}
 
 	.footer-icon-btn:hover {
