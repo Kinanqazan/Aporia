@@ -122,13 +122,14 @@
 	let gutterHeight = $state<number | null>(null);
 
 	function syncRowHeights() {
-		if (!tableElement || !gutterElement) return;
+		if (!containerElement || !tableElement || !gutterElement) return;
+		const zoomScale = Number.parseFloat(getComputedStyle(containerElement).zoom) || 1;
 		const gutterRect = gutterElement.getBoundingClientRect();
 		const theadTr = tableElement.querySelector('thead tr');
 		if (theadTr) {
 			const trRect = theadTr.getBoundingClientRect();
-			headerTop = Math.round((trRect.top - gutterRect.top) * 100) / 100;
-			headerHeight = Math.round(trRect.height * 100) / 100;
+			headerTop = Math.round(((trRect.top - gutterRect.top) / zoomScale) * 100) / 100;
+			headerHeight = Math.round((trRect.height / zoomScale) * 100) / 100;
 		}
 
 		const trs = tableElement.querySelectorAll('tbody tr');
@@ -136,12 +137,12 @@
 		const nextHeights: number[] = [];
 		for (let i = 0; i < trs.length; i++) {
 			const r = trs[i].getBoundingClientRect();
-			nextTops.push(Math.round((r.top - gutterRect.top) * 100) / 100);
-			nextHeights.push(Math.round(r.height * 100) / 100);
+			nextTops.push(Math.round(((r.top - gutterRect.top) / zoomScale) * 100) / 100);
+			nextHeights.push(Math.round((r.height / zoomScale) * 100) / 100);
 		}
 		rowTops = nextTops;
 		rowHeights = nextHeights;
-		gutterHeight = Math.round(tableElement.offsetHeight * 100) / 100;
+		gutterHeight = Math.round((tableElement.getBoundingClientRect().height / zoomScale) * 100) / 100;
 	}
 
 	$effect(() => {
@@ -1241,6 +1242,8 @@
 <style>
 	.db-block-container {
 		margin: 1rem 0;
+		font-size: 16px;
+		zoom: var(--editor-font-scale, 1);
 		overflow: visible;
 		display: flex;
 		flex-direction: column;

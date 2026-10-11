@@ -41,6 +41,25 @@ test('holding opens options once and consumes the release click without followin
 	press.action.destroy();
 });
 
+test('a browser context-menu event after the hold does not reopen the options menu', (t) => {
+	t.mock.timers.enable({ apis: ['setTimeout'] });
+	const press = setup();
+	press.row.dispatchEvent(pointer('pointerdown'));
+	t.mock.timers.tick(450);
+	assert.equal(press.opens(), 1);
+
+	const contextMenu = new Event('contextmenu', { cancelable: true });
+	press.row.dispatchEvent(contextMenu);
+	assert.equal(contextMenu.defaultPrevented, true);
+	assert.equal(press.opens(), 1);
+
+	press.view.dispatchEvent(pointer('pointerup'));
+	const releaseClick = Object.assign(new Event('click', { cancelable: true }), { detail: 1 });
+	press.row.dispatchEvent(releaseClick);
+	assert.equal(releaseClick.defaultPrevented, true);
+	press.action.destroy();
+});
+
 test('short taps navigate normally and a fresh tap after holding is not blocked', (t) => {
 	t.mock.timers.enable({ apis: ['setTimeout'] });
 	const press = setup();

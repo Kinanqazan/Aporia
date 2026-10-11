@@ -227,8 +227,12 @@ textarea {
 	flex-shrink: 0;
 }
 
-.toggle-sidebar-btn {
-	transform: translateY(10px);
+.sidebar-search-toggle {
+	transform: translateY(4px);
+}
+
+.sidebar-header-search {
+	transform: translateY(4px);
 }
 
 .user-workspace {
@@ -237,7 +241,7 @@ textarea {
 	gap: 8px;
 	font-weight: 500;
 	font-size: 14px;
-	transform: translateY(10px);
+	transform: translateY(4px);
 }
 
 .avatar {
@@ -293,7 +297,7 @@ textarea {
 .sidebar-actions {
 	display: flex;
 	flex-direction: column;
-	padding: 18px 4px 8px;
+	padding: 8px 4px 0;
 	gap: 2px;
 }
 
@@ -343,7 +347,7 @@ textarea {
 	overflow-y: auto;
 	-ms-overflow-style: none;
 	scrollbar-width: none;
-	padding: 8px 10px 16px;
+	padding: 20px 10px 16px;
 }
 
 .sidebar-nav::-webkit-scrollbar {
@@ -454,7 +458,7 @@ textarea {
 .sidebar-actions {
 	display: flex;
 	flex-direction: column;
-	padding: 18px 4px 8px;
+	padding: 8px 4px 0;
 	gap: 2px;
 }
 
@@ -491,7 +495,7 @@ textarea {
 	overflow-y: auto;
 	-ms-overflow-style: none;
 	scrollbar-width: none;
-	padding: 8px 10px 16px;
+	padding: 20px 10px 16px;
 }
 
 .sidebar-nav::-webkit-scrollbar {
@@ -541,12 +545,16 @@ textarea {
 }
 
 .page-item-row:hover {
-	background-color: var(--hover-sidebar);
+	background-color: transparent;
 }
 
 .page-item-row.active {
 	background-color: var(--active-sidebar);
 	font-weight: 500;
+}
+
+.page-item-row.active .page-title {
+	color: var(--text-main);
 }
 
 .page-item-link {
@@ -610,12 +618,14 @@ textarea {
 }
 
 /* Hover swap: show chevron, hide emoji (only when page has children) */
-.page-item-row:hover .page-symbol-slot.has-children .disclosure-btn {
-	display: flex;
-}
+@media (hover: hover) and (pointer: fine) {
+	.page-item-row:hover .page-symbol-slot.has-children .disclosure-btn {
+		display: flex;
+	}
 
-.page-item-row:hover .page-symbol-slot.has-children .page-emoji {
-	opacity: 0;
+	.page-item-row:hover .page-symbol-slot.has-children .page-emoji {
+		opacity: 0;
+	}
 }
 
 .page-title {
@@ -626,12 +636,16 @@ textarea {
 }
 
 .page-children {
-	margin-left: 8px;
-	padding-left: 4px;
+	margin: 2px 0 0 8px;
+	padding: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
-	margin-top: 2px;
+	gap: 0;
+}
+
+.page-children .page-title {
+	font-weight: 600;
+	color: var(--text-main);
 }
 
 /* Sidebar footer */
@@ -977,6 +991,26 @@ textarea {
 	);
 }
 
+:root:not(.dark) .app-container:not(.mobile) .main-content::before,
+:root:not(.dark) .mobile .main-content::before {
+	background: linear-gradient(
+		to bottom,
+		rgb(21 21 21 / 100%) 0%,
+		rgb(21 21 21 / 50%) 50%,
+		rgb(21 21 21 / 0%) 100%
+	);
+}
+
+:root:not(.dark) .app-container:not(.mobile) .main-content::after,
+:root:not(.dark) .mobile .main-content::after {
+	background: linear-gradient(
+		to top,
+		rgb(21 21 21 / 100%) 0%,
+		rgb(21 21 21 / 50%) 50%,
+		rgb(21 21 21 / 0%) 100%
+	);
+}
+
 .mobile .header {
 	position: absolute;
 	top: 0;
@@ -1085,7 +1119,7 @@ textarea {
 }
 
 .mobile .sidebar-nav {
-	padding: 10px 20px 20px;
+	padding: 20px 20px 20px;
 }
 
 .mobile .pages-list {
@@ -1093,8 +1127,8 @@ textarea {
 }
 
 .mobile .page-children {
-	gap: 2px;
-	margin-top: 6px;
+	gap: 0;
+	margin-top: 2px;
 }
 
 .mobile .page-item-row {
@@ -1103,8 +1137,8 @@ textarea {
 }
 
 .mobile .page-children .page-item-row {
-	min-height: 44px;
-	padding-block: 2px;
+	min-height: 38px;
+	padding-block: 1px;
 }
 
 .mobile .page-children .page-item-link {
@@ -1460,11 +1494,16 @@ textarea {
 
 .ProseMirror ul[data-type="taskList"] label {
 	user-select: none;
-	margin-top: 3px;
+	margin-top: 0.3em;
+	margin-right: 0.2em;
 	display: flex;
 	align-items: center;
 	gap: 4px;
 	flex-shrink: 0;
+}
+
+.ProseMirror ul[data-type="taskList"] li > div > p {
+	margin: 0;
 }
 
 .task-item-drag-handle {
@@ -1480,7 +1519,7 @@ textarea {
 	flex-shrink: 0;
 	width: 18px;
 	height: 18px;
-	margin-top: 3px;
+	margin-top: 0.3em;
 	transition: color 0.15s ease;
 }
 
@@ -1563,8 +1602,8 @@ textarea {
 	margin: 0;
 	font: inherit;
 	color: var(--accent-color);
-	width: 16px;
-	height: 16px;
+	width: 1em;
+	height: 1em;
 	border: 1.5px solid var(--text-muted);
 	border-radius: 3px;
 	display: grid;
@@ -1574,8 +1613,8 @@ textarea {
 
 .ProseMirror ul[data-type="taskList"] input[type="checkbox"]::before {
 	content: "";
-	width: 10px;
-	height: 10px;
+	width: 0.625em;
+	height: 0.625em;
 	transform: scale(0);
 	transition: 100ms transform ease-in-out;
 	background-color: white;
@@ -1605,6 +1644,7 @@ textarea {
 
 .task-list-header {
 	order: 1;
+	zoom: var(--editor-font-scale, 1);
 	display: flex;
 	align-items: center;
 	justify-content: flex-start;
@@ -1639,7 +1679,7 @@ textarea {
 	width: 180px;
 	flex: 0 1 180px;
 	min-width: 60px;
-	height: 34px;
+	height: 36px;
 	box-sizing: border-box;
 	box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
 }
@@ -1652,12 +1692,12 @@ textarea {
 .task-list-search-icon {
 	color: var(--text-muted);
 	flex-shrink: 0;
-	width: 14px;
-	height: 14px;
+	width: 15px;
+	height: 15px;
 }
 
 .task-list-search-input {
-	font-size: 13px;
+	font-size: 14px;
 	width: 100%;
 	border: 0 !important;
 	outline: none !important;
@@ -1680,7 +1720,7 @@ textarea {
 	gap: 5px;
 	background: transparent;
 	padding: 0;
-	height: 34px;
+	height: 36px;
 	box-sizing: border-box;
 	flex-shrink: 0;
 }
@@ -1690,11 +1730,11 @@ textarea {
 	align-items: center;
 	justify-content: center;
 	gap: 5px;
-	height: 34px;
-	padding: 0 14px;
+	height: 36px;
+	padding: 0 15px;
 	border: 1px solid var(--border-color);
 	border-radius: 6px;
-	font-size: 12px;
+	font-size: 13px;
 	color: var(--text-muted);
 	background: var(--bg-canvas);
 	cursor: pointer;
@@ -1724,8 +1764,8 @@ textarea {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 34px;
-	height: 34px;
+	width: 36px;
+	height: 36px;
 	background: var(--bg-canvas);
 	color: var(--text-muted);
 	border: 1px solid var(--border-color);
@@ -1772,40 +1812,40 @@ textarea {
 	.task-list-search-wrapper {
 		flex: 1 1 90px;
 		min-width: 70px;
-		height: 34px;
+		height: 36px;
 	}
 
 	.task-list-search-input {
-		font-size: 0.78rem;
+		font-size: 0.82rem;
 		height: 100%;
 	}
 
 	.task-list-search-icon {
-		width: 13px;
-		height: 13px;
+		width: 14px;
+		height: 14px;
 	}
 
 	.task-list-filter-pills {
-		height: 34px;
+		height: 36px;
 		gap: 4px;
 		flex-shrink: 0;
 	}
 
 	.task-filter-pill {
 		padding: 0 10px;
-		font-size: 0.74rem;
-		height: 34px;
+		font-size: 0.78rem;
+		height: 36px;
 	}
 
 	.task-list-add-btn {
-		width: 34px;
-		height: 34px;
+		width: 36px;
+		height: 36px;
 		flex-shrink: 0;
 	}
 
 	.task-add-icon {
-		width: 14px;
-		height: 14px;
+		width: 15px;
+		height: 15px;
 	}
 }
 

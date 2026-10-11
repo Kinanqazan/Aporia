@@ -10,6 +10,7 @@ export function pageLongPress(node, options) {
 	let startX = 0;
 	let startY = 0;
 	let suppressClick = false;
+	let contextMenuAfterHold = false;
 
 	function cancel() {
 		clearTimeout(timer);
@@ -35,6 +36,7 @@ export function pageLongPress(node, options) {
 	function start(event) {
 		cancel();
 		suppressClick = false;
+		contextMenuAfterHold = false;
 		if (!options.enabled || !event.isPrimary || event.button !== 0) return;
 		const target = event.target;
 		if (target instanceof Element && target.closest('button, input, form, .page-options-dropdown')) return;
@@ -48,6 +50,7 @@ export function pageLongPress(node, options) {
 		view?.addEventListener('blur', cancel);
 		timer = setTimeout(() => {
 			suppressClick = true;
+			contextMenuAfterHold = true;
 			options.onOpen(node);
 		}, 450);
 	}
@@ -67,6 +70,10 @@ export function pageLongPress(node, options) {
 		event.stopPropagation();
 		cancel();
 		suppressClick = true;
+		if (contextMenuAfterHold) {
+			contextMenuAfterHold = false;
+			return;
+		}
 		options.onOpen(node);
 	}
 

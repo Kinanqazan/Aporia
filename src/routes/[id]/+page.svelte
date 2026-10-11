@@ -3558,6 +3558,7 @@
 
 	/* Subpages nested list styling */
 	.subpages-list {
+		zoom: var(--editor-font-scale, 1);
 		display: flex;
 		flex-direction: column;
 		gap: 6px;

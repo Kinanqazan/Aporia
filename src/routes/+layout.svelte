@@ -7,7 +7,6 @@
 	import { invalidateAll, goto, afterNavigate } from '$app/navigation';
 	import { 
 		Menu, 
-		ChevronLeft, 
 		Search, 
 		Plus, 
 		Sun, 
@@ -32,6 +31,7 @@
 	import { parseExpandedSidebarState, serializeExpandedSidebarState } from '$lib/sidebar-state.js';
 	import { sidebarGesture } from '$lib/sidebar-gesture.js';
 	import { pageLongPress } from '$lib/page-long-press.js';
+	import { createSidebarCreateNavigation } from '$lib/sidebar-create-navigation.js';
 
 	// SvelteKit Props
 	let { data, children } = $props();
@@ -173,7 +173,7 @@
 
 	// Search States
 	let isSearchOpen = $state(false);
-	let preserveSidebarAfterCreate = false;
+	let isSidebarSearchVisible = $state(false);
 	let searchQuery = $state('');
 	let searchResults = $state<any[]>([]);
 	let searchFocusedIndex = $state(0);
@@ -189,12 +189,32 @@
 	// Dropdown menu state
 	let openMenuPageId = $state<string | null>(null);
 	let isPageMenuAbove = $state(false);
+	let pendingPageDelete = $state<{ id: string; title: string; version: string } | null>(null);
+	let pageDeleteCancelButton = $state<HTMLButtonElement | null>(null);
+
+	$effect(() => {
+		if (pendingPageDelete) pageDeleteCancelButton?.focus();
+	});
+
+	function closePageDeleteConfirmation() {
+		const pageId = pendingPageDelete?.id;
+		pendingPageDelete = null;
+		if (pageId && typeof window !== 'undefined') {
+			requestAnimationFrame(() => document.getElementById(`page-delete-trigger-${pageId}`)?.focus());
+		}
+	}
 
 	function openMobilePageMenu(id: string, row: HTMLElement) {
 		const nav = row.closest('.sidebar-nav');
 		isPageMenuAbove = !!nav && nav.getBoundingClientRect().bottom - row.getBoundingClientRect().bottom < 156;
 		openMenuPageId = id;
 	}
+
+	const sidebarCreateNavigation = createSidebarCreateNavigation({
+		isMobile: () => isMobile,
+		setSidebarOpen: (open) => { isSidebarOpen = open; },
+		onStart: () => { openMenuPageId = null; }
+	});
 
 	// Active page tracking from route params
 	let currentPageId = $derived($page.params.id || null);
@@ -324,8 +344,15 @@
 		void processNativeShares();
 
 		const handleClickOutside = (e: MouseEvent) => {
-			if (isSearchOpen && searchContainerEl && !searchContainerEl.contains(e.target as Node)) {
-				isSearchOpen = false;
+			const target = e.target;
+			if (
+				isSidebarSearchVisible &&
+				searchContainerEl &&
+				target instanceof Element &&
+				!searchContainerEl.contains(target) &&
+				!target.closest('.sidebar-search-toggle')
+			) {
+				closeSidebarSearch();
 			}
 			if (isEditorTextSizeOpen && editorTextSizeMenuEl && !editorTextSizeMenuEl.contains(e.target as Node)) {
 				isEditorTextSizeOpen = false;
@@ -391,12 +418,8 @@
 
 	afterNavigate((navigation) => {
 		isSearchOpen = false;
-		if (preserveSidebarAfterCreate) {
-			preserveSidebarAfterCreate = false;
-			if (isMobile) isSidebarOpen = true;
-		} else if (isMobile) {
-			isSidebarOpen = false;
-		}
+		isSidebarSearchVisible = false;
+		sidebarCreateNavigation.afterNavigate();
 		if (
 			navigation.type !== 'enter' &&
 			navigation.from?.url.pathname !== navigation.to?.url.pathname &&
@@ -448,7 +471,7 @@
 				selectSearchResult(searchResults[searchFocusedIndex]);
 			}
 		} else if (e.key === 'Escape') {
-			isSearchOpen = false;
+			closeSidebarSearch();
 		}
 	}
 
@@ -481,6 +504,16 @@
 
 	function toggleSidebar() {
 		isSidebarOpen = !isSidebarOpen;
+	}
+
+	function showSidebarSearch() {
+		isSidebarSearchVisible = true;
+		requestAnimationFrame(() => sidebarSearchInputEl?.focus());
+	}
+
+	function closeSidebarSearch() {
+		isSidebarSearchVisible = false;
+		isSearchOpen = false;
 	}
 
 	function toggleTheme() {
@@ -758,24 +791,14 @@
 	class:mobile={isMobile} 
 	style:--sidebar-width="{sidebarWidth}px"
 	style:--editor-font-size="{editorTextSize}px"
+	style:--editor-font-scale="{editorTextSize / 16}"
 	use:sidebarGesture={{ enabled: isMobile, open: isSidebarOpen, onOpenChange: (open) => isSidebarOpen = open }}
 >
 	<!-- Sidebar -->
 	<aside class="sidebar">
 		<div class="sidebar-header">
-			<div class="user-workspace">
-				<img src="/aporia-logo.svg" alt="Aporia Logo" class="workspace-logo" />
-				<span class="workspace-name">Aporia</span>
-			</div>
-			<button class="icon-btn toggle-sidebar-btn" onclick={toggleSidebar} title="Close sidebar">
-				<ChevronLeft size={16} />
-			</button>
-		</div>
-
-		<!-- Action items -->
-		<div class="sidebar-actions">
-			<div class="sidebar-search-row">
-				<div class="sidebar-search-container" bind:this={searchContainerEl}>
+			{#if isSidebarSearchVisible}
+				<div class="sidebar-search-container sidebar-header-search" bind:this={searchContainerEl}>
 					<div class="sidebar-search-input-wrapper">
 						<Search size={16} class="sidebar-search-icon" />
 						<input
@@ -788,9 +811,7 @@
 							onfocus={() => isSearchOpen = true}
 							onclick={(e) => e.stopPropagation()}
 						/>
-						{#if searchQuery}
-							<button type="button" class="clear-search-btn" onclick={() => { searchQuery = ''; searchResults = []; }}>✕</button>
-						{/if}
+						<button type="button" class="sidebar-search-close" onclick={closeSidebarSearch} title="Close search" aria-label="Close search">×</button>
 					</div>
 
 					{#if isSearchOpen && searchResults.length > 0}
@@ -816,30 +837,15 @@
 						</div>
 					{/if}
 				</div>
-				<form
-					method="POST"
-					action="/?/create"
-					use:enhance={() => {
-						preserveSidebarAfterCreate = isMobile;
-						return async ({ result, update }) => {
-							await update();
-							if (result.type !== 'redirect') {
-								preserveSidebarAfterCreate = false;
-							}
-							if (isMobile && result.type === 'redirect') {
-								isSidebarOpen = true;
-							}
-						};
-					}}
-					class="sidebar-create-page-form"
-				>
-					<input type="hidden" name="parentId" value="null" />
-					<input type="hidden" name="title" value="Untitled" />
-					<button type="submit" class="add-section-btn" title="Create new page" aria-label="Create new page">
-						<Plus size={16} />
-					</button>
-				</form>
-			</div>
+			{:else}
+				<div class="user-workspace">
+					<img src="/aporia-logo.svg" alt="Aporia Logo" class="workspace-logo" />
+					<span class="workspace-name">Aporia</span>
+				</div>
+				<button type="button" class="icon-btn sidebar-search-toggle" onclick={showSidebarSearch} title="Search pages" aria-label="Search pages">
+					<Search size={17} />
+				</button>
+			{/if}
 		</div>
 
 		<!-- Page list -->
@@ -912,19 +918,33 @@
 		<!-- Trash & Export -->
 		<div class="sidebar-footer">
 			<div class="footer-row">
-				<button
-					class="footer-icon-btn"
-					onclick={() => {
-						isTrashOpen = !isTrashOpen;
-						isSettingsOpen = false;
-					}}
-					title="Trash Bin"
-				>
-					<Trash2 size={18} />
-					{#if data.trashPages && data.trashPages.length > 0}
-						<span class="trash-badge-bubble">{data.trashPages.length}</span>
-					{/if}
-				</button>
+				<div class="footer-left-actions">
+					<form
+						method="POST"
+						action="/?/create"
+						use:enhance={sidebarCreateNavigation.enhance}
+						class="sidebar-create-page-form"
+					>
+						<input type="hidden" name="parentId" value="null" />
+						<input type="hidden" name="title" value="Untitled" />
+						<button type="submit" class="footer-icon-btn" title="Create new page" aria-label="Create new page">
+							<Plus size={18} />
+						</button>
+					</form>
+					<button
+						class="footer-icon-btn"
+						onclick={() => {
+							isTrashOpen = !isTrashOpen;
+							isSettingsOpen = false;
+						}}
+						title="Trash Bin"
+					>
+						<Trash2 size={18} />
+						{#if data.trashPages && data.trashPages.length > 0}
+							<span class="trash-badge-bubble">{data.trashPages.length}</span>
+						{/if}
+					</button>
+				</div>
 				<div class="footer-right-actions">
 					<button
 						class="footer-icon-btn"
@@ -1145,6 +1165,55 @@
 		</div>
 	{/if}
 
+	{#if pendingPageDelete}
+		<div class="page-delete-confirmation-backdrop">
+			<div
+				class="page-delete-confirmation-dialog"
+				role="alertdialog"
+				aria-modal="true"
+				aria-labelledby="page-delete-confirmation-title"
+				aria-describedby="page-delete-confirmation-description"
+				tabindex="-1"
+				onkeydown={(event) => {
+					if (event.key === 'Escape') {
+						event.preventDefault();
+						event.stopPropagation();
+						closePageDeleteConfirmation();
+						return;
+					}
+					if (event.key === 'Tab') {
+						const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');
+						const firstButton = buttons[0];
+						const lastButton = buttons[buttons.length - 1];
+						if (event.shiftKey && document.activeElement === firstButton) {
+							event.preventDefault();
+							lastButton?.focus();
+						} else if (!event.shiftKey && document.activeElement === lastButton) {
+							event.preventDefault();
+							firstButton?.focus();
+						}
+					}
+				}}
+			>
+				<h2 id="page-delete-confirmation-title">Move page to trash?</h2>
+				<p id="page-delete-confirmation-description">
+					Move “{pendingPageDelete.title}” and its subpages to Trash? You can restore them later.
+				</p>
+				<div class="page-delete-confirmation-actions">
+					<button bind:this={pageDeleteCancelButton} type="button" class="page-delete-cancel" onclick={closePageDeleteConfirmation}>No</button>
+					<form method="POST" action="/?/trash" use:enhance={() => { pendingPageDelete = null; openMenuPageId = null; }}>
+						<input type="hidden" name="id" value={pendingPageDelete.id} />
+						<input type="hidden" name="expectedVersion" value={pendingPageDelete.version} />
+						{#if isCurrentPageInSubtree(pendingPageDelete.id)}
+							<input type="hidden" name="returnToWorkspace" value="true" />
+						{/if}
+						<button type="submit" class="page-delete-confirm">Yes</button>
+					</form>
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	<!-- Mobile Overlay -->
 	{#if isMobile}
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -1305,7 +1374,7 @@
 						openMenuPageId = null;
 						event.currentTarget.closest('.page-item-row')?.querySelector<HTMLAnchorElement>('.page-item-link')?.focus();
 					}}>
-						<form method="POST" action="/?/create" use:enhance={() => { openMenuPageId = null; }}>
+						<form method="POST" action="/?/create" use:enhance={sidebarCreateNavigation.enhance}>
 							<input type="hidden" name="parentId" value={node.id} />
 							<input type="hidden" name="title" value="Untitled" />
 							<button type="submit" class="dropdown-action-btn" title="Add child page">
@@ -1315,16 +1384,15 @@
 						<button class="dropdown-action-btn" title="Rename inline" onclick={(e) => { openMenuPageId = null; startEditingTitle(node.id, node.title, e); }}>
 							<Edit3 size={isMobile ? 18 : 14} /> <span>Rename</span>
 						</button>
-						<form method="POST" action="/?/trash" use:enhance={() => { openMenuPageId = null; }}>
-							<input type="hidden" name="id" value={node.id} />
-							<input type="hidden" name="expectedVersion" value={node.version} />
-							{#if isCurrentPageInSubtree(node.id)}
-								<input type="hidden" name="returnToWorkspace" value="true" />
-							{/if}
-							<button type="submit" class="dropdown-action-btn hover-trash" title="Move to trash">
-								<Trash size={isMobile ? 18 : 14} /> <span>Delete</span>
-							</button>
-						</form>
+						<button
+							id={`page-delete-trigger-${node.id}`}
+							type="button"
+							class="dropdown-action-btn hover-trash"
+							title="Move to trash"
+							onclick={() => { pendingPageDelete = { id: node.id, title: node.title, version: node.version }; }}
+						>
+							<Trash size={isMobile ? 18 : 14} /> <span>Delete</span>
+						</button>
 					</div>
 				{/if}
 			</div>
@@ -1715,6 +1783,76 @@
 		background: rgb(0 0 0 / 42%);
 	}
 
+	.page-delete-confirmation-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 220;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 20px;
+		background: rgb(0 0 0 / 46%);
+	}
+
+	.page-delete-confirmation-dialog {
+		width: min(360px, 100%);
+		padding: 20px;
+		border: 1px solid var(--border-color);
+		border-radius: 12px;
+		background: var(--bg-canvas);
+		box-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
+		color: var(--text-main);
+	}
+
+	.page-delete-confirmation-dialog h2 {
+		margin: 0;
+		font-size: 17px;
+		font-weight: 650;
+	}
+
+	.page-delete-confirmation-dialog p {
+		margin: 9px 0 0;
+		color: var(--text-muted);
+		font-size: 13px;
+		line-height: 1.5;
+		overflow-wrap: anywhere;
+	}
+
+	.page-delete-confirmation-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: 20px;
+	}
+
+	.page-delete-confirmation-actions button {
+		min-width: 72px;
+		min-height: 36px;
+		padding: 0 12px;
+		border: 1px solid var(--border-color);
+		border-radius: 7px;
+		font: inherit;
+		font-size: 13px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.page-delete-cancel {
+		background: var(--bg-sidebar);
+		color: var(--text-main);
+	}
+
+	.page-delete-confirm {
+		border-color: color-mix(in srgb, var(--error-color) 55%, transparent);
+		background: var(--error-color);
+		color: #fff;
+	}
+
+	.page-delete-confirmation-actions button:focus-visible {
+		outline: 2px solid var(--accent-color);
+		outline-offset: 2px;
+	}
+
 	.notion-import-modal {
 		width: min(440px, 100%);
 		padding: 20px;
@@ -1997,17 +2135,23 @@
 		flex-shrink: 0;
 	}
 
-	.clear-search-btn {
-		font-size: 10px;
+	.sidebar-search-close {
+		flex-shrink: 0;
+		width: 20px;
+		height: 20px;
+		padding: 0;
+		border: 0;
+		background: transparent;
 		color: var(--text-muted);
-		padding: 2px;
+		font-size: 18px;
+		line-height: 1;
 		cursor: pointer;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 	}
 
-	.clear-search-btn:hover {
+	.sidebar-search-close:hover {
 		color: var(--text-main);
 	}
 
@@ -2093,6 +2237,12 @@
 		justify-content: space-between;
 		width: 100%;
 		padding: 4px 8px;
+	}
+
+	.footer-left-actions {
+		display: flex;
+		align-items: center;
+		gap: 2px;
 	}
 
 	.footer-right-actions {
