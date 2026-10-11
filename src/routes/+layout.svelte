@@ -1241,11 +1241,11 @@
 						{/if}
 					</button>
 					<span class="page-emoji">
-						<PageIcon icon={node.icon} color={node.iconColor} size={isMobile ? 24 : 20} />
+						<PageIcon icon={node.icon} color={node.iconColor} size={isMobile ? 22 : 20} />
 					</span>
 				{:else}
 					<span class="page-emoji">
-						<PageIcon icon={node.icon} color={node.iconColor} size={isMobile ? 24 : 20} />
+						<PageIcon icon={node.icon} color={node.iconColor} size={isMobile ? 22 : 20} />
 					</span>
 				{/if}
 			</div>

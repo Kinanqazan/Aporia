@@ -44,7 +44,7 @@
 
 :root.dark {
 	/* Dark Mode (Notion Aesthetic) */
-	--bg-canvas: #191919;
+	--bg-canvas: #151515;
 	--bg-sidebar: #202020;
 	--sidebar-surface: #242424;
 	--text-main: #e3e3e3;
@@ -932,6 +932,10 @@ textarea {
 	}
 }
 
+:root.dark .mobile {
+	--bg-canvas: #121212;
+}
+
 .mobile .main-content {
 	--mobile-controls-top: 22px;
 	padding-left: 0 !important;
@@ -1028,14 +1032,18 @@ textarea {
 	height: 40px;
 }
 
-.mobile .footer-icon-btn {
-	width: 44px;
-	height: 44px;
+.mobile .sidebar-footer .footer-icon-btn {
+	width: 40px;
+	height: 40px;
 }
 
-.mobile .footer-icon-btn svg {
-	width: 22px;
-	height: 22px;
+.mobile .sidebar-footer .footer-icon-btn svg {
+	width: 20px;
+	height: 20px;
+}
+
+.mobile .sidebar-footer .text-size-trigger {
+	font-size: 20px;
 }
 
 .mobile .footer-row {
@@ -1049,19 +1057,19 @@ textarea {
 }
 
 .mobile .page-item-link {
-	font-size: 18px;
+	font-size: 16px;
 	line-height: 1.35;
 	padding-block: 6px;
 }
 
 .mobile .page-symbol-slot {
-	width: 28px;
-	height: 28px;
+	width: 26px;
+	height: 26px;
 	margin-right: 6px;
 }
 
 .mobile .page-symbol-slot .page-emoji {
-	font-size: 24px;
+	font-size: 22px;
 }
 
 .mobile .sidebar-header {
@@ -1100,18 +1108,18 @@ textarea {
 }
 
 .mobile .page-children .page-item-link {
-	font-size: 19px;
+	font-size: 17px;
 	line-height: 1.4;
 	padding-block: 4px;
 }
 
 .mobile .page-children .page-symbol-slot {
-	width: 30px;
-	height: 30px;
+	width: 28px;
+	height: 28px;
 }
 
 .mobile .page-children .page-symbol-slot .page-emoji {
-	font-size: 26px;
+	font-size: 24px;
 }
 
 /* ==========================================================================
