@@ -582,28 +582,28 @@ textarea {
 	margin-right: 4px;
 }
 
-.page-symbol-slot .disclosure-btn {
-	position: absolute;
-	top: 1px;
-	left: 1px;
-	width: 22px;
-	height: 22px;
-	display: none;
+.page-row-disclosure {
+	flex: 0 0 24px;
+	width: 24px;
+	height: 24px;
+	display: flex;
 	align-items: center;
 	justify-content: center;
-	background-color: var(--hover-sidebar);
-	border: 1px solid var(--border-color);
+	margin-left: 4px;
 	border-radius: 4px;
 	color: var(--text-muted);
-	z-index: 1;
+	opacity: 0;
+	transition: opacity var(--transition-speed), background var(--transition-speed), color var(--transition-speed);
 }
 
-:root.dark .page-symbol-slot .disclosure-btn {
-	background-color: var(--hover-icon);
+.page-item-row:hover .page-row-disclosure,
+.page-row-disclosure:focus-visible {
+	opacity: 1;
 }
 
-.page-symbol-slot .disclosure-btn:hover {
-	background-color: var(--active-sidebar);
+.page-row-disclosure:hover,
+.page-row-disclosure:focus-visible {
+	background: var(--hover-icon);
 	color: var(--text-main);
 }
 
@@ -614,18 +614,6 @@ textarea {
 	width: 100%;
 	height: 100%;
 	font-size: 20px;
-	transition: opacity var(--transition-speed);
-}
-
-/* Hover swap: show chevron, hide emoji (only when page has children) */
-@media (hover: hover) and (pointer: fine) {
-	.page-item-row:hover .page-symbol-slot.has-children .disclosure-btn {
-		display: flex;
-	}
-
-	.page-item-row:hover .page-symbol-slot.has-children .page-emoji {
-		opacity: 0;
-	}
 }
 
 .page-title {
@@ -1067,17 +1055,17 @@ textarea {
 }
 
 .mobile .sidebar-footer .footer-icon-btn {
-	width: 40px;
-	height: 40px;
+	width: 36px;
+	height: 36px;
 }
 
 .mobile .sidebar-footer .footer-icon-btn svg {
-	width: 20px;
-	height: 20px;
+	width: 18px;
+	height: 18px;
 }
 
 .mobile .sidebar-footer .text-size-trigger {
-	font-size: 20px;
+	font-size: 18px;
 }
 
 .mobile .footer-row {
@@ -1100,6 +1088,13 @@ textarea {
 	width: 26px;
 	height: 26px;
 	margin-right: 6px;
+}
+
+.mobile .page-row-disclosure {
+	flex: 0 0 28px;
+	width: 28px;
+	height: 28px;
+	opacity: 1;
 }
 
 .mobile .page-symbol-slot .page-emoji {

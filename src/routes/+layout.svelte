@@ -708,7 +708,7 @@
 	}
 
 	function handleDragStart(event: DragEvent, node: any) {
-		if (editingPageId !== null) {
+		if (isMobile || editingPageId !== null) {
 			event.preventDefault();
 			return;
 		}
@@ -1298,17 +1298,6 @@
 			<!-- Overlapping Emoji / Chevron symbol slot -->
 			<div class="page-symbol-slot" class:has-children={node.children && node.children.length > 0}>
 				{#if node.children && node.children.length > 0}
-					<button 
-						class="disclosure-btn" 
-						onclick={(e) => toggleNodeExpand(node.id, e)}
-						aria-label={expandedNodes.has(node.id) ? 'Collapse' : 'Expand'}
-					>
-						{#if expandedNodes.has(node.id)}
-							<ChevronDown size={15} />
-						{:else}
-							<ChevronRight size={15} />
-						{/if}
-					</button>
 					<span class="page-emoji">
 						<PageIcon icon={node.icon} color={node.iconColor} size={isMobile ? 22 : 20} />
 					</span>
@@ -1396,6 +1385,21 @@
 					</div>
 				{/if}
 			</div>
+
+			{#if node.children && node.children.length > 0}
+				<button
+					type="button"
+					class="page-row-disclosure"
+					onclick={(e) => toggleNodeExpand(node.id, e)}
+					aria-label={expandedNodes.has(node.id) ? 'Collapse subpages' : 'Expand subpages'}
+				>
+					{#if expandedNodes.has(node.id)}
+						<ChevronDown size={16} />
+					{:else}
+						<ChevronRight size={16} />
+					{/if}
+				</button>
+			{/if}
 		</div>
 
 		<!-- Recursive Child Rendering -->
@@ -1477,6 +1481,13 @@
 
 	:global(.mobile) .page-item-row {
 		-webkit-touch-callout: none;
+		-webkit-user-select: none;
+		user-select: none;
+	}
+
+	:global(.mobile) .page-item-link {
+		-webkit-user-drag: none;
+		-webkit-user-select: none;
 		user-select: none;
 	}
 
@@ -2348,8 +2359,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 44px;
-		height: 44px;
+		width: 40px;
+		height: 40px;
 		border-radius: 6px;
 		color: var(--text-muted);
 		transition: background var(--transition-speed), color var(--transition-speed);
@@ -2357,8 +2368,8 @@
 	}
 
 	.footer-icon-btn :global(svg) {
-		width: 22px;
-		height: 22px;
+		width: 20px;
+		height: 20px;
 	}
 
 	.footer-icon-btn:hover {
