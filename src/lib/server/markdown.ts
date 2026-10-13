@@ -77,6 +77,12 @@ function convertNode(node: any, indentLevel = 0): string {
 			return src ? `![${alt}](${src})` : '';
 		}
 
+		case 'linkBookmark': {
+			const title = String(node.attrs?.title || 'Link').replace(/[\[\]]/g, '');
+			const url = String(node.attrs?.url || '');
+			return url ? `${indent}[${title}](${url})` : '';
+		}
+
 		case 'details': {
 			const summaryNode = node.content?.find((c: any) => c.type === 'detailsSummary');
 			const contentNode = node.content?.find((c: any) => c.type === 'detailsContent');

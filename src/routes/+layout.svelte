@@ -67,7 +67,84 @@
 	let isBackupRestoring = $state(false);
 	type NativeSharedContent = { id: string; title?: string; text?: string; url?: string };
 	type NativeShareWindow = Window & { __APORIA_NATIVE_SHARE_QUEUE__?: NativeSharedContent[] };
+	let activeLinkShare = $state<NativeSharedContent | null>(null);
+	let shareLinkTitle = $state('');
+	let shareTargetPageId = $state('');
+	let shareTargetSearch = $state('');
+	let shareTargetError = $state('');
+	let isSavingSharedLink = $state(false);
 	let isProcessingNativeShare = false;
+
+	function suggestedSharedLinkTitle(shared: NativeSharedContent) {
+		const suppliedTitle = shared.title?.trim();
+		if (suppliedTitle && suppliedTitle !== shared.url) return suppliedTitle;
+		try {
+			return new URL(shared.url || '').hostname.replace(/^www\./i, '') || 'Shared link';
+		} catch {
+			return 'Shared link';
+		}
+	}
+
+	function finishNativeShare(shared: NativeSharedContent, discard = false) {
+		const shareWindow = window as NativeShareWindow;
+		const queue = shareWindow.__APORIA_NATIVE_SHARE_QUEUE__;
+		if (queue?.[0]?.id !== shared.id) return false;
+		queue.shift();
+		if (shared.id) {
+			window.location.href = `aporia-native://share-ack?id=${encodeURIComponent(shared.id)}`;
+		}
+		activeLinkShare = null;
+		shareLinkTitle = '';
+		shareTargetPageId = '';
+		shareTargetSearch = '';
+		shareTargetError = '';
+		if (discard) queueMicrotask(() => void processNativeShares());
+		return true;
+	}
+
+	function requestEditorFlush(pageId: string): Promise<boolean> {
+		return new Promise((resolve) => {
+			const detail: {
+				pageId: string;
+				handled: boolean;
+				resolve: (saved: boolean) => void;
+			} = { pageId, handled: false, resolve };
+			window.dispatchEvent(new CustomEvent('aporia-flush-page-before-share', { detail }));
+			if (!detail.handled) resolve(true);
+		});
+	}
+
+	async function addSharedLinkToPage() {
+		const shared = activeLinkShare;
+		const targetPageId = shareTargetPageId;
+		if (!shared || !targetPageId || isSavingSharedLink) return;
+
+		isSavingSharedLink = true;
+		shareTargetError = '';
+		try {
+			if (!(await requestEditorFlush(targetPageId))) {
+				throw new Error('Save the current page changes before adding this link.');
+			}
+			const response = await fetch('/api/share-target', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ ...shared, targetPageId, bookmarkTitle: shareLinkTitle })
+			});
+			const result = await response.json();
+			if (!response.ok || !result.success || typeof result.pageId !== 'string') {
+				throw new Error(result.error || 'Aporia could not add this link.');
+			}
+
+			finishNativeShare(shared);
+			await invalidateAll();
+			await goto(`/${encodeURIComponent(result.pageId)}`);
+			void processNativeShares();
+		} catch (error) {
+			shareTargetError = error instanceof Error ? error.message : 'Aporia could not add this link.';
+		} finally {
+			isSavingSharedLink = false;
+		}
+	}
 
 	async function processNativeShares() {
 		if (typeof window === 'undefined' || isProcessingNativeShare) return;
@@ -81,6 +158,16 @@
 		try {
 			while (queue.length > 0) {
 				const shared = queue[0];
+				if (shared.url) {
+					if (activeLinkShare?.id !== shared.id) {
+						activeLinkShare = shared;
+						shareLinkTitle = suggestedSharedLinkTitle(shared);
+						shareTargetPageId = currentPageId && !currentPage?.isLocked ? currentPageId : '';
+						shareTargetSearch = '';
+						shareTargetError = '';
+					}
+					break;
+				}
 				const response = await fetch('/api/share-target', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
@@ -92,9 +179,7 @@
 				}
 
 				queue.shift();
-				if (shared.id) {
-					window.location.href = `aporia-native://share-ack?id=${encodeURIComponent(shared.id)}`;
-				}
+				if (shared.id) window.location.href = `aporia-native://share-ack?id=${encodeURIComponent(shared.id)}`;
 				await goto(`/${encodeURIComponent(result.pageId)}`);
 			}
 		} catch (error) {
@@ -289,6 +374,19 @@
 
 	// Tree structure derived from active database pages
 	let pageTree = $derived(buildTree(data.activePages || []));
+	let sharePageOptions = $derived.by(() => {
+		const query = shareTargetSearch.trim().toLocaleLowerCase();
+		return flattenPageTree(pageTree).filter(({ page }) =>
+			page.isLocked !== 1 && (!query || page.title.toLocaleLowerCase().includes(query))
+		);
+	});
+
+	function flattenPageTree(nodes: any[], depth = 0): Array<{ page: any; depth: number }> {
+		return nodes.flatMap((node) => [
+			{ page: node, depth },
+			...flattenPageTree(node.children || [], depth + 1)
+		]);
+	}
 
 	function buildTree(flatPages: any[]) {
 		const map = new Map();
@@ -1119,6 +1217,68 @@
 		{/if}
 	</aside>
 
+	{#if activeLinkShare}
+		<div class="notion-import-modal-backdrop share-link-backdrop" role="presentation">
+			<div class="notion-import-modal share-link-dialog" role="dialog" aria-modal="true" aria-labelledby="share-link-title">
+				<div class="notion-import-modal-header">
+					<div>
+					<h2 id="share-link-title">Add link to a page</h2>
+					<p class="share-link-url">{activeLinkShare.url}</p>
+					</div>
+				</div>
+
+				<label class="share-link-label" for="share-link-bookmark-title">Link title</label>
+				<input
+					id="share-link-bookmark-title"
+					class="share-link-input"
+					maxlength="160"
+					bind:value={shareLinkTitle}
+				/>
+
+				<label class="share-link-label" for="share-target-search">Choose a destination page</label>
+				<div class="share-target-search">
+					<Search size={16} aria-hidden="true" />
+					<input id="share-target-search" type="search" placeholder="Find a page" bind:value={shareTargetSearch} />
+				</div>
+				<div class="share-target-list" role="listbox" aria-label="Aporia pages">
+					{#each sharePageOptions as option (option.page.id)}
+						<button
+							type="button"
+							role="option"
+							aria-selected={shareTargetPageId === option.page.id}
+							class="share-target-option"
+							class:selected={shareTargetPageId === option.page.id}
+							style={`padding-left:${10 + Math.min(option.depth, 5) * 16}px`}
+							onclick={() => { shareTargetPageId = option.page.id; shareTargetError = ''; }}
+						>
+							<span class="share-target-option-title">{option.page.title}</span>
+							{#if shareTargetPageId === option.page.id}<span aria-hidden="true">✓</span>{/if}
+						</button>
+					{:else}
+						<p class="share-target-empty">No available pages match that search.</p>
+					{/each}
+				</div>
+
+				{#if shareTargetError}
+					<p class="notion-import-modal-error" role="alert">{shareTargetError}</p>
+				{/if}
+				<div class="share-link-actions">
+					<button type="button" class="share-link-discard" disabled={isSavingSharedLink} onclick={() => activeLinkShare && finishNativeShare(activeLinkShare, true)}>
+						Discard
+					</button>
+					<button
+						type="button"
+						class="share-link-add"
+						disabled={!shareTargetPageId || isSavingSharedLink}
+						onclick={addSharedLinkToPage}
+					>
+						{isSavingSharedLink ? 'Adding…' : 'Add link'}
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	{#if notionImportDialogOpen}
 		<div class="notion-import-modal-backdrop" role="presentation">
 			<div class="notion-import-modal" role="dialog" aria-modal="true" aria-labelledby="notion-import-modal-title">
@@ -1871,6 +2031,155 @@
 		border-radius: 12px;
 		background: var(--bg-canvas);
 		box-shadow: 0 18px 50px rgba(0, 0, 0, 0.2);
+	}
+
+	.share-link-dialog {
+		width: min(480px, 100%);
+		max-height: min(720px, 90dvh);
+		display: flex;
+		flex-direction: column;
+		color: var(--text-main);
+	}
+
+	.share-link-url {
+		max-width: 360px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.share-link-label {
+		display: block;
+		margin: 18px 0 6px;
+		color: var(--text-main);
+		font-size: 12px;
+		font-weight: 600;
+	}
+
+	.share-link-input,
+	.share-target-search input {
+		width: 100%;
+		min-width: 0;
+		border: 1px solid var(--border-color);
+		border-radius: 7px;
+		padding: 10px 11px;
+		background: var(--bg-sidebar);
+		color: var(--text-main);
+		font: inherit;
+		font-size: 14px;
+	}
+
+	.share-link-input:focus,
+	.share-target-search:focus-within {
+		outline: 2px solid var(--accent-color);
+		outline-offset: 1px;
+	}
+
+	.share-target-search {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding-inline: 10px;
+		border: 1px solid var(--border-color);
+		border-radius: 7px;
+		background: var(--bg-sidebar);
+		color: var(--text-muted);
+	}
+
+	.share-target-search input {
+		border: 0;
+		padding-inline: 0;
+		background: transparent;
+		outline: 0;
+	}
+
+	.share-target-list {
+		max-height: min(310px, 38dvh);
+		min-height: 70px;
+		overflow: auto;
+		margin-top: 8px;
+		padding: 3px;
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+	}
+
+	.share-target-option {
+		width: 100%;
+		min-height: 40px;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		padding: 8px 10px 8px 10px;
+		border: 0;
+		border-radius: 6px;
+		background: transparent;
+		color: var(--text-main);
+		text-align: left;
+		font: inherit;
+		font-size: 13px;
+		cursor: pointer;
+	}
+
+	.share-target-option:hover,
+	.share-target-option.selected {
+		background: var(--hover-sidebar);
+	}
+
+	.share-target-option.selected {
+		color: var(--accent-color);
+	}
+
+	.share-target-option-title {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.share-target-empty {
+		margin: 12px;
+		color: var(--text-muted);
+		font-size: 13px;
+	}
+
+	.share-link-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: 18px;
+	}
+
+	.share-link-actions button {
+		min-height: 38px;
+		padding: 0 13px;
+		border: 1px solid var(--border-color);
+		border-radius: 7px;
+		font: inherit;
+		font-size: 13px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.share-link-discard {
+		background: var(--bg-sidebar);
+		color: var(--text-main);
+	}
+
+	.share-link-add {
+		border-color: var(--accent-color) !important;
+		background: var(--accent-color);
+		color: #fff;
+	}
+
+	.share-link-actions button:disabled {
+		opacity: 0.55;
+		cursor: default;
+	}
+
+	.share-link-actions button:focus-visible,
+	.share-target-option:focus-visible {
+		outline: 2px solid var(--accent-color);
+		outline-offset: 2px;
 	}
 
 	.notion-import-modal-header {

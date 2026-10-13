@@ -15,6 +15,7 @@
 	import { DetailsClipboard } from '$lib/editor/extensions/DetailsClipboard';
 	import { PreserveDetailsLevel } from '$lib/editor/extensions/PreserveDetailsLevel';
 	import { DatabaseBlock } from '$lib/editor/extensions/DatabaseBlockExtension.svelte';
+	import { LinkBookmark, linkBookmarkHost, normalizeLinkBookmarkUrl } from '$lib/editor/extensions/LinkBookmark';
 	import { TextStyle } from '@tiptap/extension-text-style';
 	import { Color } from '@tiptap/extension-color';
 	import { Highlight } from '@tiptap/extension-highlight';
@@ -34,7 +35,7 @@
 	import { 
 		CloudLightning, Plus, GripVertical, Trash2, Copy,
 		Heading1, Heading2, Heading3, Type, Quote, Code, 
-		List, ListOrdered, Bold, Italic, Link as LinkIcon, Palette,
+		List, ListOrdered, Bold, Italic, Link as LinkIcon, Bookmark, Palette,
 		CheckSquare, Minus, Table as TableIcon, ChevronRight, Lock, Unlock,
 		ChevronDown, Database, Image as ImageIcon, X, ZoomIn, ZoomOut, RotateCcw, Undo2
 	} from 'lucide-svelte';
@@ -230,6 +231,12 @@
 	let imageUrl = $state('');
 	let imageError = $state('');
 	let imageInsertRange = $state<{ from: number; to: number } | null>(null);
+	let isLinkBookmarkPickerOpen = $state(false);
+	let linkBookmarkUrl = $state('');
+	let linkBookmarkTitle = $state('');
+	let linkBookmarkError = $state('');
+	let linkBookmarkTitleEdited = $state(false);
+	let linkBookmarkInsertRange = $state<{ from: number; to: number } | null>(null);
 
 	// Image viewer state. The editor keeps the image's original size; zooming and
 	// panning only affect this temporary preview layer.
@@ -686,6 +693,57 @@
 		}
 	}
 
+	function openLinkBookmarkPicker(range?: { from: number; to: number }) {
+		if (isLocked || !editor) return;
+		linkBookmarkInsertRange = range ?? null;
+		linkBookmarkUrl = '';
+		linkBookmarkTitle = '';
+		linkBookmarkTitleEdited = false;
+		linkBookmarkError = '';
+		isLinkBookmarkPickerOpen = true;
+	}
+
+	function updateLinkBookmarkUrl(value: string) {
+		linkBookmarkUrl = value;
+		if (linkBookmarkTitleEdited) return;
+		const url = normalizeLinkBookmarkUrl(value);
+		linkBookmarkTitle = url ? linkBookmarkHost(url) : '';
+	}
+
+	function closeLinkBookmarkPicker() {
+		isLinkBookmarkPickerOpen = false;
+		linkBookmarkInsertRange = null;
+		linkBookmarkError = '';
+	}
+
+	function insertLinkBookmark() {
+		if (!editor || isLocked) return;
+		const url = normalizeLinkBookmarkUrl(linkBookmarkUrl);
+		if (!url) {
+			linkBookmarkError = 'Enter a valid HTTP or HTTPS URL.';
+			return;
+		}
+
+		const title = linkBookmarkTitle.trim() || linkBookmarkHost(url) || 'Link';
+		const chain = editor.chain().focus();
+		if (linkBookmarkInsertRange) chain.deleteRange(linkBookmarkInsertRange);
+		chain.insertContent({ type: 'linkBookmark', attrs: { url, title } }).run();
+		closeLinkBookmarkPicker();
+	}
+
+	function pastedLinkTitle(clipboard: DataTransfer, url: string) {
+		const html = clipboard.getData('text/html');
+		if (html) {
+			const doc = new DOMParser().parseFromString(html, 'text/html');
+			for (const anchor of Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]'))) {
+				if (normalizeLinkBookmarkUrl(anchor.href) !== url) continue;
+				const title = anchor.textContent?.trim();
+				if (title) return title.slice(0, 160);
+			}
+		}
+		return linkBookmarkHost(url);
+	}
+
 	function imageFileFrom(files: FileList | null | undefined): File | null {
 		if (!files) return null;
 		return Array.from(files).find((file) => file.type.startsWith('image/')) ?? null;
@@ -755,6 +813,13 @@
 			searchTerms: ['image', 'photo', 'picture', 'upload', 'embed', 'media'],
 			icon: ImageIcon,
 			action: (_editor: Editor, range: any) => openImagePicker(range)
+		},
+		{
+			title: 'Link bookmark',
+			description: 'Embed a URL with a custom title.',
+			searchTerms: ['link', 'bookmark', 'url', 'embed', 'website'],
+			icon: LinkIcon,
+			action: (_editor: Editor, range: any) => openLinkBookmarkPicker(range)
 		},
 		{
 			title: 'Bullet List',
@@ -1219,6 +1284,7 @@
 				ColumnLayout,
 				Column,
 				DatabaseBlock,
+				LinkBookmark,
 				TextStyle,
 				Color,
 				Highlight.configure({ multicolor: true }),
@@ -1366,9 +1432,23 @@
 					handlePaste: (view, event) => {
 						if (isLocked) return false;
 						const file = imageFileFrom(event.clipboardData?.files);
-						if (!file) return false;
+						if (file) {
+							event.preventDefault();
+							void uploadImage(file, view.state.selection.from);
+							return true;
+						}
+
+						const clipboard = event.clipboardData;
+						const pastedText = clipboard?.getData('text/plain').trim() || '';
+						if (!/^https?:\/\/\S+$/i.test(pastedText)) return false;
+						const url = normalizeLinkBookmarkUrl(pastedText);
+						if (!url) return false;
 						event.preventDefault();
-						void uploadImage(file, view.state.selection.from);
+						const title = pastedLinkTitle(clipboard!, url);
+						const transaction = view.state.tr.replaceSelectionWith(
+							view.state.schema.nodes.linkBookmark.create({ url, title })
+						).scrollIntoView();
+						view.dispatch(transaction);
 						return true;
 					},
 					handleDrop: (view, event, _slice, moved) => {
@@ -1559,6 +1639,16 @@
 		const handlePageHide = () => {
 			void flushPendingSave({ keepalive: true });
 		};
+		const handleShareFlushRequest = (event: Event) => {
+			const detail = (event as CustomEvent<{
+				pageId: string;
+				handled: boolean;
+				resolve: (saved: boolean) => void;
+			}>).detail;
+			if (!detail || detail.pageId !== data.pageRecord.id) return;
+			detail.handled = true;
+			void flushPendingSave().then(detail.resolve);
+		};
 
 		// Listen to global mousemoves to position the floating gutter block handle
 		window.addEventListener('mousemove', handleMouseMove);
@@ -1572,9 +1662,11 @@
 		window.addEventListener('keydown', handleImageViewerKeydown);
 		window.addEventListener('resize', handleResize);
 		window.addEventListener('pagehide', handlePageHide);
+		window.addEventListener('aporia-flush-page-before-share', handleShareFlushRequest);
 
 		return () => {
 			window.removeEventListener('pagehide', handlePageHide);
+			window.removeEventListener('aporia-flush-page-before-share', handleShareFlushRequest);
 		};
 	});
 
@@ -2900,6 +2992,16 @@
 				>
 					<LinkIcon size={14} />
 				</button>
+				<button
+					type="button"
+					class="bubble-btn"
+					onmousedown={(e) => e.preventDefault()}
+					onclick={() => openLinkBookmarkPicker()}
+					title="Insert link bookmark"
+					aria-label="Insert link bookmark"
+				>
+					<Bookmark size={14} />
+				</button>
 
 				<div class="bubble-divider"></div>
 
@@ -3022,6 +3124,54 @@
 			{#if imageError}
 				<p class="image-picker-error">{imageError}</p>
 			{/if}
+		</div>
+	{/if}
+
+	{#if isLinkBookmarkPickerOpen}
+		<div class="image-picker-backdrop" role="presentation" onclick={closeLinkBookmarkPicker}></div>
+		<div
+			class="image-picker link-bookmark-picker"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="link-bookmark-heading"
+		>
+			<form onsubmit={(event) => { event.preventDefault(); insertLinkBookmark(); }}>
+				<div class="image-picker-header">
+					<div>
+						<h2 id="link-bookmark-heading">Add a link bookmark</h2>
+						<p>Show a title while keeping the full URL embedded.</p>
+					</div>
+					<button type="button" class="image-picker-close" onclick={closeLinkBookmarkPicker} aria-label="Close link bookmark form">×</button>
+				</div>
+				<label class="image-url-label" for="bookmark-url">URL</label>
+				<input
+					id="bookmark-url"
+					class="link-bookmark-field"
+					type="url"
+					inputmode="url"
+					autocomplete="url"
+					placeholder="https://example.com/article"
+					value={linkBookmarkUrl}
+					oninput={(event) => updateLinkBookmarkUrl(event.currentTarget.value)}
+					required
+				/>
+				<label class="image-url-label link-bookmark-title-label" for="bookmark-title">Title</label>
+				<input
+					id="bookmark-title"
+					class="link-bookmark-field"
+					maxlength="160"
+					placeholder="Link title"
+					bind:value={linkBookmarkTitle}
+					oninput={() => linkBookmarkTitleEdited = true}
+				/>
+				{#if linkBookmarkError}
+					<p class="image-picker-error" role="alert">{linkBookmarkError}</p>
+				{/if}
+				<div class="link-bookmark-actions">
+					<button type="button" onclick={closeLinkBookmarkPicker}>Cancel</button>
+					<button type="submit">Add bookmark</button>
+				</div>
+			</form>
 		</div>
 	{/if}
 
@@ -3989,6 +4139,47 @@
 		margin: 10px 0 0;
 		font-size: 12px;
 		color: var(--error-color);
+	}
+
+	.link-bookmark-field {
+		width: 100%;
+		min-width: 0;
+		border: 1px solid var(--border-color);
+		background: var(--bg-canvas);
+		color: var(--text-main);
+		border-radius: 5px;
+		padding: 9px;
+		font: inherit;
+		font-size: 14px;
+	}
+
+	.link-bookmark-title-label {
+		margin-top: 14px;
+	}
+
+	.link-bookmark-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: 18px;
+	}
+
+	.link-bookmark-actions button {
+		min-height: 36px;
+		padding: 0 12px;
+		border: 1px solid var(--border-color);
+		border-radius: 6px;
+		background: var(--active-sidebar);
+		color: var(--text-main);
+		font: inherit;
+		font-size: 13px;
+		font-weight: 600;
+	}
+
+	.link-bookmark-actions button[type='submit'] {
+		border-color: var(--accent-color);
+		background: var(--accent-color);
+		color: #fff;
 	}
 
 	/* Blue drop target line indicator (Notion-style) — horizontal */

@@ -470,6 +470,11 @@ function walkNode(node: any): string {
 			}).join(' ');
 		}
 	}
+	if (node.type === 'linkBookmark') {
+		const title = typeof node.attrs?.title === 'string' ? node.attrs.title : '';
+		const url = typeof node.attrs?.url === 'string' ? node.attrs.url : '';
+		text += ` ${title} ${url}`;
+	}
 	if (Array.isArray(node.content)) {
 		text += ' ' + node.content.map(walkNode).join(' ');
 	}

@@ -1,4 +1,11 @@
-import { createPage, updatePage } from '$lib/server/pages';
+import {
+	createPage,
+	getPageById,
+	updatePage,
+	updatePageContentAtVersion
+} from '$lib/server/pages';
+import { pageVersion } from '$lib/server/mcp/versions';
+import { validateEditorDocument } from '$lib/server/mcp/document';
 
 const MAX_TITLE_LENGTH = 160;
 const MAX_TEXT_LENGTH = 50_000;
@@ -8,7 +15,15 @@ export type SharedContentInput = {
 	title?: unknown;
 	text?: unknown;
 	url?: unknown;
+	bookmarkTitle?: unknown;
 };
+
+export class SharedContentError extends Error {
+	constructor(message: string, readonly status = 400) {
+		super(message);
+		this.name = 'SharedContentError';
+	}
+}
 
 type TiptapNode = Record<string, unknown>;
 
@@ -78,4 +93,48 @@ export async function createPageFromSharedContent(input: SharedContentInput) {
 		contentJson: JSON.stringify({ type: 'doc', content })
 	});
 	return page;
+}
+
+export async function appendSharedLinkToPage(pageId: unknown, input: SharedContentInput) {
+	if (typeof pageId !== 'string' || !pageId) throw new SharedContentError('Choose a page to add this link to.');
+	const page = await getPageById(pageId);
+	if (!page || page.isInTrash) throw new SharedContentError('That page is no longer available.', 404);
+	if (page.isLocked) throw new SharedContentError('Unlock the selected page before adding a link.', 423);
+
+	const url = safeHttpUrl(input.url);
+	if (!url) throw new SharedContentError('The shared item does not contain a valid web link.');
+	const suppliedTitle = cleanText(input.bookmarkTitle, MAX_TITLE_LENGTH)
+		|| cleanText(input.title, MAX_TITLE_LENGTH);
+	const title = suppliedTitle || new URL(url).hostname.replace(/^www\./i, '');
+
+	let document: { type: string; content: unknown[] };
+	try {
+		document = page.contentJson
+			? JSON.parse(page.contentJson)
+			: { type: 'doc', content: [] };
+	} catch {
+		throw new SharedContentError('The selected page has invalid content.', 500);
+	}
+	if (document.type !== 'doc' || !Array.isArray(document.content)) {
+		throw new SharedContentError('The selected page has invalid content.', 500);
+	}
+
+	const nextDocument = {
+		...document,
+		content: [...document.content, { type: 'linkBookmark', attrs: { url, title } }]
+	};
+	const documentError = validateEditorDocument(nextDocument);
+	if (documentError) throw new SharedContentError(`Could not add this link: ${documentError}`, 400);
+
+	const contentJson = JSON.stringify(nextDocument);
+	const updatedPage = await updatePageContentAtVersion(
+		page.id,
+		contentJson,
+		pageVersion(page.revision),
+		{ isLocked: page.isLocked, contentJson: page.contentJson }
+	);
+	if (!updatedPage) {
+		throw new SharedContentError('This page changed while the link was being added. Please choose it again.', 409);
+	}
+	return updatedPage;
 }
