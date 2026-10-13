@@ -1,13 +1,37 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import {
+	appendSharedImagesToPage,
 	appendSharedLinkToPage,
 	createPageFromSharedContent,
 	SharedContentError,
 	type SharedContentInput
 } from '$lib/server/shared-content';
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, url }) => {
+	const origin = request.headers.get('origin');
+	if (origin && origin !== url.origin) {
+		return json({ success: false, error: 'Invalid request origin' }, { status: 403 });
+	}
+
+	if (request.headers.get('content-type')?.includes('multipart/form-data')) {
+		try {
+			const formData = await request.formData();
+			const targetPageId = formData.get('targetPageId');
+			const files = formData.getAll('files').filter((value): value is File => value instanceof File);
+			if (typeof targetPageId !== 'string' || files.length !== formData.getAll('files').length) {
+				return json({ success: false, error: 'A destination page and image files are required.' }, { status: 400 });
+			}
+			const page = await appendSharedImagesToPage(targetPageId, files);
+			return json({ success: true, pageId: page.id });
+		} catch (error) {
+			return json({
+				success: false,
+				error: error instanceof Error ? error.message : 'Could not save the shared images.'
+			}, { status: error instanceof SharedContentError ? error.status : 400 });
+		}
+	}
+
 	let payload: unknown;
 	try {
 		payload = await request.json();

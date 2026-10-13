@@ -1903,12 +1903,6 @@ textarea {
 	overflow-wrap: anywhere;
 }
 
-.ProseMirror .editor-link-bookmark-host {
-	color: var(--text-muted);
-	font-size: 12px;
-	line-height: 1.3;
-}
-
 .ProseMirror .editor-link-bookmark-invalid {
 	color: var(--text-muted);
 	font-style: italic;

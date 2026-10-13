@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.net.Uri;
@@ -31,12 +32,21 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.provider.OpenableColumns;
+import android.util.Base64;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.UUID;
@@ -46,6 +56,9 @@ public class MainActivity extends Activity {
 	private static final String KEY_SERVER = "server_url";
 	private static final String KEY_PENDING_SHARES = "pending_shares";
 	private static final int FILE_CHOOSER_REQUEST = 4071;
+	private static final int MAX_SHARED_IMAGE_BYTES = 10 * 1024 * 1024;
+	private static final int MAX_SHARED_IMAGE_TOTAL_BYTES = 25 * 1024 * 1024;
+	private static final int MAX_SHARED_IMAGE_COUNT = 5;
 	private static final Pattern SHARED_URL_PATTERN = Pattern.compile("https?://[^\\s<>\\\"']+", Pattern.CASE_INSENSITIVE);
 	private static final int INK = Color.rgb(25, 25, 25);
 	private static final int PAPER = Color.rgb(250, 249, 247);
@@ -261,6 +274,7 @@ public class MainActivity extends Activity {
 		settings.setUserAgentString(settings.getUserAgentString() + " AporiaAndroid");
 		CookieManager.getInstance().setAcceptCookie(true);
 		webView.addJavascriptInterface(new SystemBarBridge(), "AporiaSystemBar");
+		webView.addJavascriptInterface(new SharedImageBridge(), "AporiaSharedImage");
 		webView.setWebViewClient(new AporiaWebViewClient());
 		webView.setWebChromeClient(new AporiaWebChromeClient());
 		root.addView(webView, new FrameLayout.LayoutParams(
@@ -317,6 +331,13 @@ public class MainActivity extends Activity {
 		}
 	}
 
+	private class SharedImageBridge {
+		@JavascriptInterface
+		public String readImageBase64(String shareId, String imageId) {
+			return readSharedImageBase64(shareId, imageId);
+		}
+	}
+
 	private void showServerDialog() {
 		EditText input = new EditText(this);
 		input.setSingleLine(true);
@@ -369,8 +390,14 @@ public class MainActivity extends Activity {
 	}
 
 	private void captureShareIntent(Intent intent) {
-		if (intent == null || !Intent.ACTION_SEND.equals(intent.getAction())) return;
+		if (intent == null) return;
 		String type = intent.getType();
+		if (type != null && type.startsWith("image/")
+				&& (Intent.ACTION_SEND.equals(intent.getAction()) || Intent.ACTION_SEND_MULTIPLE.equals(intent.getAction()))) {
+			captureSharedImages(intent);
+			return;
+		}
+		if (!Intent.ACTION_SEND.equals(intent.getAction())) return;
 		if (type != null && !type.startsWith("text/")) {
 			Toast.makeText(this, "Aporia currently accepts shared text and links.", Toast.LENGTH_LONG).show();
 			return;
@@ -396,6 +423,111 @@ public class MainActivity extends Activity {
 		} catch (JSONException ignored) {
 			Toast.makeText(this, "Could not prepare the shared content.", Toast.LENGTH_SHORT).show();
 		}
+	}
+
+	private void captureSharedImages(Intent intent) {
+		List<Uri> sourceUris = new ArrayList<>();
+		if (Intent.ACTION_SEND.equals(intent.getAction())) {
+			Uri imageUri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+			if (imageUri != null) sourceUris.add(imageUri);
+		} else {
+			ArrayList<Uri> sharedUris;
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+				sharedUris = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri.class);
+			} else {
+				//noinspection deprecation
+				sharedUris = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+			}
+			if (sharedUris != null) sourceUris.addAll(sharedUris);
+		}
+		if (sourceUris.isEmpty() && intent.getClipData() != null) {
+			for (int index = 0; index < intent.getClipData().getItemCount(); index++) {
+				Uri itemUri = intent.getClipData().getItemAt(index).getUri();
+				if (itemUri != null) sourceUris.add(itemUri);
+			}
+		}
+		if (sourceUris.isEmpty()) {
+			Toast.makeText(this, "The shared image could not be opened.", Toast.LENGTH_LONG).show();
+			return;
+		}
+		if (sourceUris.size() > MAX_SHARED_IMAGE_COUNT) {
+			Toast.makeText(this, "Share up to five images at a time.", Toast.LENGTH_LONG).show();
+			return;
+		}
+
+		String shareId = UUID.randomUUID().toString();
+		JSONArray images = new JSONArray();
+		List<File> copiedFiles = new ArrayList<>();
+		int totalBytes = 0;
+		try {
+			for (Uri sourceUri : sourceUris) {
+				String imageId = UUID.randomUUID().toString();
+				File cachedFile = new File(getCacheDir(), "aporia-share-" + imageId + ".img");
+				long bytesCopied = copySharedImage(sourceUri, cachedFile, MAX_SHARED_IMAGE_BYTES);
+				if (bytesCopied <= 0 || totalBytes + bytesCopied > MAX_SHARED_IMAGE_TOTAL_BYTES) {
+					cachedFile.delete();
+					throw new IllegalArgumentException("Shared images must total 25 MB or less.");
+				}
+				totalBytes += (int) bytesCopied;
+				copiedFiles.add(cachedFile);
+
+				String mimeType = getContentResolver().getType(sourceUri);
+				if (mimeType == null || !mimeType.startsWith("image/")) mimeType = intent.getType();
+				JSONObject image = new JSONObject();
+				image.put("id", imageId);
+				image.put("name", sharedImageName(sourceUri));
+				image.put("mimeType", mimeType == null ? "image/*" : mimeType);
+				image.put("size", bytesCopied);
+				images.put(image);
+			}
+
+			JSONObject payload = new JSONObject();
+			payload.put("id", shareId);
+			payload.put("kind", "image");
+			payload.put("title", images.optJSONObject(0).optString("name", "Shared image"));
+			payload.put("images", images);
+			JSONArray pending = readPendingShares();
+			pending.put(payload);
+			getPreferences(MODE_PRIVATE).edit().putString(KEY_PENDING_SHARES, pending.toString()).apply();
+		} catch (Exception error) {
+			for (File cachedFile : copiedFiles) cachedFile.delete();
+			String message = error.getMessage();
+			Toast.makeText(this, message == null ? "Could not prepare the shared image." : message, Toast.LENGTH_LONG).show();
+		}
+	}
+
+	private long copySharedImage(Uri sourceUri, File destination, int maxBytes) throws Exception {
+		try (InputStream input = getContentResolver().openInputStream(sourceUri);
+				FileOutputStream output = new FileOutputStream(destination)) {
+			if (input == null) throw new IllegalArgumentException("The shared image could not be opened.");
+			byte[] buffer = new byte[16 * 1024];
+			long copied = 0;
+			int read;
+			while ((read = input.read(buffer)) != -1) {
+				copied += read;
+				if (copied > maxBytes) throw new IllegalArgumentException("Each shared image must be 10 MB or smaller.");
+				output.write(buffer, 0, read);
+			}
+			return copied;
+		} catch (Exception error) {
+			destination.delete();
+			throw error;
+		}
+	}
+
+	private String sharedImageName(Uri uri) {
+		try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+			if (cursor != null && cursor.moveToFirst()) {
+				int nameColumn = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+				if (nameColumn >= 0) {
+					String name = cursor.getString(nameColumn);
+					if (name != null && !name.trim().isEmpty()) return name.trim();
+				}
+			}
+		} catch (Exception ignored) {
+			// A provider may not expose a display name; use a safe generic name.
+		}
+		return "Shared image";
 	}
 
 	private String findSharedUrl(String text) {
@@ -446,9 +578,50 @@ public class MainActivity extends Activity {
 		JSONArray remaining = new JSONArray();
 		for (int index = 0; index < pending.length(); index++) {
 			JSONObject payload = pending.optJSONObject(index);
-			if (payload != null && !id.equals(payload.optString("id"))) remaining.put(payload);
+			if (payload == null) continue;
+			if (id.equals(payload.optString("id"))) {
+				JSONArray images = payload.optJSONArray("images");
+				if (images != null) {
+					for (int imageIndex = 0; imageIndex < images.length(); imageIndex++) {
+						JSONObject image = images.optJSONObject(imageIndex);
+						String imageId = image == null ? "" : image.optString("id");
+						if (imageId.matches("[0-9a-fA-F-]{36}")) {
+							new File(getCacheDir(), "aporia-share-" + imageId + ".img").delete();
+						}
+					}
+				}
+			} else {
+				remaining.put(payload);
+			}
 		}
 		getPreferences(MODE_PRIVATE).edit().putString(KEY_PENDING_SHARES, remaining.toString()).apply();
+	}
+
+	private String readSharedImageBase64(String shareId, String imageId) {
+		if (shareId == null || imageId == null || !imageId.matches("[0-9a-fA-F-]{36}")) return "";
+		JSONArray pending = readPendingShares();
+		for (int index = 0; index < pending.length(); index++) {
+			JSONObject payload = pending.optJSONObject(index);
+			if (payload == null || !shareId.equals(payload.optString("id"))) continue;
+			JSONArray images = payload.optJSONArray("images");
+			if (images == null) return "";
+			for (int imageIndex = 0; imageIndex < images.length(); imageIndex++) {
+				JSONObject image = images.optJSONObject(imageIndex);
+				if (image == null || !imageId.equals(image.optString("id"))) continue;
+				File cachedFile = new File(getCacheDir(), "aporia-share-" + imageId + ".img");
+				if (!cachedFile.isFile() || cachedFile.length() <= 0 || cachedFile.length() > MAX_SHARED_IMAGE_BYTES) return "";
+				try (FileInputStream input = new FileInputStream(cachedFile);
+						ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+					byte[] buffer = new byte[16 * 1024];
+					int read;
+					while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+					return Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP);
+				} catch (Exception ignored) {
+					return "";
+				}
+			}
+		}
+		return "";
 	}
 
 	private boolean isSameOrigin(Uri uri) {

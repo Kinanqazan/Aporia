@@ -1482,15 +1482,18 @@
 						view.dispatch(transaction);
 						return true;
 					},
-					handleClick: (view, _pos, event) => {
-						if (isLocked) return false;
-						const target = event.target;
-						if (!(target instanceof Element)) return false;
-						const bookmark = target.closest('a[data-link-bookmark]');
-						if (!bookmark || !view.dom.contains(bookmark)) return false;
-						event.preventDefault();
-						openLinkBookmarkEditor(bookmark);
-						return true;
+					handleDOMEvents: {
+						click: (view, event) => {
+							if (isLocked) return false;
+							const target = event.target;
+							if (!(target instanceof Element)) return false;
+							const bookmark = target.closest('a[data-link-bookmark]');
+							if (!bookmark || !view.dom.contains(bookmark)) return false;
+							event.preventDefault();
+							event.stopPropagation();
+							openLinkBookmarkEditor(bookmark);
+							return true;
+						}
 					},
 					handleDrop: (view, event, _slice, moved) => {
 						if (isLocked || moved) return false;
@@ -3178,13 +3181,19 @@
 		>
 			<form onsubmit={(event) => { event.preventDefault(); insertLinkBookmark(); }}>
 				<div class="image-picker-header">
-					<div>
-						<h2 id="link-bookmark-heading">{linkBookmarkEditPos !== null ? 'Edit link bookmark' : 'Add a link bookmark'}</h2>
-						<p>Keep the title and destination URL editable separately.</p>
-					</div>
+					<h2 id="link-bookmark-heading">{linkBookmarkEditPos !== null ? 'Edit link bookmark' : 'Add a link bookmark'}</h2>
 					<button type="button" class="image-picker-close" onclick={closeLinkBookmarkPicker} aria-label="Close link bookmark form">×</button>
 				</div>
-				<label class="image-url-label" for="bookmark-url">URL</label>
+				<label class="image-url-label" for="bookmark-title">Title</label>
+				<input
+					id="bookmark-title"
+					class="link-bookmark-field"
+					maxlength="160"
+					placeholder="Link title"
+					bind:value={linkBookmarkTitle}
+					oninput={() => linkBookmarkTitleEdited = true}
+				/>
+				<label class="image-url-label link-bookmark-title-label" for="bookmark-url">URL</label>
 				<input
 					id="bookmark-url"
 					class="link-bookmark-field"
@@ -3196,23 +3205,11 @@
 					oninput={(event) => updateLinkBookmarkUrl(event.currentTarget.value)}
 					required
 				/>
-				<label class="image-url-label link-bookmark-title-label" for="bookmark-title">Title</label>
-				<input
-					id="bookmark-title"
-					class="link-bookmark-field"
-					maxlength="160"
-					placeholder="Link title"
-					bind:value={linkBookmarkTitle}
-					oninput={() => linkBookmarkTitleEdited = true}
-				/>
 				{#if linkBookmarkError}
 					<p class="image-picker-error" role="alert">{linkBookmarkError}</p>
 				{/if}
 				<div class="link-bookmark-actions">
 					<button type="button" onclick={closeLinkBookmarkPicker}>Cancel</button>
-					{#if linkBookmarkEditPos !== null}
-						<a class="link-bookmark-open" href={normalizeLinkBookmarkUrl(linkBookmarkUrl)} target="_blank" rel="noopener noreferrer">Open link</a>
-					{/if}
 					<button type="submit">{linkBookmarkEditPos !== null ? 'Save changes' : 'Add bookmark'}</button>
 				</div>
 			</form>
@@ -4224,17 +4221,6 @@
 		border-color: var(--accent-color);
 		background: var(--accent-color);
 		color: #fff;
-	}
-
-	.link-bookmark-open {
-		display: inline-flex;
-		min-height: 36px;
-		align-items: center;
-		padding: 0 10px;
-		color: var(--accent-color);
-		font-size: 13px;
-		font-weight: 600;
-		text-decoration: none;
 	}
 
 	/* Blue drop target line indicator (Notion-style) — horizontal */

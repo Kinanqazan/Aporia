@@ -4,7 +4,7 @@ This is a small Android WebView shell for the existing hosted Aporia app. The AP
 
 Deploy the updated Aporia web app for that Settings action to appear in the Android shell. The error dialog also keeps a **Change server** action if the configured host becomes unreachable.
 
-The app receives shared text and web links from Android's Share menu. Shared text creates a new page. For a shared web link, choose an existing page and add it as a compact bookmark with an editable title. Image and file sharing are not included: the Android share filters accept text, and the app does not receive `ACTION_SEND` image/file payloads.
+The app receives shared text, web links, and images from Android's Share menu. Shared text creates a new page. For a shared web link or image, choose an existing page and add it there. Images use the same supported formats and 10 MB per-image limit as uploads in the editor; sharing up to five images at a time is supported.
 
 The Android APK is a WebView shell that loads the configured Aporia server. Changes to the link picker and bookmark editor are delivered by deploying the updated web app; rebuilding the APK is only needed when the native Android shell changes.
 

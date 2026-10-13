@@ -4,6 +4,7 @@ import {
 	updatePage,
 	updatePageContentAtVersion
 } from '$lib/server/pages';
+import { AssetValidationError, publicAssetUrl, removeAsset, storeImage, validateImageReferences } from '$lib/server/assets';
 import { pageVersion } from '$lib/server/mcp/versions';
 import { validateEditorDocument } from '$lib/server/mcp/document';
 
@@ -137,4 +138,63 @@ export async function appendSharedLinkToPage(pageId: unknown, input: SharedConte
 		throw new SharedContentError('This page changed while the link was being added. Please choose it again.', 409);
 	}
 	return updatedPage;
+}
+
+export async function appendSharedImagesToPage(pageId: unknown, files: File[]) {
+	if (typeof pageId !== 'string' || !pageId) throw new SharedContentError('Choose a page to add these images to.');
+	if (files.length === 0 || files.length > 5) throw new SharedContentError('Share between one and five images at a time.');
+	if (files.reduce((total, file) => total + file.size, 0) > 25 * 1024 * 1024) {
+		throw new SharedContentError('Shared images must total 25 MB or less.');
+	}
+
+	const page = await getPageById(pageId);
+	if (!page || page.isInTrash) throw new SharedContentError('That page is no longer available.', 404);
+	if (page.isLocked) throw new SharedContentError('Unlock the selected page before adding images.', 423);
+
+	let document: { type: string; content: unknown[] };
+	try {
+		document = page.contentJson ? JSON.parse(page.contentJson) : { type: 'doc', content: [] };
+	} catch {
+		throw new SharedContentError('The selected page has invalid content.', 500);
+	}
+	if (document.type !== 'doc' || !Array.isArray(document.content)) {
+		throw new SharedContentError('The selected page has invalid content.', 500);
+	}
+
+	const storedAssets: Awaited<ReturnType<typeof storeImage>>[] = [];
+	try {
+		for (const file of files) storedAssets.push(await storeImage(file));
+		const nextDocument = {
+			...document,
+			content: [...document.content, ...storedAssets.map((asset) => ({
+				type: 'image',
+				attrs: {
+					src: publicAssetUrl(asset.id),
+					alt: '',
+					title: asset.originalFilename,
+					source: 'upload',
+					assetId: asset.id
+				}
+			}))]
+		};
+		const imageReferenceError = await validateImageReferences(nextDocument);
+		if (imageReferenceError) throw new SharedContentError(imageReferenceError);
+		const documentError = validateEditorDocument(nextDocument);
+		if (documentError) throw new SharedContentError(`Could not add these images: ${documentError}`);
+
+		const updatedPage = await updatePageContentAtVersion(
+			page.id,
+			JSON.stringify(nextDocument),
+			pageVersion(page.revision),
+			{ isLocked: page.isLocked, contentJson: page.contentJson }
+		);
+		if (!updatedPage) {
+			throw new SharedContentError('This page changed while the images were being added. Please choose it again.', 409);
+		}
+		return updatedPage;
+	} catch (error) {
+		await Promise.allSettled(storedAssets.map((asset) => removeAsset(asset.id)));
+		if (error instanceof AssetValidationError) throw new SharedContentError(error.message);
+		throw error;
+	}
 }

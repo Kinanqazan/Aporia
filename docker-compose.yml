@@ -9,6 +9,7 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 3000
+      BODY_SIZE_LIMIT: 27M
       DATABASE_URL: /app/data/app.db
       UPLOAD_DIR: /app/data/uploads
       APORIA_MCP_ENABLED: ${APORIA_MCP_ENABLED:-false}

@@ -65,14 +65,17 @@
 
 	let backupRestoreInput = $state<HTMLInputElement | null>(null);
 	let isBackupRestoring = $state(false);
-	type NativeSharedContent = { id: string; title?: string; text?: string; url?: string };
-	type NativeShareWindow = Window & { __APORIA_NATIVE_SHARE_QUEUE__?: NativeSharedContent[] };
+	type NativeSharedImage = { id: string; name?: string; mimeType?: string; size?: number };
+	type NativeSharedContent = { id: string; title?: string; text?: string; url?: string; images?: NativeSharedImage[] };
+	type NativeShareWindow = Window & {
+		__APORIA_NATIVE_SHARE_QUEUE__?: NativeSharedContent[];
+		AporiaSharedImage?: { readImageBase64: (shareId: string, imageId: string) => string };
+	};
 	let activeLinkShare = $state<NativeSharedContent | null>(null);
 	let shareLinkTitle = $state('');
 	let shareTargetPageId = $state('');
-	let shareTargetSearch = $state('');
 	let shareTargetError = $state('');
-	let isSavingSharedLink = $state(false);
+	let isSavingSharedItem = $state(false);
 	let isProcessingNativeShare = false;
 
 	function suggestedSharedLinkTitle(shared: NativeSharedContent) {
@@ -96,7 +99,6 @@
 		activeLinkShare = null;
 		shareLinkTitle = '';
 		shareTargetPageId = '';
-		shareTargetSearch = '';
 		shareTargetError = '';
 		if (discard) queueMicrotask(() => void processNativeShares());
 		return true;
@@ -117,9 +119,9 @@
 	async function addSharedLinkToPage() {
 		const shared = activeLinkShare;
 		const targetPageId = shareTargetPageId;
-		if (!shared || !targetPageId || isSavingSharedLink) return;
+		if (!shared || !targetPageId || isSavingSharedItem) return;
 
-		isSavingSharedLink = true;
+		isSavingSharedItem = true;
 		shareTargetError = '';
 		try {
 			if (!(await requestEditorFlush(targetPageId))) {
@@ -142,7 +144,52 @@
 		} catch (error) {
 			shareTargetError = error instanceof Error ? error.message : 'Aporia could not add this link.';
 		} finally {
-			isSavingSharedLink = false;
+			isSavingSharedItem = false;
+		}
+	}
+
+	async function addSharedImagesToPage() {
+		const shared = activeLinkShare;
+		const targetPageId = shareTargetPageId;
+		if (!shared?.images?.length || !targetPageId || isSavingSharedItem) return;
+
+		isSavingSharedItem = true;
+		shareTargetError = '';
+		try {
+			if (!(await requestEditorFlush(targetPageId))) {
+				throw new Error('Save the current page changes before adding these images.');
+			}
+			const bridge = (window as NativeShareWindow).AporiaSharedImage;
+			if (!bridge) throw new Error('Image sharing requires the updated Aporia APK.');
+
+			const formData = new FormData();
+			formData.set('targetPageId', targetPageId);
+			for (const image of shared.images) {
+				const encoded = bridge.readImageBase64(shared.id, image.id);
+				if (!encoded) throw new Error('A shared image is no longer available. Share it again.');
+				const binary = window.atob(encoded);
+				const bytes = new Uint8Array(binary.length);
+				for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+				const file = new File([bytes], image.name || 'Shared image', {
+					type: image.mimeType?.startsWith('image/') ? image.mimeType : 'image/jpeg'
+				});
+				formData.append('files', file, file.name);
+			}
+
+			const response = await fetch('/api/share-target', { method: 'POST', body: formData });
+			const result = await response.json();
+			if (!response.ok || !result.success || typeof result.pageId !== 'string') {
+				throw new Error(result.error || 'Aporia could not add these images.');
+			}
+
+			finishNativeShare(shared);
+			await invalidateAll();
+			await goto(`/${encodeURIComponent(result.pageId)}`);
+			void processNativeShares();
+		} catch (error) {
+			shareTargetError = error instanceof Error ? error.message : 'Aporia could not add these images.';
+		} finally {
+			isSavingSharedItem = false;
 		}
 	}
 
@@ -158,12 +205,11 @@
 		try {
 			while (queue.length > 0) {
 				const shared = queue[0];
-				if (shared.url) {
+				if (shared.url || shared.images?.length) {
 					if (activeLinkShare?.id !== shared.id) {
 						activeLinkShare = shared;
-						shareLinkTitle = suggestedSharedLinkTitle(shared);
+						shareLinkTitle = shared.url ? suggestedSharedLinkTitle(shared) : '';
 						shareTargetPageId = currentPageId && !currentPage?.isLocked ? currentPageId : '';
-						shareTargetSearch = '';
 						shareTargetError = '';
 					}
 					break;
@@ -374,12 +420,9 @@
 
 	// Tree structure derived from active database pages
 	let pageTree = $derived(buildTree(data.activePages || []));
-	let sharePageOptions = $derived.by(() => {
-		const query = shareTargetSearch.trim().toLocaleLowerCase();
-		return flattenPageTree(pageTree).filter(({ page }) =>
-			page.isLocked !== 1 && (!query || page.title.toLocaleLowerCase().includes(query))
-		);
-	});
+	let sharePageOptions = $derived(
+		flattenPageTree(pageTree).filter(({ page }) => page.isLocked !== 1)
+	);
 
 	function flattenPageTree(nodes: any[], depth = 0): Array<{ page: any; depth: number }> {
 		return nodes.flatMap((node) => [
@@ -1222,24 +1265,28 @@
 			<div class="notion-import-modal share-link-dialog" role="dialog" aria-modal="true" aria-labelledby="share-link-title">
 				<div class="notion-import-modal-header">
 					<div>
-					<h2 id="share-link-title">Add link to a page</h2>
-					<p class="share-link-url">{activeLinkShare.url}</p>
+						<h2 id="share-link-title">
+							{activeLinkShare.images?.length === 1 ? 'Add image to a page' : activeLinkShare.images?.length ? 'Add images to a page' : 'Add link to a page'}
+						</h2>
+						<p class="share-link-url">
+							{activeLinkShare.url || (activeLinkShare.images?.length === 1
+								? activeLinkShare.images[0].name
+								: `${activeLinkShare.images?.length || 0} images`)}
+						</p>
 					</div>
 				</div>
 
-				<label class="share-link-label" for="share-link-bookmark-title">Link title</label>
-				<input
-					id="share-link-bookmark-title"
-					class="share-link-input"
-					maxlength="160"
-					bind:value={shareLinkTitle}
-				/>
+				{#if !activeLinkShare.images?.length}
+					<label class="share-link-label" for="share-link-bookmark-title">Link title</label>
+					<input
+						id="share-link-bookmark-title"
+						class="share-link-input"
+						maxlength="160"
+						bind:value={shareLinkTitle}
+					/>
+				{/if}
 
-				<label class="share-link-label" for="share-target-search">Choose a destination page</label>
-				<div class="share-target-search">
-					<Search size={16} aria-hidden="true" />
-					<input id="share-target-search" type="search" placeholder="Find a page" bind:value={shareTargetSearch} />
-				</div>
+				<p class="share-link-label">Choose a destination page</p>
 				<div class="share-target-list" role="listbox" aria-label="Aporia pages">
 					{#each sharePageOptions as option (option.page.id)}
 						<button
@@ -1255,7 +1302,7 @@
 							{#if shareTargetPageId === option.page.id}<span aria-hidden="true">✓</span>{/if}
 						</button>
 					{:else}
-						<p class="share-target-empty">No available pages match that search.</p>
+						<p class="share-target-empty">No unlocked pages available.</p>
 					{/each}
 				</div>
 
@@ -1263,16 +1310,22 @@
 					<p class="notion-import-modal-error" role="alert">{shareTargetError}</p>
 				{/if}
 				<div class="share-link-actions">
-					<button type="button" class="share-link-discard" disabled={isSavingSharedLink} onclick={() => activeLinkShare && finishNativeShare(activeLinkShare, true)}>
+					<button type="button" class="share-link-discard" disabled={isSavingSharedItem} onclick={() => activeLinkShare && finishNativeShare(activeLinkShare, true)}>
 						Discard
 					</button>
 					<button
 						type="button"
 						class="share-link-add"
-						disabled={!shareTargetPageId || isSavingSharedLink}
-						onclick={addSharedLinkToPage}
+						disabled={!shareTargetPageId || isSavingSharedItem}
+						onclick={() => activeLinkShare?.images?.length ? addSharedImagesToPage() : addSharedLinkToPage()}
 					>
-						{isSavingSharedLink ? 'Adding…' : 'Add link'}
+						{isSavingSharedItem
+							? 'Adding…'
+							: activeLinkShare.images?.length === 1
+								? 'Add image'
+								: activeLinkShare.images?.length
+									? 'Add images'
+									: 'Add link'}
 					</button>
 				</div>
 			</div>
@@ -2056,8 +2109,7 @@
 		font-weight: 600;
 	}
 
-	.share-link-input,
-	.share-target-search input {
+	.share-link-input {
 		width: 100%;
 		min-width: 0;
 		border: 1px solid var(--border-color);
@@ -2069,28 +2121,9 @@
 		font-size: 14px;
 	}
 
-	.share-link-input:focus,
-	.share-target-search:focus-within {
+	.share-link-input:focus {
 		outline: 2px solid var(--accent-color);
 		outline-offset: 1px;
-	}
-
-	.share-target-search {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding-inline: 10px;
-		border: 1px solid var(--border-color);
-		border-radius: 7px;
-		background: var(--bg-sidebar);
-		color: var(--text-muted);
-	}
-
-	.share-target-search input {
-		border: 0;
-		padding-inline: 0;
-		background: transparent;
-		outline: 0;
 	}
 
 	.share-target-list {

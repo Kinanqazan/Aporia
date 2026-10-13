@@ -15,6 +15,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
+ENV BODY_SIZE_LIMIT=27M
 ENV DATABASE_URL=/app/data/app.db
 ENV UPLOAD_DIR=/app/data/uploads
 

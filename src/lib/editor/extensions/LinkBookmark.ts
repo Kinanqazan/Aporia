@@ -50,7 +50,6 @@ export const LinkBookmark = Node.create({
 		const title = typeof node.attrs.title === 'string' && node.attrs.title.trim()
 			? node.attrs.title.trim()
 			: linkBookmarkHost(url) || 'Link';
-		const host = linkBookmarkHost(url);
 
 		if (!url) return ['span', { class: 'editor-link-bookmark-invalid' }, title];
 
@@ -62,10 +61,9 @@ export const LinkBookmark = Node.create({
 				href: url,
 				target: '_blank',
 				rel: 'noopener noreferrer',
-				'aria-label': `${title} (${host})`
+				'aria-label': title
 			}),
-			['span', { class: 'editor-link-bookmark-title' }, title],
-			['span', { class: 'editor-link-bookmark-host' }, host]
+			['span', { class: 'editor-link-bookmark-title' }, title]
 		];
 	}
 });
