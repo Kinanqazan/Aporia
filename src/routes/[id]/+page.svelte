@@ -237,6 +237,7 @@
 	let linkBookmarkError = $state('');
 	let linkBookmarkTitleEdited = $state(false);
 	let linkBookmarkInsertRange = $state<{ from: number; to: number } | null>(null);
+	let linkBookmarkEditPos = $state<number | null>(null);
 
 	// Image viewer state. The editor keeps the image's original size; zooming and
 	// panning only affect this temporary preview layer.
@@ -693,12 +694,16 @@
 		}
 	}
 
-	function openLinkBookmarkPicker(range?: { from: number; to: number }) {
+	function openLinkBookmarkPicker(
+		range?: { from: number; to: number },
+		existingBookmark?: { pos: number; url: string; title: string }
+	) {
 		if (isLocked || !editor) return;
 		linkBookmarkInsertRange = range ?? null;
-		linkBookmarkUrl = '';
-		linkBookmarkTitle = '';
-		linkBookmarkTitleEdited = false;
+		linkBookmarkEditPos = existingBookmark?.pos ?? null;
+		linkBookmarkUrl = existingBookmark?.url ?? '';
+		linkBookmarkTitle = existingBookmark?.title ?? '';
+		linkBookmarkTitleEdited = Boolean(existingBookmark);
 		linkBookmarkError = '';
 		isLinkBookmarkPickerOpen = true;
 	}
@@ -713,6 +718,7 @@
 	function closeLinkBookmarkPicker() {
 		isLinkBookmarkPickerOpen = false;
 		linkBookmarkInsertRange = null;
+		linkBookmarkEditPos = null;
 		linkBookmarkError = '';
 	}
 
@@ -725,10 +731,35 @@
 		}
 
 		const title = linkBookmarkTitle.trim() || linkBookmarkHost(url) || 'Link';
-		const chain = editor.chain().focus();
-		if (linkBookmarkInsertRange) chain.deleteRange(linkBookmarkInsertRange);
-		chain.insertContent({ type: 'linkBookmark', attrs: { url, title } }).run();
+		if (linkBookmarkEditPos !== null) {
+			const existing = editor.state.doc.nodeAt(linkBookmarkEditPos);
+			if (!existing || existing.type.name !== 'linkBookmark') {
+				linkBookmarkError = 'This bookmark moved. Close the editor and try again.';
+				return;
+			}
+			editor.chain().focus().command(({ tr }) => {
+				tr.setNodeMarkup(linkBookmarkEditPos!, undefined, { ...existing.attrs, url, title });
+				return true;
+			}).run();
+		} else {
+			const chain = editor.chain().focus();
+			if (linkBookmarkInsertRange) chain.deleteRange(linkBookmarkInsertRange);
+			chain.insertContent({ type: 'linkBookmark', attrs: { url, title } }).run();
+		}
 		closeLinkBookmarkPicker();
+	}
+
+	function openLinkBookmarkEditor(element: Element) {
+		if (!editor || isLocked) return;
+		let match: { pos: number; url: string; title: string } | null = null;
+		editor.state.doc.descendants((node, pos) => {
+			if (node.type.name === 'linkBookmark' && editor?.view.nodeDOM(pos) === element) {
+				match = { pos, url: node.attrs.url, title: node.attrs.title };
+				return false;
+			}
+			return true;
+		});
+		if (match) openLinkBookmarkPicker(undefined, match);
 	}
 
 	function pastedLinkTitle(clipboard: DataTransfer, url: string) {
@@ -1449,6 +1480,16 @@
 							view.state.schema.nodes.linkBookmark.create({ url, title })
 						).scrollIntoView();
 						view.dispatch(transaction);
+						return true;
+					},
+					handleClick: (view, _pos, event) => {
+						if (isLocked) return false;
+						const target = event.target;
+						if (!(target instanceof Element)) return false;
+						const bookmark = target.closest('a[data-link-bookmark]');
+						if (!bookmark || !view.dom.contains(bookmark)) return false;
+						event.preventDefault();
+						openLinkBookmarkEditor(bookmark);
 						return true;
 					},
 					handleDrop: (view, event, _slice, moved) => {
@@ -3138,8 +3179,8 @@
 			<form onsubmit={(event) => { event.preventDefault(); insertLinkBookmark(); }}>
 				<div class="image-picker-header">
 					<div>
-						<h2 id="link-bookmark-heading">Add a link bookmark</h2>
-						<p>Show a title while keeping the full URL embedded.</p>
+						<h2 id="link-bookmark-heading">{linkBookmarkEditPos !== null ? 'Edit link bookmark' : 'Add a link bookmark'}</h2>
+						<p>Keep the title and destination URL editable separately.</p>
 					</div>
 					<button type="button" class="image-picker-close" onclick={closeLinkBookmarkPicker} aria-label="Close link bookmark form">×</button>
 				</div>
@@ -3169,7 +3210,10 @@
 				{/if}
 				<div class="link-bookmark-actions">
 					<button type="button" onclick={closeLinkBookmarkPicker}>Cancel</button>
-					<button type="submit">Add bookmark</button>
+					{#if linkBookmarkEditPos !== null}
+						<a class="link-bookmark-open" href={normalizeLinkBookmarkUrl(linkBookmarkUrl)} target="_blank" rel="noopener noreferrer">Open link</a>
+					{/if}
+					<button type="submit">{linkBookmarkEditPos !== null ? 'Save changes' : 'Add bookmark'}</button>
 				</div>
 			</form>
 		</div>
@@ -4180,6 +4224,17 @@
 		border-color: var(--accent-color);
 		background: var(--accent-color);
 		color: #fff;
+	}
+
+	.link-bookmark-open {
+		display: inline-flex;
+		min-height: 36px;
+		align-items: center;
+		padding: 0 10px;
+		color: var(--accent-color);
+		font-size: 13px;
+		font-weight: 600;
+		text-decoration: none;
 	}
 
 	/* Blue drop target line indicator (Notion-style) — horizontal */
