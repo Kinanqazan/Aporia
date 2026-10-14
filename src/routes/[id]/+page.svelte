@@ -4,7 +4,7 @@
 	import { page } from '$app/stores';
 	import { onMount, onDestroy } from 'svelte';
 	import { Editor, Extension, ResizableNodeView, mergeAttributes } from '@tiptap/core';
-	import type { ResizableNodeViewDirection } from '@tiptap/core';
+	import type { JSONContent, ResizableNodeViewDirection } from '@tiptap/core';
 	import { Selection, Plugin, TextSelection } from '@tiptap/pm/state';
 	import { Decoration, DecorationSet } from '@tiptap/pm/view';
 	import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
@@ -16,6 +16,7 @@
 	import { PreserveDetailsLevel } from '$lib/editor/extensions/PreserveDetailsLevel';
 	import { DatabaseBlock } from '$lib/editor/extensions/DatabaseBlockExtension.svelte';
 	import { LinkBookmark, linkBookmarkHost, normalizeLinkBookmarkUrl } from '$lib/editor/extensions/LinkBookmark';
+	import { FileAttachment } from '$lib/editor/extensions/FileAttachment';
 	import { TextStyle } from '@tiptap/extension-text-style';
 	import { Color } from '@tiptap/extension-color';
 	import { Highlight } from '@tiptap/extension-highlight';
@@ -37,7 +38,7 @@
 		Heading1, Heading2, Heading3, Type, Quote, Code, 
 		List, ListOrdered, Bold, Italic, Link as LinkIcon, Bookmark, Palette,
 		CheckSquare, Minus, Table as TableIcon, ChevronRight, Lock, Unlock,
-		ChevronDown, Database, Image as ImageIcon, X, ZoomIn, ZoomOut, RotateCcw, Undo2
+		ChevronDown, Database, Image as ImageIcon, Paperclip, X, ZoomIn, ZoomOut, RotateCcw, Undo2
 	} from 'lucide-svelte';
 
 	import { CURATED_ICONS } from '$lib/icons';
@@ -226,11 +227,15 @@
 	let slashCommandCallback = $state<((props: any) => void) | null>(null);
 
 	let imageFileInput = $state<HTMLInputElement>();
+	let attachmentFileInput = $state<HTMLInputElement>();
 	let isImagePickerOpen = $state(false);
 	let isImageUploading = $state(false);
 	let imageUrl = $state('');
 	let imageError = $state('');
 	let imageInsertRange = $state<{ from: number; to: number } | null>(null);
+	let attachmentError = $state('');
+	let isAttachmentUploading = $state(false);
+	let attachmentInsertRange = $state<{ from: number; to: number } | null>(null);
 	let isLinkBookmarkPickerOpen = $state(false);
 	let linkBookmarkUrl = $state('');
 	let linkBookmarkTitle = $state('');
@@ -680,6 +685,102 @@
 		if (file) void uploadImage(file);
 	}
 
+	function openAttachmentPicker(range?: { from: number; to: number }) {
+		if (isLocked || isAttachmentUploading) return;
+		attachmentInsertRange = range ?? null;
+		attachmentError = '';
+		attachmentFileInput?.click();
+	}
+
+	function insertAttachment(attachment: Record<string, unknown>) {
+		if (!editor) return;
+		const chain = editor.chain().focus();
+		if (attachmentInsertRange) {
+			chain.deleteRange(attachmentInsertRange).insertContent({ type: 'fileAttachment', attrs: attachment }).run();
+		} else {
+			chain.insertContent({ type: 'fileAttachment', attrs: attachment }).run();
+		}
+		attachmentInsertRange = null;
+	}
+
+	async function uploadAttachment(file: File) {
+		if (isLocked || !editor) return;
+		isAttachmentUploading = true;
+		attachmentError = '';
+		try {
+			const formData = new FormData();
+			formData.set('pageId', data.pageRecord.id);
+			formData.set('file', file);
+			const response = await fetch('/api/assets/attachment', { method: 'POST', body: formData });
+			const result = await response.json();
+			if (!response.ok || !result.success || !result.attachment) {
+				throw new Error(result.error || 'Unable to upload file');
+			}
+			insertAttachment(result.attachment);
+		} catch (error) {
+			attachmentError = error instanceof Error ? error.message : 'Unable to upload file';
+			attachmentInsertRange = null;
+		} finally {
+			isAttachmentUploading = false;
+		}
+	}
+
+	async function uploadDroppedFiles(files: File[], position: number) {
+		if (isLocked || !editor || files.length === 0) return;
+		isAttachmentUploading = true;
+		attachmentError = '';
+		const content: JSONContent[] = [];
+		const failures: string[] = [];
+
+		try {
+			for (const file of files) {
+				try {
+					const isImage = file.type.startsWith('image/');
+					const formData = new FormData();
+					formData.set('pageId', data.pageRecord.id);
+					formData.set('file', file);
+
+					const response = await fetch(isImage ? '/api/assets' : '/api/assets/attachment', {
+						method: 'POST',
+						body: formData
+					});
+					const result = await response.json();
+					if (!response.ok || !result.success) {
+						throw new Error(result.error || `Unable to upload ${file.name || 'file'}`);
+					}
+
+					if (isImage && result.image) {
+						content.push({ type: 'image', attrs: result.image });
+					} else if (!isImage && result.attachment) {
+						content.push({ type: 'fileAttachment', attrs: result.attachment });
+					} else {
+						throw new Error(`Unable to upload ${file.name || 'file'}`);
+					}
+				} catch (error) {
+					const reason = error instanceof Error ? error.message : 'Unable to upload';
+					failures.push(`${file.name || 'File'}: ${reason}`);
+				}
+			}
+
+			if (content.length > 0 && editor) {
+				const safePosition = Math.max(0, Math.min(position, editor.state.doc.content.size));
+				editor.chain().focus().insertContentAt(safePosition, content).run();
+			}
+			if (failures.length > 0) attachmentError = failures.join(' · ');
+		} catch (error) {
+			attachmentError = error instanceof Error ? error.message : 'Unable to upload dropped files';
+		} finally {
+			isAttachmentUploading = false;
+		}
+	}
+
+	function handleAttachmentFileInput(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (file) void uploadAttachment(file);
+	}
+
 	function insertRemoteImage() {
 		const value = imageUrl.trim();
 		try {
@@ -1032,6 +1133,7 @@
 		| 'divider'
 		| 'table'
 		| 'image'
+		| 'file'
 		| 'database';
 	type BlockTypeSearchOption = {
 		label: string;
@@ -1048,6 +1150,7 @@
 		{ label: 'Toggle Heading 2', type: 'toggleHeading', level: 2, searchTerms: ['toggle heading 2', 'toggleheading2', 'toggle 2', 'th2'] },
 		{ label: 'Toggle Heading 3', type: 'toggleHeading', level: 3, searchTerms: ['toggle heading 3', 'toggleheading3', 'toggle 3', 'th3'] },
 		{ label: 'Image', type: 'image', searchTerms: ['image', 'picture'] },
+		{ label: 'File', type: 'file', searchTerms: ['file', 'attachment', 'document', 'upload'] },
 		{ label: 'Bullet List', type: 'bulletList', searchTerms: ['bullet list', 'bullets'] },
 		{ label: 'Numbered List', type: 'orderedList', searchTerms: ['numbered list', 'ordered list', 'numbered', 'ordered'] },
 		{ label: 'Quote Block', type: 'blockquote', searchTerms: ['quote block', 'quote', 'blockquote'] },
@@ -1304,6 +1407,7 @@
 						referrerpolicy: 'no-referrer'
 					}
 				}),
+				FileAttachment,
 				ToggleHeading.configure({
 					persist: true
 				}),
@@ -1497,11 +1601,11 @@
 					},
 					handleDrop: (view, event, _slice, moved) => {
 						if (isLocked || moved) return false;
-						const file = imageFileFrom(event.dataTransfer?.files);
-						if (!file) return false;
+						const files = Array.from(event.dataTransfer?.files ?? []);
+						if (files.length === 0) return false;
 						event.preventDefault();
 						const position = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ?? view.state.selection.from;
-						void uploadImage(file, position);
+						void uploadDroppedFiles(files, position);
 						return true;
 					},
 					handleKeyDown: (view, event) => {
@@ -1583,7 +1687,8 @@
 					default: null,
 					parseHTML: (element) => element.getAttribute('data-asset-id'),
 					renderHTML: (attributes) => attributes.assetId ? ({ 'data-asset-id': attributes.assetId }) : ({})
-				}
+				},
+				shareId: { default: null }
 			};
 		},
 		addNodeView() {
@@ -2232,6 +2337,11 @@
 			} else {
 				openImagePicker();
 			}
+		} else if (type === 'file') {
+			const range = activeBlock
+				? { from: activeBlock.pos, to: activeBlock.pos + activeBlock.node.nodeSize }
+				: undefined;
+			openAttachmentPicker(range);
 		} else if (type === 'database') {
 			if (activeBlock) {
 				const range = { from: activeBlock.pos, to: activeBlock.pos + activeBlock.node.nodeSize };
@@ -2829,6 +2939,10 @@
 							<ImageIcon size={13} class="menu-icon" />
 							<span>Image</span>
 						</button>
+		<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('file')} hidden={!isBlockTypeSearchMatch('file')} onclick={() => convertActiveBlockTo('file')}>
+			<Paperclip size={13} class="menu-icon" />
+			<span>File</span>
+		</button>
 						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('bulletList')} hidden={!isBlockTypeSearchMatch('bulletList')} onclick={() => convertActiveBlockTo('bulletList')}>
 							<List size={13} class="menu-icon" />
 							<span>Bullet List</span>
@@ -3142,6 +3256,18 @@
 		class="image-file-input"
 		onchange={handleImageFileInput}
 	/>
+	<input
+		bind:this={attachmentFileInput}
+		type="file"
+		accept="*/*"
+		class="image-file-input"
+		onchange={handleAttachmentFileInput}
+	/>
+	{#if attachmentError}
+		<p class="attachment-upload-error" role="alert">{attachmentError}</p>
+	{:else if isAttachmentUploading}
+		<p class="attachment-upload-error" role="status">Uploading file…</p>
+	{/if}
 
 	{#if isImagePickerOpen}
 		<div class="image-picker-backdrop" role="presentation" onclick={closeImagePicker}></div>
@@ -3872,6 +3998,102 @@
 		border-radius: 6px;
 		margin: 10px 0;
 		cursor: pointer;
+	}
+
+	:global(.tiptap-content-canvas .editor-file-attachment) {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		width: min(100%, 560px);
+		margin: 10px 0;
+		padding: 12px 14px;
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+		background: var(--bg-sidebar);
+	}
+
+	:global(.tiptap-content-canvas .editor-file-attachment-open) {
+		display: flex;
+		align-items: center;
+		flex: 1;
+		min-width: 0;
+		gap: 12px;
+		color: var(--text-main);
+		text-decoration: none;
+	}
+
+	:global(.tiptap-content-canvas .editor-file-attachment-download) {
+		flex: 0 0 auto;
+		padding: 6px 9px;
+		border-radius: 6px;
+		color: var(--accent-color);
+		font-size: 13px;
+		text-decoration: none;
+	}
+
+	:global(.tiptap-content-canvas .editor-file-attachment-download:hover) {
+		border-color: var(--accent-color);
+		background: var(--bg-canvas);
+	}
+
+	:global(.editor-file-attachment-icon) {
+		display: grid;
+		place-items: center;
+		flex: 0 0 36px;
+		height: 36px;
+		border-radius: 7px;
+		background: var(--bg-canvas);
+		color: var(--accent-color);
+		border: 1px solid currentColor;
+		font-size: 9px;
+		font-weight: 700;
+		letter-spacing: 0.02em;
+		line-height: 1;
+		text-transform: uppercase;
+	}
+
+	:global(.editor-file-attachment-icon[data-file-type='pdf']) { color: #c13d44; }
+	:global(.editor-file-attachment-icon[data-file-type='archive']) { color: #8054b8; }
+	:global(.editor-file-attachment-icon[data-file-type='document']) { color: #3975c6; }
+	:global(.editor-file-attachment-icon[data-file-type='spreadsheet']) { color: #28815b; }
+	:global(.editor-file-attachment-icon[data-file-type='presentation']) { color: #c66b32; }
+	:global(.editor-file-attachment-icon[data-file-type='code']) { color: #9a7417; }
+	:global(.editor-file-attachment-icon[data-file-type='image']) { color: #8154af; }
+	:global(.editor-file-attachment-icon[data-file-type='audio']) { color: #a24987; }
+	:global(.editor-file-attachment-icon[data-file-type='video']) { color: #bc4d55; }
+	:global(.editor-file-attachment-icon[data-file-type='file']) { color: var(--accent-color); }
+
+	:global(.editor-file-attachment-details) {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 3px;
+	}
+
+	:global(.editor-file-attachment-name) {
+		overflow: hidden;
+		font-weight: 600;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	:global(.editor-file-attachment-metadata) {
+		color: var(--text-muted);
+		font-size: 12px;
+	}
+
+	.attachment-upload-error {
+		position: fixed;
+		bottom: 16px;
+		left: 50%;
+		z-index: 800;
+		max-width: calc(100vw - 32px);
+		transform: translateX(-50%);
+		padding: 9px 13px;
+		border-radius: 7px;
+		background: var(--bg-sidebar);
+		color: var(--text-main);
+		box-shadow: 0 3px 16px rgba(0, 0, 0, 0.2);
 	}
 
 	:global(.tiptap-content-canvas:not([contenteditable='false']) img.editor-image.ProseMirror-selectednode) {

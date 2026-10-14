@@ -1,10 +1,11 @@
 import {
 	createPage,
+	deletePermanently,
 	getPageById,
 	updatePage,
 	updatePageContentAtVersion
 } from '$lib/server/pages';
-import { AssetValidationError, publicAssetUrl, removeAsset, storeImage, validateImageReferences } from '$lib/server/assets';
+import { AssetValidationError, publicAssetUrl, removeAsset, storeAttachment, storeImage, validateImageReferences } from '$lib/server/assets';
 import { pageVersion } from '$lib/server/mcp/versions';
 import { validateEditorDocument } from '$lib/server/mcp/document';
 
@@ -140,16 +141,16 @@ export async function appendSharedLinkToPage(pageId: unknown, input: SharedConte
 	return updatedPage;
 }
 
-export async function appendSharedImagesToPage(pageId: unknown, files: File[]) {
-	if (typeof pageId !== 'string' || !pageId) throw new SharedContentError('Choose a page to add these images to.');
-	if (files.length === 0 || files.length > 5) throw new SharedContentError('Share between one and five images at a time.');
+export async function appendSharedFilesToPage(pageId: unknown, files: File[], suppliedShareId?: unknown) {
+	if (typeof pageId !== 'string' || !pageId) throw new SharedContentError('Choose a page for these files.');
+	if (files.length === 0 || files.length > 5) throw new SharedContentError('Share between one and five files at a time.');
 	if (files.reduce((total, file) => total + file.size, 0) > 25 * 1024 * 1024) {
-		throw new SharedContentError('Shared images must total 25 MB or less.');
+		throw new SharedContentError('Shared files must total 25 MB or less.');
 	}
 
 	const page = await getPageById(pageId);
 	if (!page || page.isInTrash) throw new SharedContentError('That page is no longer available.', 404);
-	if (page.isLocked) throw new SharedContentError('Unlock the selected page before adding images.', 423);
+	if (page.isLocked) throw new SharedContentError('Unlock the selected page before adding files.', 423);
 
 	let document: { type: string; content: unknown[] };
 	try {
@@ -160,27 +161,38 @@ export async function appendSharedImagesToPage(pageId: unknown, files: File[]) {
 	if (document.type !== 'doc' || !Array.isArray(document.content)) {
 		throw new SharedContentError('The selected page has invalid content.', 500);
 	}
+	const shareId = typeof suppliedShareId === 'string' && suppliedShareId.length <= 64 ? suppliedShareId : null;
+	if (shareId && containsSharedItem(document, shareId)) return page;
 
 	const storedAssets: Awaited<ReturnType<typeof storeImage>>[] = [];
 	try {
-		for (const file of files) storedAssets.push(await storeImage(file));
+		for (const file of files) {
+			if (file.type.toLowerCase().startsWith('image/')) {
+				try {
+					storedAssets.push(await storeImage(file));
+				} catch (error) {
+					if (!(error instanceof AssetValidationError)) throw error;
+					const genericFile = new File([await file.arrayBuffer()], file.name, { type: 'application/octet-stream' });
+					storedAssets.push(await storeAttachment(genericFile));
+				}
+			} else {
+				storedAssets.push(await storeAttachment(file));
+			}
+		}
 		const nextDocument = {
 			...document,
-			content: [...document.content, ...storedAssets.map((asset) => ({
+			content: [...document.content, ...storedAssets.map((asset) => asset.mimeType.startsWith('image/') ? ({
 				type: 'image',
-				attrs: {
-					src: publicAssetUrl(asset.id),
-					alt: '',
-					title: asset.originalFilename,
-					source: 'upload',
-					assetId: asset.id
-				}
+				attrs: { src: publicAssetUrl(asset.id), alt: '', title: asset.originalFilename, source: 'upload', assetId: asset.id, shareId }
+			}) : ({
+				type: 'fileAttachment',
+				attrs: { assetId: asset.id, fileName: asset.originalFilename, mimeType: asset.mimeType, size: asset.byteSize, shareId }
 			}))]
 		};
 		const imageReferenceError = await validateImageReferences(nextDocument);
 		if (imageReferenceError) throw new SharedContentError(imageReferenceError);
 		const documentError = validateEditorDocument(nextDocument);
-		if (documentError) throw new SharedContentError(`Could not add these images: ${documentError}`);
+		if (documentError) throw new SharedContentError(`Could not add these files: ${documentError}`);
 
 		const updatedPage = await updatePageContentAtVersion(
 			page.id,
@@ -189,12 +201,33 @@ export async function appendSharedImagesToPage(pageId: unknown, files: File[]) {
 			{ isLocked: page.isLocked, contentJson: page.contentJson }
 		);
 		if (!updatedPage) {
-			throw new SharedContentError('This page changed while the images were being added. Please choose it again.', 409);
+			throw new SharedContentError('This page changed while the files were being added. Please choose it again.', 409);
 		}
 		return updatedPage;
 	} catch (error) {
 		await Promise.allSettled(storedAssets.map((asset) => removeAsset(asset.id)));
 		if (error instanceof AssetValidationError) throw new SharedContentError(error.message);
+		throw error;
+	}
+}
+
+function containsSharedItem(document: unknown, shareId: string): boolean {
+	const visit = (node: any): boolean => {
+		if (!node || typeof node !== 'object') return false;
+		if (node.attrs?.shareId === shareId) return true;
+		return Array.isArray(node.content) && node.content.some(visit);
+	};
+	return visit(document);
+}
+
+export async function createPageFromSharedFiles(input: SharedContentInput, files: File[]) {
+	if (files.length === 0) return createPageFromSharedContent(input);
+	const firstFileName = cleanText(files[0]?.name, MAX_TITLE_LENGTH);
+	const page = await createPageFromSharedContent({ ...input, title: cleanText(input.title, MAX_TITLE_LENGTH) || firstFileName });
+	try {
+		return await appendSharedFilesToPage(page.id, files);
+	} catch (error) {
+		await deletePermanently(page.id);
 		throw error;
 	}
 }

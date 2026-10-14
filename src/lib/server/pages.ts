@@ -475,6 +475,9 @@ function walkNode(node: any): string {
 		const url = typeof node.attrs?.url === 'string' ? node.attrs.url : '';
 		text += ` ${title} ${url}`;
 	}
+	if (node.type === 'fileAttachment' && typeof node.attrs?.fileName === 'string') {
+		text += ` ${node.attrs.fileName}`;
+	}
 	if (Array.isArray(node.content)) {
 		text += ' ' + node.content.map(walkNode).join(' ');
 	}

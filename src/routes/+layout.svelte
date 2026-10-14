@@ -88,6 +88,13 @@
 		}
 	}
 
+	function sharedItemsLabel(shared: NativeSharedContent) {
+		const items = shared.images ?? [];
+		const isImages = items.length > 0 && items.every((item) => item.mimeType?.startsWith('image/'));
+		const noun = isImages ? 'image' : 'file';
+		return `${items.length} ${noun}${items.length === 1 ? '' : 's'}`;
+	}
+
 	function finishNativeShare(shared: NativeSharedContent, discard = false) {
 		const shareWindow = window as NativeShareWindow;
 		const queue = shareWindow.__APORIA_NATIVE_SHARE_QUEUE__;
@@ -148,7 +155,7 @@
 		}
 	}
 
-	async function addSharedImagesToPage() {
+	async function addSharedFilesToPage() {
 		const shared = activeLinkShare;
 		const targetPageId = shareTargetPageId;
 		if (!shared?.images?.length || !targetPageId || isSavingSharedItem) return;
@@ -157,21 +164,22 @@
 		shareTargetError = '';
 		try {
 			if (!(await requestEditorFlush(targetPageId))) {
-				throw new Error('Save the current page changes before adding these images.');
+				throw new Error('Save the current page changes before adding these files.');
 			}
 			const bridge = (window as NativeShareWindow).AporiaSharedImage;
-			if (!bridge) throw new Error('Image sharing requires the updated Aporia APK.');
+			if (!bridge) throw new Error('File sharing requires the updated Aporia APK.');
 
 			const formData = new FormData();
 			formData.set('targetPageId', targetPageId);
+			formData.set('shareId', shared.id);
 			for (const image of shared.images) {
 				const encoded = bridge.readImageBase64(shared.id, image.id);
-				if (!encoded) throw new Error('A shared image is no longer available. Share it again.');
+				if (!encoded) throw new Error('A shared file is no longer available. Share it again.');
 				const binary = window.atob(encoded);
 				const bytes = new Uint8Array(binary.length);
 				for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
-				const file = new File([bytes], image.name || 'Shared image', {
-					type: image.mimeType?.startsWith('image/') ? image.mimeType : 'image/jpeg'
+				const file = new File([bytes], image.name || 'Shared file', {
+					type: image.mimeType || 'application/octet-stream'
 				});
 				formData.append('files', file, file.name);
 			}
@@ -179,7 +187,7 @@
 			const response = await fetch('/api/share-target', { method: 'POST', body: formData });
 			const result = await response.json();
 			if (!response.ok || !result.success || typeof result.pageId !== 'string') {
-				throw new Error(result.error || 'Aporia could not add these images.');
+				throw new Error(result.error || 'Aporia could not add these files.');
 			}
 
 			finishNativeShare(shared);
@@ -187,7 +195,7 @@
 			await goto(`/${encodeURIComponent(result.pageId)}`);
 			void processNativeShares();
 		} catch (error) {
-			shareTargetError = error instanceof Error ? error.message : 'Aporia could not add these images.';
+			shareTargetError = error instanceof Error ? error.message : 'Aporia could not add these files.';
 		} finally {
 			isSavingSharedItem = false;
 		}
@@ -741,7 +749,7 @@
 
 	async function cleanUnusedUploads() {
 		if (isCleanupInProgress) return;
-		if (!window.confirm('Delete uploads that are not used by any page? This cannot be undone.')) return;
+		if (!window.confirm('Delete uploaded items that are not used by any page? This cannot be undone.')) return;
 
 		isCleanupInProgress = true;
 		cleanupMessage = '';
@@ -750,8 +758,8 @@
 			const result = await response.json();
 			if (!response.ok || !result.success) throw new Error(result.error || 'Unable to clean uploads');
 			cleanupMessage = result.removed === 0
-				? 'No unused uploads found.'
-				: `Removed ${result.removed} upload${result.removed === 1 ? '' : 's'} (${formatBytes(result.bytesFreed)}).`;
+				? 'No unused uploaded items found.'
+				: `Removed ${result.removed} unused item${result.removed === 1 ? '' : 's'} (${formatBytes(result.bytesFreed)}).`;
 		} catch (error) {
 			cleanupMessage = error instanceof Error ? error.message : 'Unable to clean uploads';
 		} finally {
@@ -1266,12 +1274,12 @@
 				<div class="notion-import-modal-header">
 					<div>
 						<h2 id="share-link-title">
-							{activeLinkShare.images?.length === 1 ? 'Add image to a page' : activeLinkShare.images?.length ? 'Add images to a page' : 'Add link to a page'}
+							{activeLinkShare.images?.length ? `Add ${sharedItemsLabel(activeLinkShare)} to a page` : 'Add link to a page'}
 						</h2>
 						<p class="share-link-url">
 							{activeLinkShare.url || (activeLinkShare.images?.length === 1
 								? activeLinkShare.images[0].name
-								: `${activeLinkShare.images?.length || 0} images`)}
+								: sharedItemsLabel(activeLinkShare))}
 						</p>
 					</div>
 				</div>
@@ -1317,14 +1325,12 @@
 						type="button"
 						class="share-link-add"
 						disabled={!shareTargetPageId || isSavingSharedItem}
-						onclick={() => activeLinkShare?.images?.length ? addSharedImagesToPage() : addSharedLinkToPage()}
+						onclick={() => activeLinkShare?.images?.length ? addSharedFilesToPage() : addSharedLinkToPage()}
 					>
 						{isSavingSharedItem
 							? 'Adding…'
-							: activeLinkShare.images?.length === 1
-								? 'Add image'
-								: activeLinkShare.images?.length
-									? 'Add images'
+							: activeLinkShare.images?.length
+								? `Add ${sharedItemsLabel(activeLinkShare)}`
 									: 'Add link'}
 					</button>
 				</div>

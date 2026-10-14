@@ -7,6 +7,8 @@ import { dirname, extname, join, resolve } from 'path';
 import { mkdir, readFile, rename, rm, writeFile } from 'fs/promises';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const UPLOAD_GRACE_PERIOD_MS = 5 * 60 * 1000;
 const databasePath = env.DATABASE_URL || 'data/app.db';
 const configuredUploadDirectory = env.UPLOAD_DIR || join(dirname(databasePath), 'uploads');
 const uploadDirectory = resolve(configuredUploadDirectory);
@@ -68,6 +70,24 @@ function safeOriginalFilename(filename: string, extension: string): string {
 	return extname(trimmed) ? trimmed : `${trimmed}${extension}`;
 }
 
+function attachmentMimeType(file: File): string {
+	const supplied = file.type.trim().toLowerCase();
+	const hasValidSuppliedType = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(supplied);
+	const extension = extname(file.name).toLowerCase();
+	const known: Record<string, string> = {
+		'.pdf': 'application/pdf', '.json': 'application/json', '.csv': 'text/csv', '.txt': 'text/plain',
+		'.md': 'text/markdown', '.doc': 'application/msword',
+		'.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+		'.xls': 'application/vnd.ms-excel',
+		'.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		'.ppt': 'application/vnd.ms-powerpoint',
+		'.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+		'.zip': 'application/zip'
+	};
+	if (hasValidSuppliedType && supplied !== 'application/octet-stream') return supplied;
+	return known[extension] ?? (hasValidSuppliedType ? supplied : 'application/octet-stream');
+}
+
 function pathForStorageKey(storageKey: string): string {
 	const path = resolve(uploadDirectory, storageKey);
 	if (dirname(path) !== uploadDirectory) {
@@ -85,17 +105,31 @@ export async function storeImage(file: File): Promise<AssetRecord> {
 	return storeImageBytes(file.name, bytes);
 }
 
+export async function storeAttachment(file: File): Promise<AssetRecord> {
+	if (file.size === 0) throw new AssetValidationError('Choose a non-empty file to upload');
+	if (file.size > MAX_ATTACHMENT_BYTES) throw new AssetValidationError('Files must be 25 MB or smaller');
+	const bytes = new Uint8Array(await file.arrayBuffer());
+	const mimeType = attachmentMimeType(file);
+	const filename = safeOriginalFilename(file.name || 'attachment', extname(file.name) || '');
+	return persistAsset(filename, mimeType, bytes);
+}
+
 /** Stores validated image bytes from an upload or a trusted server-side importer. */
 export async function storeImageBytes(filename: string, bytes: Uint8Array): Promise<AssetRecord> {
 	const image = validateImageBytes(bytes);
+	return persistAsset(filename, image.mimeType, bytes, image.extension);
+}
 
+
+async function persistAsset(filename: string, mimeType: string, bytes: Uint8Array, forcedExtension?: string): Promise<AssetRecord> {
 	const id = createAssetId();
-	const storageKey = `${id}${image.extension}`;
+	const extension = forcedExtension ?? extname(filename).toLowerCase();
+	const storageKey = `${id}${extension}`;
 	const asset: AssetRecord = {
 		id,
 		storageKey,
-		originalFilename: safeOriginalFilename(filename, image.extension),
-		mimeType: image.mimeType,
+		originalFilename: safeOriginalFilename(filename, extension),
+		mimeType,
 		byteSize: bytes.byteLength,
 		createdAt: new Date().toISOString()
 	};
@@ -142,7 +176,10 @@ export async function readAsset(id: string): Promise<{ asset: AssetRecord; bytes
 
 function collectReferencedAssetIds(node: any, ids: Set<string>) {
 	if (!node || typeof node !== 'object') return;
-	if (node.type === 'image' && node.attrs?.source === 'upload' && typeof node.attrs.assetId === 'string') {
+	if (
+		(node.type === 'fileAttachment' || (node.type === 'image' && node.attrs?.source === 'upload')) &&
+		typeof node.attrs?.assetId === 'string'
+	) {
 		ids.add(node.attrs.assetId);
 	}
 	if (Array.isArray(node.content)) {
@@ -164,7 +201,10 @@ export async function cleanupUnusedAssets(): Promise<{ deletedCount: number; del
 	}
 
 	const allAssets = await db.select().from(assets);
-	const unusedAssets = allAssets.filter((asset) => !referencedIds.has(asset.id));
+	const cutoff = Date.now() - UPLOAD_GRACE_PERIOD_MS;
+	const unusedAssets = allAssets.filter((asset) =>
+		!referencedIds.has(asset.id) && Date.parse(asset.createdAt) < cutoff
+	);
 	let deletedBytes = 0;
 
 	for (const asset of unusedAssets) {
@@ -179,6 +219,14 @@ export async function cleanupUnusedAssets(): Promise<{ deletedCount: number; del
 export async function validateImageReferences(document: unknown): Promise<string | null> {
 	const visit = async (node: any): Promise<string | null> => {
 		if (!node || typeof node !== 'object') return null;
+		if (node.type === 'fileAttachment') {
+			const attrs = node.attrs ?? {};
+			if (typeof attrs.assetId !== 'string') return 'File attachments must reference an asset';
+			const asset = await getAsset(attrs.assetId);
+			if (!asset || attrs.fileName !== asset.originalFilename || attrs.mimeType !== asset.mimeType || attrs.size !== asset.byteSize) {
+				return 'Invalid file attachment reference';
+			}
+		}
 		if (node.type === 'image') {
 			const attrs = node.attrs ?? {};
 			if (attrs.source === 'upload') {

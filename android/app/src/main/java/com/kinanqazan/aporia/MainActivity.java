@@ -2,6 +2,7 @@ package com.kinanqazan.aporia;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.DownloadManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.database.Cursor;
@@ -16,6 +17,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
 import android.webkit.CookieManager;
+import android.webkit.DownloadListener;
 import android.webkit.JavascriptInterface;
 import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
@@ -25,6 +27,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.URLUtil;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -276,6 +279,8 @@ public class MainActivity extends Activity {
 		webView.addJavascriptInterface(new SystemBarBridge(), "AporiaSystemBar");
 		webView.addJavascriptInterface(new SharedImageBridge(), "AporiaSharedImage");
 		webView.setWebViewClient(new AporiaWebViewClient());
+		webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) ->
+				downloadAttachment(url, userAgent, contentDisposition, mimeType));
 		webView.setWebChromeClient(new AporiaWebChromeClient());
 		root.addView(webView, new FrameLayout.LayoutParams(
 				FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
@@ -392,14 +397,14 @@ public class MainActivity extends Activity {
 	private void captureShareIntent(Intent intent) {
 		if (intent == null) return;
 		String type = intent.getType();
-		if (type != null && type.startsWith("image/")
-				&& (Intent.ACTION_SEND.equals(intent.getAction()) || Intent.ACTION_SEND_MULTIPLE.equals(intent.getAction()))) {
+		boolean isSend = Intent.ACTION_SEND.equals(intent.getAction()) || Intent.ACTION_SEND_MULTIPLE.equals(intent.getAction());
+		if (isSend && (intent.hasExtra(Intent.EXTRA_STREAM) || intent.getClipData() != null)) {
 			captureSharedImages(intent);
 			return;
 		}
 		if (!Intent.ACTION_SEND.equals(intent.getAction())) return;
 		if (type != null && !type.startsWith("text/")) {
-			Toast.makeText(this, "Aporia currently accepts shared text and links.", Toast.LENGTH_LONG).show();
+			Toast.makeText(this, "The shared file could not be opened.", Toast.LENGTH_LONG).show();
 			return;
 		}
 
@@ -447,11 +452,11 @@ public class MainActivity extends Activity {
 			}
 		}
 		if (sourceUris.isEmpty()) {
-			Toast.makeText(this, "The shared image could not be opened.", Toast.LENGTH_LONG).show();
+			Toast.makeText(this, "The shared file could not be opened.", Toast.LENGTH_LONG).show();
 			return;
 		}
 		if (sourceUris.size() > MAX_SHARED_IMAGE_COUNT) {
-			Toast.makeText(this, "Share up to five images at a time.", Toast.LENGTH_LONG).show();
+			Toast.makeText(this, "Share up to five files at a time.", Toast.LENGTH_LONG).show();
 			return;
 		}
 
@@ -466,13 +471,13 @@ public class MainActivity extends Activity {
 				long bytesCopied = copySharedImage(sourceUri, cachedFile, MAX_SHARED_IMAGE_BYTES);
 				if (bytesCopied <= 0 || totalBytes + bytesCopied > MAX_SHARED_IMAGE_TOTAL_BYTES) {
 					cachedFile.delete();
-					throw new IllegalArgumentException("Shared images must total 25 MB or less.");
+					throw new IllegalArgumentException("Shared files must total 25 MB or less.");
 				}
 				totalBytes += (int) bytesCopied;
 				copiedFiles.add(cachedFile);
 
 				String mimeType = getContentResolver().getType(sourceUri);
-				if (mimeType == null || !mimeType.startsWith("image/")) mimeType = intent.getType();
+				if (mimeType == null) mimeType = intent.getType();
 				JSONObject image = new JSONObject();
 				image.put("id", imageId);
 				image.put("name", sharedImageName(sourceUri));
@@ -492,20 +497,20 @@ public class MainActivity extends Activity {
 		} catch (Exception error) {
 			for (File cachedFile : copiedFiles) cachedFile.delete();
 			String message = error.getMessage();
-			Toast.makeText(this, message == null ? "Could not prepare the shared image." : message, Toast.LENGTH_LONG).show();
+			Toast.makeText(this, message == null ? "Could not prepare the shared file." : message, Toast.LENGTH_LONG).show();
 		}
 	}
 
 	private long copySharedImage(Uri sourceUri, File destination, int maxBytes) throws Exception {
 		try (InputStream input = getContentResolver().openInputStream(sourceUri);
 				FileOutputStream output = new FileOutputStream(destination)) {
-			if (input == null) throw new IllegalArgumentException("The shared image could not be opened.");
+			if (input == null) throw new IllegalArgumentException("The shared file could not be opened.");
 			byte[] buffer = new byte[16 * 1024];
 			long copied = 0;
 			int read;
 			while ((read = input.read(buffer)) != -1) {
 				copied += read;
-				if (copied > maxBytes) throw new IllegalArgumentException("Each shared image must be 10 MB or smaller.");
+				if (copied > maxBytes) throw new IllegalArgumentException("Each shared file must be 10 MB or smaller.");
 				output.write(buffer, 0, read);
 			}
 			return copied;
@@ -527,7 +532,7 @@ public class MainActivity extends Activity {
 		} catch (Exception ignored) {
 			// A provider may not expose a display name; use a safe generic name.
 		}
-		return "Shared image";
+		return "Shared file";
 	}
 
 	private String findSharedUrl(String text) {
@@ -636,6 +641,33 @@ public class MainActivity extends Activity {
 		return uri.getPort() == -1 ? 443 : uri.getPort();
 	}
 
+	private void downloadAttachment(String downloadUrl, String userAgent, String contentDisposition, String mimeType) {
+		Uri uri = Uri.parse(downloadUrl);
+		if (!isSameOrigin(uri)) {
+			Toast.makeText(this, "Aporia can only download files from its connected server.", Toast.LENGTH_LONG).show();
+			return;
+		}
+		try {
+			DownloadManager.Request request = new DownloadManager.Request(uri);
+			String cookie = CookieManager.getInstance().getCookie(downloadUrl);
+			if (cookie != null) request.addRequestHeader("Cookie", cookie);
+			if (userAgent != null) request.addRequestHeader("User-Agent", userAgent);
+			if (mimeType != null && !mimeType.isEmpty()) request.setMimeType(mimeType);
+			String fileName = uri.getQueryParameter("filename");
+			if (fileName == null || fileName.trim().isEmpty()) {
+				fileName = URLUtil.guessFileName(downloadUrl, contentDisposition, mimeType);
+			}
+			request.setTitle(fileName);
+			request.setDescription("Downloading from Aporia");
+			request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+			DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+			manager.enqueue(request);
+			Toast.makeText(this, "Download started: " + fileName, Toast.LENGTH_SHORT).show();
+		} catch (Exception error) {
+			Toast.makeText(this, "Could not start the file download.", Toast.LENGTH_LONG).show();
+		}
+	}
+
 	private void showConnectionError(String description) {
 		if (isFinishing()) return;
 		new AlertDialog.Builder(this)
@@ -658,7 +690,17 @@ public class MainActivity extends Activity {
 			showServerDialog();
 			return true;
 		}
-		if (isSameOrigin(uri)) return false;
+		if (isSameOrigin(uri)) {
+			String path = uri.getPath();
+			if (path != null && path.startsWith("/assets/") && "1".equals(uri.getQueryParameter("open"))) {
+				Uri.Builder downloadUri = uri.buildUpon().clearQuery().appendQueryParameter("download", "1");
+				String fileName = uri.getQueryParameter("filename");
+				if (fileName != null) downloadUri.appendQueryParameter("filename", fileName);
+				downloadAttachment(downloadUri.build().toString(), null, null, null);
+				return true;
+			}
+			return false;
+		}
 		if ("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme())
 				|| "mailto".equalsIgnoreCase(uri.getScheme()) || "tel".equalsIgnoreCase(uri.getScheme())) {
 			try {

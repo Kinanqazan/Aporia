@@ -16,6 +16,7 @@ import { Highlight } from '@tiptap/extension-highlight';
 import { ColumnLayout } from '../../editor/extensions/ColumnLayout.ts';
 import { Column } from '../../editor/extensions/Column.ts';
 import { LinkBookmark } from '../../editor/extensions/LinkBookmark.ts';
+import { FileAttachment } from '../../editor/extensions/FileAttachment.ts';
 
 const ToggleHeading = Details.extend({
 	addAttributes() {
@@ -51,7 +52,8 @@ const ImageBlock = Image.extend({
 		return {
 			...(this.parent?.() ?? {}),
 			source: { default: 'remote' },
-			assetId: { default: null }
+			assetId: { default: null },
+			shareId: { default: null }
 		};
 	}
 });
@@ -60,7 +62,7 @@ const schema = getSchema([
 	StarterKit.configure({ link: false, heading: { levels: [1, 2, 3] } }),
 	ImageBlock.configure({ inline: false, allowBase64: false }), ToggleHeading.configure({ persist: true }), DetailsSummary, DetailsContent,
 	Link, TaskList, OrderedTaskItem.configure({ nested: true }), Table, TableRow, TableHeader, TableCell,
-	TextStyle, Color, Highlight.configure({ multicolor: true }), ColumnLayout, Column, DatabaseBlock, LinkBookmark
+	TextStyle, Color, Highlight.configure({ multicolor: true }), ColumnLayout, Column, DatabaseBlock, LinkBookmark, FileAttachment
 ]);
 
 const MAX_DOCUMENT_BYTES = 2_000_000;

@@ -83,6 +83,12 @@ function convertNode(node: any, indentLevel = 0): string {
 			return url ? `${indent}[${title}](${url})` : '';
 		}
 
+		case 'fileAttachment': {
+			const title = String(node.attrs?.fileName || 'Attachment').replace(/[\[\]]/g, '');
+			const assetId = typeof node.attrs?.assetId === 'string' ? node.attrs.assetId : '';
+			return assetId ? `${indent}[${title}](/assets/${encodeURIComponent(assetId)}?download=1)` : `${indent}${title}`;
+		}
+
 		case 'details': {
 			const summaryNode = node.content?.find((c: any) => c.type === 'detailsSummary');
 			const contentNode = node.content?.find((c: any) => c.type === 'detailsContent');

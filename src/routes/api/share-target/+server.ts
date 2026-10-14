@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import {
-	appendSharedImagesToPage,
+	appendSharedFilesToPage,
 	appendSharedLinkToPage,
 	createPageFromSharedContent,
 	SharedContentError,
@@ -18,16 +18,17 @@ export const POST: RequestHandler = async ({ request, url }) => {
 		try {
 			const formData = await request.formData();
 			const targetPageId = formData.get('targetPageId');
+			const shareId = formData.get('shareId');
 			const files = formData.getAll('files').filter((value): value is File => value instanceof File);
 			if (typeof targetPageId !== 'string' || files.length !== formData.getAll('files').length) {
-				return json({ success: false, error: 'A destination page and image files are required.' }, { status: 400 });
+				return json({ success: false, error: 'A destination page and files are required.' }, { status: 400 });
 			}
-			const page = await appendSharedImagesToPage(targetPageId, files);
+			const page = await appendSharedFilesToPage(targetPageId, files, shareId);
 			return json({ success: true, pageId: page.id });
 		} catch (error) {
 			return json({
 				success: false,
-				error: error instanceof Error ? error.message : 'Could not save the shared images.'
+				error: error instanceof Error ? error.message : 'Could not save the shared files.'
 			}, { status: error instanceof SharedContentError ? error.status : 400 });
 		}
 	}
