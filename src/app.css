@@ -586,10 +586,10 @@ textarea {
 .page-item-row.active {
 	/* Keep the tap area generous while painting a slimmer, edge-to-edge band. */
 	background: linear-gradient(to bottom,
-		transparent 5px,
-		var(--active-sidebar) 5px,
-		var(--active-sidebar) calc(100% - 5px),
-		transparent calc(100% - 5px));
+		transparent 2px,
+		var(--active-sidebar) 2px,
+		var(--active-sidebar) calc(100% - 2px),
+		transparent calc(100% - 2px));
 	font-weight: 500;
 }
 
