@@ -1,5 +1,24 @@
+/* Keep the UI font local so desktop, PWA, and Android use the same face. */
+@font-face {
+	font-family: 'Roboto';
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url('./lib/assets/fonts/roboto-latin-ext-wght.woff2') format('woff2');
+	unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+	font-family: 'Roboto';
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url('./lib/assets/fonts/roboto-latin-wght.woff2') format('woff2');
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
-	--font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+	--font-sans: 'Roboto', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
 
 	/* Light Mode (Notion Aesthetic) */
 	--bg-canvas: #ffffff;
@@ -131,6 +150,7 @@ button {
 }
 
 input,
+select,
 textarea {
 	font-family: inherit;
 	color: inherit;
@@ -219,7 +239,7 @@ textarea {
 }
 
 .sidebar-header {
-	height: calc(var(--header-height) + env(safe-area-inset-top));
+	height: calc(68px + env(safe-area-inset-top));
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
@@ -227,21 +247,32 @@ textarea {
 	flex-shrink: 0;
 }
 
-.sidebar-search-toggle {
-	transform: translateY(4px);
+.icon-btn.sidebar-search-toggle {
+	width: 36px;
+	height: 36px;
+	flex-shrink: 0;
+	border: 1px solid var(--border-color);
+	border-radius: 50%;
+	background: var(--hover-sidebar);
+	color: var(--text-main);
+}
+
+.sidebar-search-toggle svg {
+	width: 20px;
+	height: 20px;
 }
 
 .sidebar-header-search {
-	transform: translateY(4px);
+	min-width: 0;
 }
 
 .user-workspace {
 	display: flex;
 	align-items: center;
-	gap: 8px;
-	font-weight: 500;
-	font-size: 14px;
-	transform: translateY(4px);
+	gap: 10px;
+	min-width: 0;
+	font-weight: 600;
+	font-size: 21px;
 }
 
 .avatar {
@@ -258,8 +289,9 @@ textarea {
 }
 
 .workspace-logo {
-	width: 28px;
-	height: 28px;
+	width: 32px;
+	height: 32px;
+	flex-shrink: 0;
 	object-fit: contain;
 	filter: none;
 }
@@ -376,7 +408,7 @@ textarea {
 .pages-list {
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
+	gap: 4px;
 }
 
 .page-tree-node {
@@ -389,7 +421,8 @@ textarea {
 	display: flex;
 	align-items: center;
 	width: 100%;
-	padding: 2px 4px;
+	min-height: 40px;
+	padding: 2px 4px 2px 10px;
 	border-radius: 4px;
 	color: var(--text-main);
 	transition: background var(--transition-speed);
@@ -419,8 +452,9 @@ textarea {
 }
 
 .workspace-logo {
-	width: 28px;
-	height: 28px;
+	width: 32px;
+	height: 32px;
+	flex-shrink: 0;
 	object-fit: contain;
 	filter: none;
 }
@@ -524,7 +558,7 @@ textarea {
 .pages-list {
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
+	gap: 4px;
 }
 
 .page-tree-node {
@@ -537,6 +571,7 @@ textarea {
 	display: flex;
 	align-items: center;
 	width: 100%;
+	min-height: 40px;
 	padding: 2px 4px;
 	border-radius: 4px;
 	color: var(--text-main);
@@ -568,7 +603,7 @@ textarea {
 	font-size: 16px;
 	cursor: pointer;
 	user-select: none;
-	padding: 4px 0;
+	padding: 6px 0;
 }
 
 .page-symbol-slot {
@@ -579,7 +614,7 @@ textarea {
 	align-items: center;
 	justify-content: center;
 	flex-shrink: 0;
-	margin-right: 4px;
+	margin-right: 8px;
 }
 
 .page-row-disclosure {
@@ -620,19 +655,18 @@ textarea {
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
-	font-weight: 600;
+	font-weight: 400;
 }
 
 .page-children {
-	margin: 2px 0 0 8px;
+	margin: 4px 0 0;
 	padding: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 0;
+	gap: 4px;
 }
-
 .page-children .page-title {
-	font-weight: 600;
+	font-weight: 400;
 	color: var(--text-main);
 }
 
@@ -906,8 +940,27 @@ textarea {
 }
 
 .mobile .sidebar-header {
-	height: calc(var(--header-height) + env(safe-area-inset-top) + 8px);
-	padding-top: calc(env(safe-area-inset-top) + 8px);
+	height: calc(80px + env(safe-area-inset-top));
+	padding-top: env(safe-area-inset-top);
+}
+
+.mobile .user-workspace {
+	font-size: 24px;
+}
+
+.mobile .workspace-logo {
+	width: 36px;
+	height: 36px;
+}
+
+.mobile .icon-btn.sidebar-search-toggle {
+	width: 44px;
+	height: 44px;
+}
+
+.mobile .sidebar-search-toggle svg {
+	width: 24px;
+	height: 24px;
 }
 
 .mobile.sidebar-closed .sidebar {
@@ -1079,15 +1132,15 @@ textarea {
 }
 
 .mobile .page-item-link {
-	font-size: 16px;
-	line-height: 1.35;
+	font-size: 18px;
+	line-height: 1.4;
 	padding-block: 6px;
 }
 
 .mobile .page-symbol-slot {
 	width: 26px;
 	height: 26px;
-	margin-right: 6px;
+	margin-right: 10px;
 }
 
 .mobile .page-row-disclosure {
@@ -1114,37 +1167,37 @@ textarea {
 }
 
 .mobile .sidebar-nav {
-	padding: 20px 20px 20px;
+	padding: 16px 20px 20px;
 }
 
 .mobile .pages-list {
-	gap: 6px;
+	gap: 4px;
 }
 
 .mobile .page-children {
-	gap: 0;
-	margin-top: 2px;
+	gap: 4px;
+	margin-top: 4px;
 }
 
 .mobile .page-item-row {
-	min-height: 44px;
+	min-height: 50px;
 	padding-block: 4px;
 }
 
 .mobile .page-children .page-item-row {
-	min-height: 38px;
-	padding-block: 1px;
-}
-
-.mobile .page-children .page-item-link {
-	font-size: 17px;
-	line-height: 1.4;
+	min-height: 50px;
 	padding-block: 4px;
 }
 
+.mobile .page-children .page-item-link {
+	font-size: 18px;
+	line-height: 1.4;
+	padding-block: 6px;
+}
+
 .mobile .page-children .page-symbol-slot {
-	width: 28px;
-	height: 28px;
+	width: 26px;
+	height: 26px;
 }
 
 .mobile .page-children .page-symbol-slot .page-emoji {

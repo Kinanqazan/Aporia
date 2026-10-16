@@ -138,6 +138,29 @@
 		}
 	}
 
+	function handlePageLockShortcut(event: KeyboardEvent) {
+		if (
+			!event.shiftKey ||
+			event.ctrlKey ||
+			event.metaKey ||
+			event.altKey ||
+			event.code !== 'KeyL' ||
+			event.repeat ||
+			event.defaultPrevented ||
+			isLockRequestInFlight ||
+			imageViewer
+		) return;
+
+		const target = event.target;
+		if (target instanceof HTMLElement) {
+			if (target.closest('input, textarea, select, [role="textbox"]')) return;
+			if (target.isContentEditable) return;
+		}
+
+		event.preventDefault();
+		void togglePageLock();
+	}
+
 	function submitIconChange() {
 		setTimeout(() => {
 			setFormExpectedVersion(iconForm);
@@ -1852,6 +1875,7 @@
 		handleResize();
 		editorElement?.addEventListener('dblclick', handleEditorImageClick);
 		window.addEventListener('keydown', handleImageViewerKeydown);
+		window.addEventListener('keydown', handlePageLockShortcut);
 		window.addEventListener('resize', handleResize);
 		window.addEventListener('pagehide', handlePageHide);
 		window.addEventListener('aporia-flush-page', handleEditorFlushRequest);
@@ -1886,6 +1910,7 @@
 			window.removeEventListener('dragend', handleDragEnd, { capture: true });
 			editorElement?.removeEventListener('dblclick', handleEditorImageClick);
 			window.removeEventListener('keydown', handleImageViewerKeydown);
+			window.removeEventListener('keydown', handlePageLockShortcut);
 			window.removeEventListener('resize', handleResize);
 			document.body.classList.remove('image-viewer-open');
 		}
@@ -2806,8 +2831,9 @@
 				class="page-lock-btn"
 				disabled={isLockRequestInFlight}
 				onclick={togglePageLock}
-				title={isLocked ? 'Unlock page' : 'Lock page'}
+				title={`${isLocked ? 'Unlock page' : 'Lock page'} (Shift+L)`}
 				aria-label={isLocked ? 'Unlock page' : 'Lock page'}
+				aria-keyshortcuts="Shift+L"
 			>
 				{#if isLocked}<Lock size={isMobile ? 26 : 18} />{:else}<Unlock size={isMobile ? 26 : 18} />{/if}
 			</button>
