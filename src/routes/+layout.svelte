@@ -30,6 +30,7 @@
 	import type { PageNode } from '$lib/server/pages';
 	import { parseExpandedSidebarState, serializeExpandedSidebarState } from '$lib/sidebar-state.js';
 	import { sidebarGesture } from '$lib/sidebar-gesture.js';
+	import { createSearchController } from '$lib/search-controller.js';
 	import { pageLongPress } from '$lib/page-long-press.js';
 	import { createSidebarCreateNavigation } from '$lib/sidebar-create-navigation.js';
 
@@ -111,14 +112,15 @@
 		return true;
 	}
 
-	function requestEditorFlush(pageId: string): Promise<boolean> {
+	function requestEditorFlush(pageId: string, purpose: 'share' | 'cleanup' = 'share'): Promise<boolean> {
 		return new Promise((resolve) => {
 			const detail: {
 				pageId: string;
+				purpose: 'share' | 'cleanup';
 				handled: boolean;
 				resolve: (saved: boolean) => void;
-			} = { pageId, handled: false, resolve };
-			window.dispatchEvent(new CustomEvent('aporia-flush-page-before-share', { detail }));
+			} = { pageId, purpose, handled: false, resolve };
+			window.dispatchEvent(new CustomEvent('aporia-flush-page', { detail }));
 			if (!detail.handled) resolve(true);
 		});
 	}
@@ -316,6 +318,15 @@
 	let searchQuery = $state('');
 	let searchResults = $state<any[]>([]);
 	let searchFocusedIndex = $state(0);
+	const searchController = createSearchController({
+		search: async (query) => {
+			const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+			if (!response.ok) throw new Error(`Search failed: HTTP ${response.status}`);
+			return (await response.json()).results || [];
+		},
+		onResults: (results: any[]) => { searchResults = results; searchFocusedIndex = 0; },
+		onError: (error) => console.error(error)
+	});
 	let sidebarSearchInputEl = $state<HTMLInputElement | null>(null);
 	let searchContainerEl = $state<HTMLDivElement | null>(null);
 	let editorTextSizeMenuEl = $state<HTMLDivElement | null>(null);
@@ -566,6 +577,7 @@
 	});
 
 	afterNavigate((navigation) => {
+		searchController.cancel();
 		isSearchOpen = false;
 		isSidebarSearchVisible = false;
 		sidebarCreateNavigation.afterNavigate();
@@ -589,18 +601,7 @@
 	});
 
 	async function handleSearchInput() {
-		searchFocusedIndex = 0;
-		if (!searchQuery.trim()) {
-			searchResults = [];
-			return;
-		}
-		try {
-			const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
-			const data = await res.json();
-			searchResults = data.results || [];
-		} catch (err) {
-			console.error(err);
-		}
+		await searchController.update(searchQuery);
 	}
 
 	function handleSearchKeydown(e: KeyboardEvent) {
@@ -661,6 +662,7 @@
 	}
 
 	function closeSidebarSearch() {
+		searchController.cancel();
 		isSidebarSearchVisible = false;
 		isSearchOpen = false;
 	}
@@ -754,6 +756,12 @@
 		isCleanupInProgress = true;
 		cleanupMessage = '';
 		try {
+			if (isSavingSharedItem || isNotionImportInProgress || isBackupRestoring) {
+				throw new Error('Finish the current upload or import before cleaning unused uploads.');
+			}
+			if (currentPageId && !(await requestEditorFlush(currentPageId, 'cleanup'))) {
+				throw new Error('Finish uploads and save your page changes before cleaning unused uploads.');
+			}
 			const response = await fetch('/api/assets/cleanup', { method: 'POST' });
 			const result = await response.json();
 			if (!response.ok || !result.success) throw new Error(result.error || 'Unable to clean uploads');

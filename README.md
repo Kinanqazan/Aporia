@@ -62,7 +62,7 @@ For personal AI assistant access, see [the MCP connection guide](docs/mcp.md). I
 | **Editor** | [TipTap 3](https://tiptap.dev/) |
 | **Database & ORM** | [SQLite](https://sqlite.org/) + [Drizzle ORM](https://orm.drizzle.team/) |
 | **Bundler** | [Vite 8](https://vitejs.dev/) |
-| **Deployment** | Docker / GHCR / Vercel (`adapter-auto`) |
+| **Deployment** | Docker / GHCR (`adapter-node`) / Vercel (`adapter-vercel`) |
 
 ---
 

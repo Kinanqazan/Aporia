@@ -5,7 +5,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { Editor, Extension, ResizableNodeView, mergeAttributes } from '@tiptap/core';
 	import type { JSONContent, ResizableNodeViewDirection } from '@tiptap/core';
-	import { Selection, Plugin, TextSelection } from '@tiptap/pm/state';
+	import { Selection, Plugin, TextSelection, type Transaction } from '@tiptap/pm/state';
 	import { Decoration, DecorationSet } from '@tiptap/pm/view';
 	import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 	import StarterKit from '@tiptap/starter-kit';
@@ -46,6 +46,7 @@
 	import PageIcon from '$lib/components/PageIcon.svelte';
 	import { constrainImageSizeToWidth } from '$lib/editor/image-resize';
 	import { createAutosaveController } from '$lib/editor/autosave-controller.js';
+	import { startUploadActivity, type UploadActivity } from '$lib/editor/upload-activity';
 	import {
 		restorePersistedDetailsOpenState,
 		synchronizeDetailsElement,
@@ -155,10 +156,13 @@
 	// Tiptap states
 	let editorElement = $state<HTMLDivElement>();
 	let editor = $state<Editor>();
+	let isFileDropActive = $state(false);
+	let fileDragDepth = 0;
 	let canUndo = $state(false);
 	let editorPageId = $state<string | null>(null);
 	let autosaveStatus = $state<'idle' | 'saving' | 'error' | 'conflict'>('idle');
 	const draftsByPage = new Map<string, string>();
+	const pendingUploadActivities = new Map<string, Set<UploadActivity>>();
 	const autosaveController = createAutosaveController({
 		save: savePageContent,
 		onStatusChange: (status) => autosaveStatus = status,
@@ -626,7 +630,7 @@
 	}
 
 	function openImagePicker(range?: { from: number; to: number }) {
-		if (isLocked) return;
+		if (isLocked || isImageUploading || isAttachmentUploading) return;
 		imageInsertRange = range ?? null;
 		imageUrl = '';
 		imageError = '';
@@ -654,26 +658,11 @@
 	}
 
 	async function uploadImage(file: File, position?: number) {
-		if (isLocked || !editor) return;
-		isImageUploading = true;
-		imageError = '';
-		try {
-			const formData = new FormData();
-			formData.set('pageId', data.pageRecord.id);
-			formData.set('file', file);
-			const response = await fetch('/api/assets', { method: 'POST', body: formData });
-			const result = await response.json();
-			if (!response.ok || !result.success) throw new Error(result.error || 'Unable to upload image');
-			insertImage(result.image, position);
-			isImagePickerOpen = false;
-		} catch (error) {
-			imageError = error instanceof Error ? error.message : 'Unable to upload image';
-		} finally {
-			isImageUploading = false;
-		}
+		if (await uploadPageFiles([file], 'image', position, imageInsertRange)) isImagePickerOpen = false;
 	}
 
 	function selectLocalImage() {
+		if (isImageUploading || isAttachmentUploading) return;
 		imageError = '';
 		imageFileInput?.click();
 	}
@@ -686,64 +675,76 @@
 	}
 
 	function openAttachmentPicker(range?: { from: number; to: number }) {
-		if (isLocked || isAttachmentUploading) return;
+		if (isLocked || isAttachmentUploading || isImageUploading) return;
 		attachmentInsertRange = range ?? null;
 		attachmentError = '';
 		attachmentFileInput?.click();
 	}
 
-	function insertAttachment(attachment: Record<string, unknown>) {
-		if (!editor) return;
-		const chain = editor.chain().focus();
-		if (attachmentInsertRange) {
-			chain.deleteRange(attachmentInsertRange).insertContent({ type: 'fileAttachment', attrs: attachment }).run();
-		} else {
-			chain.insertContent({ type: 'fileAttachment', attrs: attachment }).run();
-		}
-		attachmentInsertRange = null;
-	}
-
 	async function uploadAttachment(file: File) {
-		if (isLocked || !editor) return;
-		isAttachmentUploading = true;
-		attachmentError = '';
-		try {
-			const formData = new FormData();
-			formData.set('pageId', data.pageRecord.id);
-			formData.set('file', file);
-			const response = await fetch('/api/assets/attachment', { method: 'POST', body: formData });
-			const result = await response.json();
-			if (!response.ok || !result.success || !result.attachment) {
-				throw new Error(result.error || 'Unable to upload file');
-			}
-			insertAttachment(result.attachment);
-		} catch (error) {
-			attachmentError = error instanceof Error ? error.message : 'Unable to upload file';
-			attachmentInsertRange = null;
-		} finally {
-			isAttachmentUploading = false;
-		}
+		await uploadPageFiles([file], 'attachment', undefined, attachmentInsertRange);
 	}
 
 	async function uploadDroppedFiles(files: File[], position: number) {
-		if (isLocked || !editor || files.length === 0) return;
-		isAttachmentUploading = true;
+		await uploadPageFiles(files, 'drop', position);
+	}
+
+	async function finishPageUploads(pageId: string) {
+		const activities = pendingUploadActivities.get(pageId);
+		if (!activities) return;
+		pendingUploadActivities.delete(pageId);
+		await Promise.allSettled([...activities].map(activity => activity.finish()));
+	}
+
+	async function uploadPageFiles(
+		files: File[], source: 'image' | 'attachment' | 'drop', position?: number,
+		replaceRange?: { from: number; to: number } | null
+	): Promise<boolean> {
+		if (isLocked || !editor || files.length === 0) return false;
+		if (isImageUploading || isAttachmentUploading) {
+			attachmentError = 'Wait for the current upload to finish before adding more files.';
+			return false;
+		}
+		const targetEditor = editor;
+		const pageId = data.pageRecord.id;
+		let insertPosition = position ?? targetEditor.state.selection.from;
+		let range = replaceRange ? { ...replaceRange } : null;
+		const controller = new AbortController();
+		const cancel = () => controller.abort(new Error('Upload cancelled because the page changed.'));
+		const trackPosition = ({ transaction }: { transaction: Transaction }) => {
+			insertPosition = transaction.mapping.map(insertPosition);
+			if (range) range = { from: transaction.mapping.map(range.from), to: transaction.mapping.map(range.to) };
+		};
+		targetEditor.on('destroy', cancel);
+		targetEditor.on('transaction', trackPosition);
+		if (source === 'image') { isImageUploading = true; imageInsertRange = null; imageError = ''; }
+		else { isAttachmentUploading = true; attachmentInsertRange = null; }
 		attachmentError = '';
+		let activity: UploadActivity | undefined;
+		let inserted = false;
 		const content: JSONContent[] = [];
 		const failures: string[] = [];
-
+		const reportError = (message: string) => {
+			if (source === 'image') imageError = message;
+			else attachmentError = message;
+		};
 		try {
+			activity = await startUploadActivity();
+			const signal = AbortSignal.any([controller.signal, activity.signal]);
+			signal.throwIfAborted();
 			for (const file of files) {
 				try {
-					const isImage = file.type.startsWith('image/');
+					let isImage = source === 'image' || (source === 'drop' && file.type.startsWith('image/'));
 					const formData = new FormData();
-					formData.set('pageId', data.pageRecord.id);
+					formData.set('pageId', pageId);
 					formData.set('file', file);
-
-					const response = await fetch(isImage ? '/api/assets' : '/api/assets/attachment', {
-						method: 'POST',
-						body: formData
-					});
+					let response = await fetch(isImage ? '/api/assets' : '/api/assets/attachment', { method: 'POST', body: formData, signal });
+					// Images the inline viewer cannot handle can still be attached as files.
+					if (source === 'drop' && isImage && response.status === 400) {
+						await response.arrayBuffer();
+						isImage = false;
+						response = await fetch('/api/assets/attachment', { method: 'POST', body: formData, signal });
+					}
 					const result = await response.json();
 					if (!response.ok || !result.success) {
 						throw new Error(result.error || `Unable to upload ${file.name || 'file'}`);
@@ -757,20 +758,46 @@
 						throw new Error(`Unable to upload ${file.name || 'file'}`);
 					}
 				} catch (error) {
+					signal.throwIfAborted();
 					const reason = error instanceof Error ? error.message : 'Unable to upload';
 					failures.push(`${file.name || 'File'}: ${reason}`);
 				}
 			}
 
-			if (content.length > 0 && editor) {
-				const safePosition = Math.max(0, Math.min(position, editor.state.doc.content.size));
-				editor.chain().focus().insertContentAt(safePosition, content).run();
+			signal.throwIfAborted();
+			if (editor !== targetEditor || data.pageRecord.id !== pageId || targetEditor.isDestroyed || isLocked) {
+				throw new Error('Upload cancelled because the page changed or was locked.');
 			}
-			if (failures.length > 0) attachmentError = failures.join(' · ');
+			if (content.length > 0) {
+				const activities = pendingUploadActivities.get(pageId) ?? new Set<UploadActivity>();
+				activities.add(activity);
+				pendingUploadActivities.set(pageId, activities);
+				const chain = targetEditor.chain().focus();
+				if (range) chain.deleteRange(range).insertContent(content);
+				else chain.insertContentAt(Math.max(0, Math.min(insertPosition, targetEditor.state.doc.content.size)), content);
+				inserted = chain.run();
+				if (!inserted) {
+					activities.delete(activity);
+					throw new Error('Unable to insert the uploaded files.');
+				}
+				// The captured page now owns these files; save it before releasing protection.
+				targetEditor.off('destroy', cancel);
+				if (!(await flushPendingSave())) {
+					reportError('Files uploaded, but the page could not be saved. Retry saving before cleaning uploads.');
+					return false;
+				}
+			}
+			if (failures.length > 0) reportError(failures.join(' · '));
+			return inserted;
 		} catch (error) {
-			attachmentError = error instanceof Error ? error.message : 'Unable to upload dropped files';
+			reportError(error instanceof Error ? error.message : 'Unable to upload files');
+			return false;
 		} finally {
-			isAttachmentUploading = false;
+			targetEditor.off('destroy', cancel);
+			targetEditor.off('transaction', trackPosition);
+			if (activity && !inserted) await activity.finish().catch(() => {});
+			if (source === 'image') isImageUploading = false;
+			else isAttachmentUploading = false;
 		}
 	}
 
@@ -1120,7 +1147,7 @@
 	let isActionMenuOpen = $state(false);
 	let openUpward = $state(false);
 	let blockTypeSearchQuery = $state('');
-	let blockTypeSearchInput: HTMLInputElement | null = null;
+	let blockTypeSearchInput = $state<HTMLInputElement | null>(null);
 	type BlockActionType =
 		| 'paragraph'
 		| 'heading'
@@ -1273,10 +1300,12 @@
 		
 		if (editor && editorPageId !== data.pageRecord.id) {
 			if (editorPageId && autosaveController.isDirty(editorPageId)) draftsByPage.set(editorPageId, JSON.stringify(editor.getJSON()));
-			autosaveController.markSaved({
-				pageId: data.pageRecord.id,
-				contentJson: data.pageRecord.contentJson
-			}, data.pageRecord.version);
+			if (!autosaveController.isDirty(data.pageRecord.id)) {
+				autosaveController.markSaved({
+					pageId: data.pageRecord.id,
+					contentJson: data.pageRecord.contentJson
+				}, data.pageRecord.version);
+			}
 			editor.destroy();
 			editor = undefined;
 			editorElement?.replaceChildren();
@@ -1788,21 +1817,35 @@
 		const handlePageHide = () => {
 			void flushPendingSave({ keepalive: true });
 		};
-		const handleShareFlushRequest = (event: Event) => {
+		const handleEditorFlushRequest = (event: Event) => {
 			const detail = (event as CustomEvent<{
 				pageId: string;
+				purpose: 'share' | 'cleanup';
 				handled: boolean;
 				resolve: (saved: boolean) => void;
 			}>).detail;
 			if (!detail || detail.pageId !== data.pageRecord.id) return;
 			detail.handled = true;
-			void flushPendingSave().then(detail.resolve);
+			const canCleanUploads = () => !isImageUploading && !isAttachmentUploading &&
+				![...draftsByPage.keys()].some((pageId) => autosaveController.hasConflict(pageId));
+			if (detail.purpose === 'cleanup' && !canCleanUploads()) {
+				detail.resolve(false);
+				return;
+			}
+			void flushPendingSave().then(
+				(saved) => detail.resolve(saved && (detail.purpose !== 'cleanup' || canCleanUploads())),
+				() => detail.resolve(false)
+			);
 		};
 
 		// Listen to global mousemoves to position the floating gutter block handle
 		window.addEventListener('mousemove', handleMouseMove);
 		window.addEventListener('click', handleGlobalClick);
 		window.addEventListener('dragover', handleDragOver, { capture: true });
+		window.addEventListener('dragenter', handleFileDragEnter, { capture: true });
+		window.addEventListener('dragleave', handleFileDragLeave, { capture: true });
+		window.addEventListener('dragover', handleFileDragOver, { capture: true });
+		window.addEventListener('drop', handleFileDrop, { capture: true });
 		window.addEventListener('drop', handleDrop, { capture: true });
 		window.addEventListener('dragend', handleDragEnd, { capture: true });
 		
@@ -1811,17 +1854,22 @@
 		window.addEventListener('keydown', handleImageViewerKeydown);
 		window.addEventListener('resize', handleResize);
 		window.addEventListener('pagehide', handlePageHide);
-		window.addEventListener('aporia-flush-page-before-share', handleShareFlushRequest);
+		window.addEventListener('aporia-flush-page', handleEditorFlushRequest);
 
 		return () => {
 			window.removeEventListener('pagehide', handlePageHide);
-			window.removeEventListener('aporia-flush-page-before-share', handleShareFlushRequest);
+			window.removeEventListener('aporia-flush-page', handleEditorFlushRequest);
 		};
 	});
 
 	onDestroy(() => {
 		cancelGutterHide();
-		void flushPendingSave({ keepalive: true });
+		void flushPendingSave({ keepalive: true }).finally(() => {
+			for (const activities of pendingUploadActivities.values()) {
+				for (const activity of activities) activity.abandon();
+			}
+			pendingUploadActivities.clear();
+		});
 		autosaveController.destroy();
 		if (editor) {
 			editor.destroy();
@@ -1830,6 +1878,10 @@
 			window.removeEventListener('mousemove', handleMouseMove);
 			window.removeEventListener('click', handleGlobalClick);
 			window.removeEventListener('dragover', handleDragOver, { capture: true });
+			window.removeEventListener('dragenter', handleFileDragEnter, { capture: true });
+			window.removeEventListener('dragleave', handleFileDragLeave, { capture: true });
+			window.removeEventListener('dragover', handleFileDragOver, { capture: true });
+			window.removeEventListener('drop', handleFileDrop, { capture: true });
 			window.removeEventListener('drop', handleDrop, { capture: true });
 			window.removeEventListener('dragend', handleDragEnd, { capture: true });
 			editorElement?.removeEventListener('dblclick', handleEditorImageClick);
@@ -2045,7 +2097,10 @@
 			});
 			const result = await response.json();
 			if (response.ok && result.success === true) {
-				if (draftsByPage.get(save.pageId) === save.contentJson) draftsByPage.delete(save.pageId);
+				if (draftsByPage.get(save.pageId) === save.contentJson) {
+					draftsByPage.delete(save.pageId);
+					await finishPageUploads(save.pageId);
+				}
 				return { success: true, version: result.version };
 			}
 			return { success: false, conflict: [404, 409, 423].includes(response.status) || result.conflict === true };
@@ -2074,6 +2129,7 @@
 		const saved = data.pageRecord.contentJson ? JSON.parse(data.pageRecord.contentJson) : { type: 'doc', content: [] };
 		editor.commands.setContent(saved, { emitUpdate: false });
 		draftsByPage.delete(data.pageRecord.id);
+		await finishPageUploads(data.pageRecord.id);
 		autosaveController.markSaved({ pageId: data.pageRecord.id, contentJson: data.pageRecord.contentJson }, data.pageRecord.version);
 		autosaveStatus = 'idle';
 	}
@@ -2426,6 +2482,8 @@
 	function handleDragEnd() {
 		draggedBlockIndex = null;
 		draggedBlockPath = null;
+		fileDragDepth = 0;
+		isFileDropActive = false;
 		dropLineTop = null;
 		dropLineVertical = null;
 		dropMode = 'vertical';
@@ -2433,6 +2491,44 @@
 		isGutterVisible = false;
 		clearTimeout(dragExpandTimeout);
 		lastDragTargetDetails = null;
+	}
+
+	function isFileDrag(event: DragEvent) {
+		return Array.from(event.dataTransfer?.types ?? []).includes('Files') ||
+			(event.dataTransfer?.files.length ?? 0) > 0;
+	}
+
+	function handleFileDragEnter(event: DragEvent) {
+		if (!isFileDrag(event) || isLocked) return;
+		fileDragDepth += 1;
+		isFileDropActive = true;
+	}
+
+	function handleFileDragLeave(event: DragEvent) {
+		if (!isFileDrag(event)) return;
+		fileDragDepth = Math.max(0, fileDragDepth - 1);
+		if (fileDragDepth === 0) isFileDropActive = false;
+	}
+
+	function handleFileDragOver(event: DragEvent) {
+		if (!isFileDrag(event)) return;
+		event.preventDefault();
+		if (event.dataTransfer) event.dataTransfer.dropEffect = isLocked ? 'none' : 'copy';
+		isFileDropActive = !isLocked;
+	}
+
+	function handleFileDrop(event: DragEvent) {
+		const files = Array.from(event.dataTransfer?.files ?? []);
+		if (files.length === 0) return;
+		event.preventDefault();
+		event.stopPropagation();
+		fileDragDepth = 0;
+		isFileDropActive = false;
+		if (isLocked || !editor) return;
+
+		const position = editor.view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ??
+			editor.state.doc.content.size;
+		void uploadDroppedFiles(files, position);
 	}
 
 	/** Edge detection threshold in px — how close to left/right edge triggers column mode */
@@ -2659,7 +2755,20 @@
 	}
 </script>
 
+<svelte:head>
+	<title>{title || 'Untitled'} - Aporia</title>
+</svelte:head>
+
 <article class="editor-page">
+	{#if isFileDropActive && !isLocked}
+		<div class="file-drop-overlay" aria-hidden="true">
+			<div class="file-drop-highlight">
+				<strong>Drop files to upload</strong>
+				<span>Images and documents will be added to this page</span>
+			</div>
+		</div>
+	{/if}
+
 	<!-- Combined save status and page lock controls -->
 	<div class="page-status-controls">
 		{#if autosaveStatus === 'saving' || autosaveStatus === 'error'}
@@ -3280,7 +3389,7 @@
 				<button type="button" class="image-picker-close" onclick={closeImagePicker} aria-label="Close image picker">×</button>
 			</div>
 
-			<button type="button" class="image-upload-button" disabled={isImageUploading} onclick={selectLocalImage}>
+			<button type="button" class="image-upload-button" disabled={isImageUploading || isAttachmentUploading} onclick={selectLocalImage}>
 				<ImageIcon size={18} />
 				<span>{isImageUploading ? 'Uploading image…' : 'Upload image'}</span>
 			</button>
@@ -3394,6 +3503,42 @@
 	.editor-page {
 		position: relative;
 		padding-top: 24px;
+	}
+
+	.file-drop-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 3000;
+		pointer-events: none;
+		display: grid;
+		place-items: center;
+		padding: 24px;
+		background: color-mix(in srgb, var(--accent-color, #5b8def) 10%, transparent);
+	}
+
+	.file-drop-highlight {
+		width: min(100%, 560px);
+		min-height: 220px;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		border: 2px dashed var(--accent-color, #5b8def);
+		border-radius: 18px;
+		background: var(--bg-sidebar);
+		color: var(--text-main);
+		text-align: center;
+		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+	}
+
+	.file-drop-highlight strong {
+		font-size: 18px;
+	}
+
+	.file-drop-highlight span {
+		color: var(--text-muted);
+		font-size: 14px;
 	}
 
 	@media (max-width: 768px) {

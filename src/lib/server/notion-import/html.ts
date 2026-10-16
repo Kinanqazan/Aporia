@@ -6,6 +6,7 @@ import { db } from '$lib/server/database';
 import { pages } from '$lib/server/schema';
 import { extractTextFromJson, generateId, getActivePages } from '$lib/server/pages';
 import { AssetValidationError, publicAssetUrl, removeAsset, storeImageBytes, validateImageBytes, validateImageReferences } from '$lib/server/assets';
+import { withUploadActivity } from '$lib/server/upload-activity';
 import { validateTiptapDocument } from './validation';
 import { countMarkdownTables, csvToHtml, markdownToHtml, titleFromMarkdown } from './formats';
 
@@ -97,6 +98,10 @@ export async function previewNotionHtmlImport(archive: File): Promise<NotionImpo
 }
 
 export async function applyNotionHtmlImport(archive: File): Promise<NotionImportResult> {
+	return withUploadActivity(() => applyNotionHtmlImportContents(archive));
+}
+
+async function applyNotionHtmlImportContents(archive: File): Promise<NotionImportResult> {
 	const prepared = await prepareArchive(archive);
 	const createdAssetIds: string[] = [];
 	const imageCache = new Map<string, TiptapNode | null>();

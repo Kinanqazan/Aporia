@@ -5,8 +5,18 @@ import { validateImageReferences } from '$lib/server/assets';
 import { isTaskCheckboxOnlyChange } from '$lib/server/task-checkbox-change.js';
 import { validateEditorDocument } from '$lib/server/mcp/document';
 import { pageVersion } from '$lib/server/mcp/versions';
+import { withUploadActivity, UploadActivityError } from '$lib/server/upload-activity';
 
-export const POST: RequestHandler = async ({ params, request }) => {
+export const POST: RequestHandler = async (event) => {
+	try {
+		return await withUploadActivity(async () => savePage(event));
+	} catch (error) {
+		return json({ success: false, error: error instanceof Error ? error.message : 'Unable to save page' },
+			{ status: error instanceof UploadActivityError ? 503 : 500 });
+	}
+};
+
+const savePage: RequestHandler = async ({ params, request }) => {
 	const id = params.id;
 	if (!id) {
 		return json({ success: false, error: 'Invalid page ID' }, { status: 400 });

@@ -113,9 +113,10 @@ export function createAutosaveController({
 	/** @param {FlushOptions} options */
 	async function drain(options) {
 		while (pendingSaves.size > 0) {
-			const next = pendingSaves.values().next();
-			if (next.done) break;
-			const payload = next.value;
+			const nextPayload = [...pendingSaves.values()].find((pending) => !conflictedPages.has(pending.pageId));
+			if (!nextPayload) break;
+			// A preceding save may have advanced the version after this edit was queued.
+			const payload = { ...nextPayload, expectedVersion: versionsByPage.get(nextPayload.pageId) ?? nextPayload.expectedVersion };
 			pendingSaves.delete(payload.pageId);
 			activePayload = payload;
 			clearStatusTimeout();
@@ -133,15 +134,15 @@ export function createAutosaveController({
 			const saved = typeof response === 'boolean' ? response : response.success;
 
 			if (!saved) {
-				if (typeof response !== 'boolean' && response.conflict) {
-					conflictedPages.add(payload.pageId);
-					setStatus('conflict');
-					return false;
-				}
 				// Never let an older failed request replace a newer edit that was
 				// queued while the request was in flight.
 				if (!pendingSaves.has(payload.pageId)) {
 					pendingSaves.set(payload.pageId, payload);
+				}
+				if (typeof response !== 'boolean' && response.conflict) {
+					conflictedPages.add(payload.pageId);
+					setStatus('conflict');
+					return false;
 				}
 				setStatus('error');
 				return false;
@@ -150,6 +151,10 @@ export function createAutosaveController({
 			lastSavedByPage.set(payload.pageId, payload.contentJson);
 		}
 
+		if (conflictedPages.size > 0) {
+			setStatus('conflict');
+			return false;
+		}
 		return true;
 	}
 
@@ -159,12 +164,11 @@ export function createAutosaveController({
 		clearStatusTimeout();
 	}
 
-	/** @param {AutosavePayload} payload */
 	/** @param {AutosavePayload} payload @param {string} [version] */
 	function markSaved(payload, version) {
 		lastSavedByPage.set(payload.pageId, payload.contentJson);
 		if (version) versionsByPage.set(payload.pageId, version);
-		conflictedPages.delete(payload.pageId);
+		if (conflictedPages.delete(payload.pageId)) pendingSaves.delete(payload.pageId);
 	}
 
 	/** @param {string} pageId */

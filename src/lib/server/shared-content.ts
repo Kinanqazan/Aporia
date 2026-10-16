@@ -8,6 +8,7 @@ import {
 import { AssetValidationError, publicAssetUrl, removeAsset, storeAttachment, storeImage, validateImageReferences } from '$lib/server/assets';
 import { pageVersion } from '$lib/server/mcp/versions';
 import { validateEditorDocument } from '$lib/server/mcp/document';
+import { withUploadActivity, UploadActivityError } from '$lib/server/upload-activity';
 
 const MAX_TITLE_LENGTH = 160;
 const MAX_TEXT_LENGTH = 50_000;
@@ -98,6 +99,15 @@ export async function createPageFromSharedContent(input: SharedContentInput) {
 }
 
 export async function appendSharedLinkToPage(pageId: unknown, input: SharedContentInput) {
+	try {
+		return await withUploadActivity(() => appendSharedLink(pageId, input));
+	} catch (error) {
+		if (error instanceof UploadActivityError) throw new SharedContentError(error.message, error.status);
+		throw error;
+	}
+}
+
+async function appendSharedLink(pageId: unknown, input: SharedContentInput) {
 	if (typeof pageId !== 'string' || !pageId) throw new SharedContentError('Choose a page to add this link to.');
 	const page = await getPageById(pageId);
 	if (!page || page.isInTrash) throw new SharedContentError('That page is no longer available.', 404);
@@ -142,6 +152,15 @@ export async function appendSharedLinkToPage(pageId: unknown, input: SharedConte
 }
 
 export async function appendSharedFilesToPage(pageId: unknown, files: File[], suppliedShareId?: unknown) {
+	try {
+		return await withUploadActivity(() => appendSharedFiles(pageId, files, suppliedShareId));
+	} catch (error) {
+		if (error instanceof UploadActivityError) throw new SharedContentError(error.message, error.status);
+		throw error;
+	}
+}
+
+async function appendSharedFiles(pageId: unknown, files: File[], suppliedShareId?: unknown) {
 	if (typeof pageId !== 'string' || !pageId) throw new SharedContentError('Choose a page for these files.');
 	if (files.length === 0 || files.length > 5) throw new SharedContentError('Share between one and five files at a time.');
 	if (files.reduce((total, file) => total + file.size, 0) > 25 * 1024 * 1024) {

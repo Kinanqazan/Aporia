@@ -5,10 +5,10 @@ import { eq } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
 import { dirname, extname, join, resolve } from 'path';
 import { mkdir, readFile, rename, rm, writeFile } from 'fs/promises';
+import { withCleanupActivity, withUploadActivity } from './upload-activity';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
-const UPLOAD_GRACE_PERIOD_MS = 5 * 60 * 1000;
 const databasePath = env.DATABASE_URL || 'data/app.db';
 const configuredUploadDirectory = env.UPLOAD_DIR || join(dirname(databasePath), 'uploads');
 const uploadDirectory = resolve(configuredUploadDirectory);
@@ -122,6 +122,10 @@ export async function storeImageBytes(filename: string, bytes: Uint8Array): Prom
 
 
 async function persistAsset(filename: string, mimeType: string, bytes: Uint8Array, forcedExtension?: string): Promise<AssetRecord> {
+	return withUploadActivity(() => writeAsset(filename, mimeType, bytes, forcedExtension));
+}
+
+async function writeAsset(filename: string, mimeType: string, bytes: Uint8Array, forcedExtension?: string): Promise<AssetRecord> {
 	const id = createAssetId();
 	const extension = forcedExtension ?? extname(filename).toLowerCase();
 	const storageKey = `${id}${extension}`;
@@ -188,23 +192,29 @@ function collectReferencedAssetIds(node: any, ids: Set<string>) {
 }
 
 export async function cleanupUnusedAssets(): Promise<{ deletedCount: number; deletedBytes: number }> {
+	return withCleanupActivity(removeUnusedAssets);
+}
+
+async function removeUnusedAssets(): Promise<{ deletedCount: number; deletedBytes: number }> {
+	// The cleanup reservation excludes uploads and imports during this scan.
+	const allAssets = await db.select().from(assets);
 	const referencedIds = new Set<string>();
 	const documents = await db.select({ contentJson: pages.contentJson }).from(pages);
 
 	for (const document of documents) {
 		try {
-			collectReferencedAssetIds(JSON.parse(document.contentJson), referencedIds);
+			const content = JSON.parse(document.contentJson);
+			if (!content || content.type !== 'doc' || (content.content !== undefined && !Array.isArray(content.content))) {
+				throw new Error('Invalid document');
+			}
+			collectReferencedAssetIds(content, referencedIds);
 		} catch {
 			// A malformed document must never cause potentially referenced assets to be deleted.
 			throw new Error('Cleanup stopped because a page has invalid content');
 		}
 	}
 
-	const allAssets = await db.select().from(assets);
-	const cutoff = Date.now() - UPLOAD_GRACE_PERIOD_MS;
-	const unusedAssets = allAssets.filter((asset) =>
-		!referencedIds.has(asset.id) && Date.parse(asset.createdAt) < cutoff
-	);
+	const unusedAssets = allAssets.filter((asset) => !referencedIds.has(asset.id));
 	let deletedBytes = 0;
 
 	for (const asset of unusedAssets) {

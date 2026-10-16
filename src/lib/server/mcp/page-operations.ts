@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { sqlite } from '$lib/server/database';
-import { generateId, extractTextFromJson, type PageNode } from '$lib/server/pages';
+import { generateId, extractTextFromJson, toFtsPrefixQuery, type PageNode } from '$lib/server/pages';
 import { normalizeIconColor } from '$lib/icon-colors';
 import { getWorkspaceGeneration } from './versions.js';
 import { parsePageVersion, pageVersion } from './page-version.js';
@@ -55,7 +55,7 @@ export function listPages(options: { parentId?: string | null; includeTrash?: bo
 	const values: unknown[] = [];
 	if (options.includeTrash) conditions.push('is_in_trash = 1');
 	else conditions.push('is_in_trash = 0');
-	if (options.parentId !== undefined) { conditions.push('parent_id = ?'); values.push(options.parentId); }
+	if (options.parentId !== undefined) { conditions.push('parent_id IS ?'); values.push(options.parentId); }
 	const where = conditions.join(' AND ');
 	const total = (sqlite.prepare(`SELECT count(*) AS n FROM pages WHERE ${where}`).get(...values) as { n: number }).n;
 	const pages = sqlite.prepare(`SELECT ${PAGE_SUMMARY_COLUMNS} FROM pages WHERE ${where} ORDER BY parent_id, position LIMIT ? OFFSET ?`)
@@ -77,12 +77,12 @@ export function getMcpPage(id: string) {
 }
 
 export function searchMcpPages(query: string, limit: number) {
-	const words = query.trim().split(/\s+/).filter(Boolean).map(term => `${term.replace(/"/g, '""')}*`);
-	if (!words.length) return { pages: [], limit, truncated: false };
+	const ftsQuery = toFtsPrefixQuery(query);
+	if (!ftsQuery) return { pages: [], limit, truncated: false };
 	try {
 		const found = sqlite.prepare(`SELECT p.id, p.title, p.icon, p.icon_color AS iconColor, p.parent_id AS parentId, p.position, p.revision
 			FROM pages_fts JOIN pages p ON p.id = pages_fts.id
-			WHERE pages_fts MATCH ? AND p.is_in_trash = 0 ORDER BY rank LIMIT ?`).all(words.join(' AND '), limit + 1) as any[];
+			WHERE pages_fts MATCH ? AND p.is_in_trash = 0 ORDER BY rank LIMIT ?`).all(ftsQuery, limit + 1) as any[];
 		const truncated = found.length > limit;
 		return { pages: found.slice(0, limit).map(p => ({ ...p, version: pageVersion(p.revision, getWorkspaceGeneration()) })), limit, truncated };
 	} catch {
@@ -195,8 +195,7 @@ export function restoreMcpPage(input: { id: string; expectedVersion: string; par
 	const now = new Date().toISOString();
 	sqlite.transaction(() => {
 		sqlite.prepare('UPDATE pages SET parent_id = ?, position = ?, is_in_trash = 0, trash_at = NULL, revision = revision + 1, updated_at = ? WHERE id = ?').run(parentId, siblings.n, now, page.id);
-		let position = 0;
-		for (const child of affected.slice(1)) sqlite.prepare('UPDATE pages SET position = ?, is_in_trash = 0, trash_at = NULL, revision = revision + 1, updated_at = ? WHERE id = ?').run(position++, now, child.id);
+		for (const child of affected.slice(1)) sqlite.prepare('UPDATE pages SET is_in_trash = 0, trash_at = NULL, revision = revision + 1, updated_at = ? WHERE id = ?').run(now, child.id);
 	})();
 	return { page: publicPageSummary(row(page.id)!), affectedPageIds: affected.map(p => p.id) };
 }

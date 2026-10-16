@@ -170,34 +170,6 @@ export async function updatePageAtVersion(
 	return result[0] || null;
 }
 
-// Persist content only if the page still has the same lock state and content
-// observed by the request handler. This closes the check-then-update race
-// between autosave and locking, and prevents concurrent writers from silently
-// overwriting one another.
-export async function updatePageContentConditionally(
-	id: string,
-	contentJson: string,
-	expected: { isLocked: number; contentJson: string }
-): Promise<PageNode | null> {
-	const now = new Date().toISOString();
-	const contentText = extractTextFromJson(contentJson);
-	const result = await db.update(pages)
-		.set({
-			contentJson,
-			contentText,
-			revision: sql`case when ${pages.contentJson} <> ${contentJson} then ${pages.revision} + 1 else ${pages.revision} end`,
-			updatedAt: now
-		})
-		.where(and(
-			eq(pages.id, id),
-			eq(pages.isLocked, expected.isLocked),
-			eq(pages.contentJson, expected.contentJson)
-		))
-		.returning() as PageNode[];
-
-	return result[0] || null;
-}
-
 export async function updatePageContentAtVersion(
 	id: string,
 	contentJson: string,
@@ -227,167 +199,6 @@ export async function updatePageContentAtVersion(
 	return result[0] || null;
 }
 
-// Move a page to a new parent and position
-export async function movePage(id: string, targetParentId: string | null, targetPosition: number): Promise<boolean> {
-	const now = new Date().toISOString();
-	const pageToMove = await getPageById(id);
-	if (!pageToMove || pageToMove.isInTrash) return false;
-	if (!Number.isInteger(targetPosition) || targetPosition < 0 || targetParentId === id) return false;
-
-	const activePages = await getActivePages();
-	const pagesById = new Map(activePages.map((page) => [page.id, page]));
-
-	// A page cannot be moved beneath itself or one of its descendants.
-	let ancestorId = targetParentId;
-	while (ancestorId !== null) {
-		if (ancestorId === id) return false;
-		const ancestor = pagesById.get(ancestorId);
-		if (!ancestor) return false;
-		ancestorId = ancestor.parentId;
-	}
-
-	const oldSiblings = activePages
-		.filter((page) => page.parentId === pageToMove.parentId && page.id !== id)
-		.sort((a, b) => a.position - b.position);
-	const newSiblings = activePages
-		.filter((page) => page.parentId === targetParentId && page.id !== id)
-		.sort((a, b) => a.position - b.position);
-	const finalPosition = Math.min(targetPosition, newSiblings.length);
-
-	// Re-number both affected sibling lists. This also handles reordering within the
-	// same parent without leaving gaps or duplicating positions.
-	db.transaction((tx) => {
-		for (const [position, sibling] of oldSiblings.entries()) {
-			tx.update(pages)
-				.set({ position, updatedAt: now })
-				.where(eq(pages.id, sibling.id))
-				.run();
-		}
-
-		const reorderedSiblings = [...newSiblings];
-		reorderedSiblings.splice(finalPosition, 0, pageToMove);
-		for (const [position, sibling] of reorderedSiblings.entries()) {
-			tx.update(pages)
-				.set({
-					parentId: sibling.id === id ? targetParentId : sibling.parentId,
-					position,
-					updatedAt: now
-				})
-				.where(eq(pages.id, sibling.id))
-				.run();
-		}
-	});
-
-	return true;
-}
-
-// Send a page (and recursively all its children) to the Trash Bin
-export async function sendToTrash(id: string): Promise<boolean> {
-	const now = new Date().toISOString();
-	const page = await getPageById(id);
-	if (!page) return false;
-
-	db.transaction((tx) => {
-		// Set trash state on the page itself
-		tx.update(pages)
-			.set({
-				isInTrash: 1,
-				trashAt: now,
-				updatedAt: now
-			})
-			.where(eq(pages.id, id))
-			.run();
-
-		// Recursively flag children (they follow parent to trash)
-		const findAndTrashChildren = (parentId: string) => {
-			const children = tx.select().from(pages).where(eq(pages.parentId, parentId)).all();
-			for (const child of children) {
-				tx.update(pages)
-					.set({
-						isInTrash: 1,
-						trashAt: now,
-						updatedAt: now
-					})
-					.where(eq(pages.id, child.id))
-					.run();
-				findAndTrashChildren(child.id);
-			}
-		};
-
-		findAndTrashChildren(id);
-	});
-
-	return true;
-}
-
-// Restore a page from the Trash Bin
-export async function restoreFromTrash(id: string, newParentId: string | null = null): Promise<boolean> {
-	const now = new Date().toISOString();
-	const page = await getPageById(id);
-	if (!page) return false;
-
-	// Check if current parent is in trash. If so, default parent becomes root (null) unless parent is specified.
-	let parentId = newParentId;
-	if (parentId === null && page.parentId !== null) {
-		const parent = db.select().from(pages).where(eq(pages.id, page.parentId)).limit(1).all()[0];
-		if (parent && parent.isInTrash === 0) {
-			parentId = page.parentId;
-		}
-	}
-
-	// Calculate sibling position in restored location
-	let nextPosition = 0;
-	if (parentId === null) {
-		const siblings = db.select({ count: sql<number>`count(*)` })
-			.from(pages)
-			.where(and(isNull(pages.parentId), eq(pages.isInTrash, 0)))
-			.all();
-		nextPosition = siblings[0]?.count || 0;
-	} else {
-		const siblings = db.select({ count: sql<number>`count(*)` })
-			.from(pages)
-			.where(and(eq(pages.parentId, parentId), eq(pages.isInTrash, 0)))
-			.all();
-		nextPosition = siblings[0]?.count || 0;
-	}
-
-	db.transaction((tx) => {
-		// Restore the target page
-		tx.update(pages)
-			.set({
-				parentId,
-				position: nextPosition,
-				isInTrash: 0,
-				trashAt: null,
-				updatedAt: now
-			})
-			.where(eq(pages.id, id))
-			.run();
-
-		// Recursively restore direct children to keep tree structure intact
-		const restoreChildren = (pId: string) => {
-			const children = tx.select().from(pages).where(and(eq(pages.parentId, pId), eq(pages.isInTrash, 1))).all();
-			let childPos = 0;
-			for (const child of children) {
-				tx.update(pages)
-					.set({
-						isInTrash: 0,
-						trashAt: null,
-						position: childPos++,
-						updatedAt: now
-					})
-					.where(eq(pages.id, child.id))
-					.run();
-				restoreChildren(child.id);
-			}
-		};
-
-		restoreChildren(id);
-	});
-
-	return true;
-}
-
 // Permanently delete a page and all its descendants
 export async function deletePermanently(id: string): Promise<boolean> {
 	const page = await getPageById(id);
@@ -404,11 +215,14 @@ export async function emptyTrash(): Promise<void> {
 }
 
 // Search pages using FTS5 virtual table
+export function toFtsPrefixQuery(query: string): string {
+	return query.trim().split(/\s+/).filter(Boolean)
+		.map((term) => `"${term.replace(/"/g, '""')}"*`).join(' AND ');
+}
+
 export function searchPages(query: string): SearchResult[] {
-	if (!query) return [];
-	const terms = query.trim().split(/\s+/).filter(Boolean).map(term => `${term.replace(/"/g, '""')}*`);
-	if (terms.length === 0) return [];
-	const ftsQuery = terms.join(' AND ');
+	const ftsQuery = toFtsPrefixQuery(query);
+	if (!ftsQuery) return [];
 
 	try {
 		const results = sqlite.prepare(`

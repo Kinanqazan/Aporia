@@ -1,6 +1,7 @@
 import { McpServer, createMcpHandler } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { validateImageReferences } from '$lib/server/assets';
+import { withUploadActivity } from '$lib/server/upload-activity';
 import { tiptapToMarkdown } from '$lib/server/markdown';
 import { validateEditorDocument } from './document.js';
 import { getWorkspaceGeneration } from './versions.js';
@@ -60,20 +61,20 @@ function createServer() {
 		inputSchema: z.object({ operationId: z.string().min(8).max(128), title: z.string().min(1).max(300).default('Untitled'), parentId: z.string().nullable().optional(), content: z.unknown().optional() }),
 		outputSchema,
 		annotations: { readOnlyHint: false, destructiveHint: false }
-	}, async (input) => run('create_page', undefined, async () => {
+	}, async (input) => run('create_page', undefined, () => withUploadActivity(async () => {
 		const document = input.content ?? { type: 'doc', content: [{ type: 'paragraph' }] };
 		const validation = validateEditorDocument(document);
 		if (validation) throw new PageOperationError('INVALID_INPUT', validation);
 		const imageError = await validateImageReferences(document);
 		if (imageError) throw new PageOperationError('INVALID_INPUT', imageError);
 		return createPageIdempotently({ operationId: input.operationId, title: input.title, parentId: input.parentId ?? null, contentJson: JSON.stringify(document) });
-	}));
+	})));
 	server.registerTool('update_page', {
 		description: 'Rename and/or replace a page document using the version returned by read_page or list_pages.',
 		inputSchema: z.object({ id: z.string().min(1), expectedVersion: z.string().min(1), title: z.string().min(1).max(300).optional(), content: z.unknown().optional() }),
 		outputSchema,
 		annotations: { readOnlyHint: false, destructiveHint: true }
-	}, async (input) => run('update_page', input.id, async () => {
+	}, async (input) => run('update_page', input.id, () => withUploadActivity(async () => {
 		let contentJson: string | undefined;
 		if (input.content !== undefined) {
 			const validation = validateEditorDocument(input.content);
@@ -83,7 +84,7 @@ function createServer() {
 			contentJson = JSON.stringify(input.content);
 		}
 		return updateMcpPage({ id: input.id, expectedVersion: input.expectedVersion, title: input.title, contentJson });
-	}));
+	})));
 	server.registerTool('move_page', {
 		description: 'Move a page to a parent or root. Position is zero-based; omit to move to the end.',
 		inputSchema: z.object({ id: z.string().min(1), expectedVersion: z.string().min(1), parentId: z.string().nullable(), position: z.number().int().min(0).optional() }),

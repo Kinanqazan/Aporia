@@ -56,6 +56,11 @@ sqlite.exec(`
 		byte_size INTEGER NOT NULL,
 		created_at TEXT NOT NULL
 	);
+	CREATE TABLE IF NOT EXISTS upload_activity (
+		id TEXT PRIMARY KEY,
+		kind TEXT NOT NULL CHECK(kind IN ('upload', 'cleanup')),
+		expires_at INTEGER NOT NULL
+	);
 `);
 
 // Initialize Settings Table

@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { cleanupUnusedAssets } from '$lib/server/assets';
+import { UploadActivityError } from '$lib/server/upload-activity';
 
 export const POST: RequestHandler = async ({ request, url }) => {
 	const origin = request.headers.get('origin');
@@ -17,6 +18,6 @@ export const POST: RequestHandler = async ({ request, url }) => {
 		});
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Unable to clean uploads';
-		return json({ success: false, error: message }, { status: 500 });
+		return json({ success: false, error: message }, { status: error instanceof UploadActivityError ? error.status : 500 });
 	}
 };

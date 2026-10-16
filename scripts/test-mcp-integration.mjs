@@ -165,7 +165,49 @@ try {
 	const restored = await client.callTool({ name: 'restore_page', arguments: { id: pageId, expectedVersion: trashed.structuredContent.result.page.version } });
 	assert.equal(restored.structuredContent.result.page.isInTrash, 0);
 	assert.equal('contentJson' in restored.structuredContent.result.page, false, 'restore should return a summary');
+	const reviewFailures = [];
+	const verify = (condition, message) => { if (!condition) reviewFailures.push(message); };
+	const roots = await client.callTool({ name: 'list_pages', arguments: { parentId: null, limit: 100 } });
+	verify(roots.structuredContent.result.pages.some((page) => page.id === pageId), 'parentId:null must list root pages');
+	verify(roots.structuredContent.result.pages.every((page) => page.parentId === null), 'root listing must exclude child pages');
+	const punctuationPage = await client.callTool({ name: 'create_page', arguments: {
+		operationId: 'review-punctuation-page', title: 'C++ to-do "quoted" OR guide'
+	} });
+	for (const query of ['C++', 'to-do', '"quoted"', 'OR']) {
+		const mcpSearch = await client.callTool({ name: 'search_pages', arguments: { query } });
+		verify(!mcpSearch.isError && mcpSearch.structuredContent.result.pages.some((page) =>
+			page.id === punctuationPage.structuredContent.result.page.id), `MCP search must treat ${query} as plain text`);
+		const browserSearch = await fetch(`${baseUrl}/api/search?q=${encodeURIComponent(query)}`, { headers: { Cookie: sessionCookie } });
+		verify((await browserSearch.json()).results.some((page) => page.id === punctuationPage.structuredContent.result.page.id),
+			`browser search must treat ${query} as plain text`);
+	}
+	const orderParent = (await client.callTool({ name: 'create_page', arguments: {
+		operationId: 'review-order-parent', title: 'Review order parent'
+	} })).structuredContent.result.page;
+	const orderA = (await client.callTool({ name: 'create_page', arguments: {
+		operationId: 'review-order-child-a', title: 'Order A', parentId: orderParent.id
+	} })).structuredContent.result.page;
+	const orderB = (await client.callTool({ name: 'create_page', arguments: {
+		operationId: 'review-order-child-b', title: 'Order B', parentId: orderParent.id
+	} })).structuredContent.result.page;
+	const grandchild = (await client.callTool({ name: 'create_page', arguments: {
+		operationId: 'review-order-grandchild', title: 'Grandchild', parentId: orderA.id
+	} })).structuredContent.result.page;
+	await client.callTool({ name: 'move_page', arguments: { id: orderB.id, expectedVersion: orderB.version, parentId: orderParent.id, position: 0 } });
+	const trashedParent = (await client.callTool({ name: 'trash_page', arguments: {
+		id: orderParent.id, expectedVersion: orderParent.version
+	} })).structuredContent.result.page;
+	await client.callTool({ name: 'restore_page', arguments: { id: orderParent.id, expectedVersion: trashedParent.version } });
+	const childrenAfterRestore = (await client.callTool({ name: 'list_pages', arguments: { parentId: orderParent.id } })).structuredContent.result.pages;
+	verify(JSON.stringify(childrenAfterRestore.map((page) => [page.id, page.position])) === JSON.stringify([[orderB.id, 0], [orderA.id, 1]]),
+		'Trash restore must preserve the manual order and positions of siblings');
+	const nestedAfterRestore = (await client.callTool({ name: 'read_page', arguments: { id: grandchild.id } })).structuredContent.result.page;
+	verify(nestedAfterRestore.position === 0, 'Trash restore must preserve nested sibling positions');
+	const debugResponse = await fetch(`${baseUrl}/api/test-db`, { headers: { Cookie: sessionCookie } });
+	verify(debugResponse.status === 404, 'the mutating database debug GET must be removed');
+	assert.deepEqual(reviewFailures, [], reviewFailures.join('\n'));
 	console.log('MCP integration passed: protected HTTP, two clients, all eight tools, summary-sized list/search/write results, page moves/cycle rejection, idempotent create, browser/MCP conflicts, backup invalidation, Trash and restore.');
+	console.log('Review regressions passed: root filtering, literal search punctuation, nested Trash ordering, and removed debug route.');
 } catch (error) {
 	console.error(error);
 	console.error(childOutput);

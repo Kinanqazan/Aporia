@@ -158,7 +158,68 @@ test('a conflict pauses autosave and keeps the local draft pending', async () =>
 	assert.equal(controller.hasConflict('page'), true);
 	assert.equal(controller.isDirty('page'), true);
 	controller.queue({ pageId: 'page', contentJson: 'newer draft' });
-	assert.equal(await controller.flush(), true);
+	assert.equal(await controller.flush(), false);
 	assert.equal(calls, 1);
 	controller.destroy();
+});
+
+test('an edit queued during a slow save uses that save\'s returned version', async () => {
+	const firstRequest = deferred();
+	/** @type {Array<string | undefined>} */
+	const versions = [];
+	const controller = createAutosaveController({
+		debounceMs: 60_000,
+		onStatusChange: () => {},
+		save: async (payload) => {
+			versions.push(payload.expectedVersion);
+			if (versions.length === 1) await firstRequest.promise;
+			return { success: true, version: `version-${versions.length}` };
+		}
+	});
+	try {
+		controller.markSaved({ pageId: 'page', contentJson: 'saved' }, 'version-0');
+		controller.queue({ pageId: 'page', contentJson: 'one' });
+		const saving = controller.flush();
+		controller.queue({ pageId: 'page', contentJson: 'two' });
+		firstRequest.resolve(true);
+		assert.equal(await saving, true);
+		assert.deepEqual(versions, ['version-0', 'version-1']);
+	} finally {
+		controller.destroy();
+	}
+});
+
+test('a newer edit queued during a conflicting save stays paused until reload', async () => {
+	const firstRequest = deferred();
+	/** @type {string[]} */
+	const attempts = [];
+	const controller = createAutosaveController({
+		debounceMs: 60_000,
+		onStatusChange: () => {},
+		save: async (payload) => {
+			attempts.push(payload.contentJson);
+			if (attempts.length === 1) {
+				await firstRequest.promise;
+				return { success: false, conflict: true };
+			}
+			return { success: true, version: 'version-2' };
+		}
+	});
+	try {
+		controller.markSaved({ pageId: 'page', contentJson: 'saved' }, 'version-0');
+		controller.queue({ pageId: 'page', contentJson: 'one' });
+		const saving = controller.flush();
+		controller.queue({ pageId: 'page', contentJson: 'two' });
+		firstRequest.resolve(true);
+		assert.equal(await saving, false);
+		assert.equal(await controller.flush(), false);
+		assert.deepEqual(attempts, ['one']);
+		assert.equal(controller.isDirty('page'), true);
+		controller.markSaved({ pageId: 'page', contentJson: 'reloaded' }, 'version-1');
+		assert.equal(await controller.flush(), true);
+		assert.deepEqual(attempts, ['one']);
+		assert.equal(controller.isDirty('page'), false);
+	} finally {
+		controller.destroy();
+	}
 });

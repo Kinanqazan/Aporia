@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { AssetValidationError, storeAttachment } from '$lib/server/assets';
 import { getPageById } from '$lib/server/pages';
+import { UploadActivityError } from '$lib/server/upload-activity';
 
 export const POST: RequestHandler = async ({ request, url }) => {
 	const origin = request.headers.get('origin');
@@ -32,6 +33,6 @@ export const POST: RequestHandler = async ({ request, url }) => {
 		});
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Unable to upload file';
-		return json({ success: false, error: message }, { status: error instanceof AssetValidationError ? 400 : 500 });
+		return json({ success: false, error: message }, { status: error instanceof UploadActivityError ? error.status : error instanceof AssetValidationError ? 400 : 500 });
 	}
 };

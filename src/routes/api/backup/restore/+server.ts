@@ -1,4 +1,5 @@
 import { restoreWorkspaceBackup } from '$lib/server/backup';
+import { UploadActivityError } from '$lib/server/upload-activity';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
@@ -24,7 +25,7 @@ export const POST: RequestHandler = async ({ request }) => {
 				success: false,
 				error: err?.message || 'Failed to restore backup'
 			},
-			{ status: 400 }
+			{ status: err instanceof UploadActivityError ? err.status : 400 }
 		);
 	}
 };
