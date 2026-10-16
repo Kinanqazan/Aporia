@@ -379,7 +379,7 @@ textarea {
 	overflow-y: auto;
 	-ms-overflow-style: none;
 	scrollbar-width: none;
-	padding: 20px 10px 16px;
+	padding: 20px 0 16px;
 }
 
 .sidebar-nav::-webkit-scrollbar {
@@ -529,7 +529,7 @@ textarea {
 	overflow-y: auto;
 	-ms-overflow-style: none;
 	scrollbar-width: none;
-	padding: 20px 10px 16px;
+	padding: 20px 0 16px;
 }
 
 .sidebar-nav::-webkit-scrollbar {
@@ -572,8 +572,8 @@ textarea {
 	align-items: center;
 	width: 100%;
 	min-height: 40px;
-	padding: 2px 4px;
-	border-radius: 4px;
+	padding: 2px 14px;
+	border-radius: 0;
 	color: var(--text-main);
 	transition: background var(--transition-speed);
 	position: relative;
@@ -584,7 +584,12 @@ textarea {
 }
 
 .page-item-row.active {
-	background-color: var(--active-sidebar);
+	/* Keep the tap area generous while painting a slimmer, edge-to-edge band. */
+	background: linear-gradient(to bottom,
+		transparent 5px,
+		var(--active-sidebar) 5px,
+		var(--active-sidebar) calc(100% - 5px),
+		transparent calc(100% - 5px));
 	font-weight: 500;
 }
 
@@ -1167,7 +1172,7 @@ textarea {
 }
 
 .mobile .sidebar-nav {
-	padding: 16px 20px 20px;
+	padding: 16px 0 20px;
 }
 
 .mobile .pages-list {
@@ -1182,6 +1187,7 @@ textarea {
 .mobile .page-item-row {
 	min-height: 50px;
 	padding-block: 4px;
+	padding-inline: 24px;
 }
 
 .mobile .page-children .page-item-row {
