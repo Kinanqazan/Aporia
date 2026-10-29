@@ -90,10 +90,15 @@ export function searchMcpPages(query: string, limit: number) {
 	}
 }
 
-export function createPageIdempotently(input: { operationId: string; title: string; parentId: string | null; contentJson: string }) {
+export function createPageIdempotently(input: { operationId: string; title: string; parentId: string | null; contentJson: string; icon?: string | null; iconColor?: string | null; isFullWidth?: boolean; isLocked?: boolean }) {
 	if (!/^[A-Za-z0-9._:-]{8,128}$/.test(input.operationId)) throw new PageOperationError('INVALID_INPUT', 'operationId must be 8–128 letters, numbers, dots, underscores, colons, or dashes.');
 	const now = new Date().toISOString();
-	const payload = { title: input.title, parentId: input.parentId, contentJson: input.contentJson };
+	const icon = input.icon ?? 'lucide:file-text';
+	const iconColor = normalizeIconColor(input.iconColor);
+	// Keep the original hash for default metadata so pre-upgrade retries still work.
+	const payload = { title: input.title, parentId: input.parentId, contentJson: input.contentJson,
+		...(icon !== 'lucide:file-text' ? { icon } : {}), ...(iconColor ? { iconColor } : {}),
+		...(input.isFullWidth ? { isFullWidth: true } : {}), ...(input.isLocked ? { isLocked: true } : {}) };
 	const inputHash = hash(payload);
 	const existing = sqlite.prepare('SELECT input_hash, page_id FROM mcp_requests WHERE operation_id = ?').get(input.operationId) as { input_hash: string; page_id: string } | undefined;
 	if (existing) {
@@ -106,8 +111,8 @@ export function createPageIdempotently(input: { operationId: string; title: stri
 		const siblings = sqlite.prepare('SELECT count(*) AS n FROM pages WHERE parent_id IS ? AND is_in_trash = 0').get(input.parentId) as { n: number };
 		const id = generateId();
 		sqlite.prepare(`INSERT INTO pages (id, parent_id, position, title, icon, icon_color, content_json, content_text, schema_version, revision, is_locked, is_full_width, is_in_trash, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 0, 0, 0, ?, ?)`)
-			.run(id, input.parentId, siblings.n, input.title, 'lucide:file-text', normalizeIconColor(null), input.contentJson, extractTextFromJson(input.contentJson), now, now);
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, 0, ?, ?)`)
+			.run(id, input.parentId, siblings.n, input.title, icon, iconColor, input.contentJson, extractTextFromJson(input.contentJson), input.isLocked ? 1 : 0, input.isFullWidth ? 1 : 0, now, now);
 		sqlite.prepare('INSERT INTO mcp_requests (operation_id, input_hash, page_id, created_at) VALUES (?, ?, ?, ?)')
 			.run(input.operationId, inputHash, id, now);
 		return id;
@@ -115,26 +120,40 @@ export function createPageIdempotently(input: { operationId: string; title: stri
 	return { page: publicPageSummary(row(result)!), repeated: false, currentStatus: 'active' };
 }
 
-export function updateMcpPage(input: { id: string; expectedVersion: string; title?: string; contentJson?: string }) {
-	if (input.title === undefined && input.contentJson === undefined) throw new PageOperationError('INVALID_INPUT', 'Provide a title or contentJson to update.');
+export function updateMcpPage(input: { id: string; expectedVersion: string; title?: string; contentJson?: string; icon?: string | null; iconColor?: string | null; isFullWidth?: boolean }) {
+	if (input.title === undefined && input.contentJson === undefined && input.icon === undefined && input.iconColor === undefined && input.isFullWidth === undefined) throw new PageOperationError('INVALID_INPUT', 'Provide title, content, icon, iconColor, or isFullWidth to update.');
 	const page = activePage(input.id);
 	checkVersion(page, input.expectedVersion);
-	if (page.isLocked) throw new PageOperationError('LOCKED', 'Unlock this page in Aporia before editing it.');
+	if (page.isLocked) throw new PageOperationError('LOCKED', 'Use set_page_lock with isLocked=false before editing. Use the returned version, and restore the lock after the requested edit.');
 	const contentJson = input.contentJson ?? page.contentJson;
 	const title = input.title ?? page.title;
-	const changed = title !== page.title || contentJson !== page.contentJson;
+	const icon = input.icon === undefined ? page.icon : input.icon;
+	const iconColor = input.iconColor === undefined ? page.iconColor : normalizeIconColor(input.iconColor);
+	const isFullWidth = input.isFullWidth === undefined ? page.isFullWidth : input.isFullWidth ? 1 : 0;
+	const changed = title !== page.title || contentJson !== page.contentJson || icon !== page.icon || iconColor !== page.iconColor || isFullWidth !== page.isFullWidth;
 	if (!changed) return { page: publicPageSummary(page), changed: false };
 	const now = new Date().toISOString();
-	const result = sqlite.prepare(`UPDATE pages SET title = ?, content_json = ?, content_text = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ? AND is_in_trash = 0 AND is_locked = 0`)
-		.run(title, contentJson, extractTextFromJson(contentJson), now, page.id, page.revision);
+	const result = sqlite.prepare(`UPDATE pages SET title = ?, content_json = ?, content_text = ?, icon = ?, icon_color = ?, is_full_width = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ? AND is_in_trash = 0 AND is_locked = 0`)
+		.run(title, contentJson, extractTextFromJson(contentJson), icon, iconColor, isFullWidth, now, page.id, page.revision);
 	if (!result.changes) throw new PageOperationError('CONFLICT', 'The page changed while saving. Read it again.', row(input.id) ? publicPageSummary(row(input.id)!) : undefined);
+	return { page: publicPageSummary(row(input.id)!), changed: true };
+}
+
+export function setMcpPageLock(input: { id: string; expectedVersion: string; isLocked: boolean }) {
+	const page = activePage(input.id);
+	checkVersion(page, input.expectedVersion);
+	const isLocked = input.isLocked ? 1 : 0;
+	if (page.isLocked === isLocked) return { page: publicPageSummary(page), changed: false };
+	const result = sqlite.prepare(`UPDATE pages SET is_locked = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ? AND is_in_trash = 0`)
+		.run(isLocked, new Date().toISOString(), page.id, page.revision);
+	if (!result.changes) throw new PageOperationError('CONFLICT', 'The page changed while setting its lock. Read it again.', row(input.id) ? publicPageSummary(row(input.id)!) : undefined);
 	return { page: publicPageSummary(row(input.id)!), changed: true };
 }
 
 export function moveMcpPage(input: { id: string; expectedVersion: string; parentId: string | null; position?: number }) {
 	const page = activePage(input.id);
 	checkVersion(page, input.expectedVersion);
-	if (page.isLocked) throw new PageOperationError('LOCKED', 'Unlock this page in Aporia before organizing it.');
+	if (page.isLocked) throw new PageOperationError('LOCKED', 'Use set_page_lock with isLocked=false before organizing this page.');
 	if (input.parentId === page.id) throw new PageOperationError('INVALID_INPUT', 'A page cannot be its own parent.');
 	const target = input.parentId ? activePage(input.parentId) : null;
 	let ancestor = target;

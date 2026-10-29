@@ -1,6 +1,6 @@
 <resources>
 	<style name="AppTheme" parent="BaseAppTheme">
 		<item name="android:windowSplashScreenBackground">#8F4148</item>
-		<item name="android:windowSplashScreenAnimatedIcon">@drawable/aporia_splash_mark</item>
+		<item name="android:windowSplashScreenAnimatedIcon">@drawable/aporia_splash_icon</item>
 	</style>
 </resources>

@@ -98,26 +98,28 @@ export async function createPageFromSharedContent(input: SharedContentInput) {
 	return page;
 }
 
-export async function appendSharedLinkToPage(pageId: unknown, input: SharedContentInput) {
+export async function appendSharedContentToPage(pageId: unknown, input: SharedContentInput) {
 	try {
-		return await withUploadActivity(() => appendSharedLink(pageId, input));
+		return await withUploadActivity(() => appendSharedContent(pageId, input));
 	} catch (error) {
 		if (error instanceof UploadActivityError) throw new SharedContentError(error.message, error.status);
 		throw error;
 	}
 }
 
-async function appendSharedLink(pageId: unknown, input: SharedContentInput) {
-	if (typeof pageId !== 'string' || !pageId) throw new SharedContentError('Choose a page to add this link to.');
+async function appendSharedContent(pageId: unknown, input: SharedContentInput) {
+	if (typeof pageId !== 'string' || !pageId) throw new SharedContentError('Choose a page to add this item to.');
 	const page = await getPageById(pageId);
 	if (!page || page.isInTrash) throw new SharedContentError('That page is no longer available.', 404);
-	if (page.isLocked) throw new SharedContentError('Unlock the selected page before adding a link.', 423);
+	if (page.isLocked) throw new SharedContentError('Unlock the selected page before adding this item.', 423);
 
 	const url = safeHttpUrl(input.url);
-	if (!url) throw new SharedContentError('The shared item does not contain a valid web link.');
+	if (input.url && !url) throw new SharedContentError('The shared item does not contain a valid web link.');
+	const text = cleanText(input.text, MAX_TEXT_LENGTH) || cleanText(input.title, MAX_TITLE_LENGTH);
+	if (!url && !text) throw new SharedContentError('The shared item did not contain text or a web link.');
 	const suppliedTitle = cleanText(input.bookmarkTitle, MAX_TITLE_LENGTH)
 		|| cleanText(input.title, MAX_TITLE_LENGTH);
-	const title = suppliedTitle || new URL(url).hostname.replace(/^www\./i, '');
+	const title = suppliedTitle || (url ? new URL(url).hostname.replace(/^www\./i, '') : '');
 
 	let document: { type: string; content: unknown[] };
 	try {
@@ -133,10 +135,12 @@ async function appendSharedLink(pageId: unknown, input: SharedContentInput) {
 
 	const nextDocument = {
 		...document,
-		content: [...document.content, { type: 'linkBookmark', attrs: { url, title } }]
+		content: [...document.content, ...(url
+			? [{ type: 'linkBookmark', attrs: { url, title } }]
+			: text.split(/\r?\n/).map(line => ({ type: 'paragraph', ...(line ? { content: [{ type: 'text', text: line }] } : {}) })))]
 	};
 	const documentError = validateEditorDocument(nextDocument);
-	if (documentError) throw new SharedContentError(`Could not add this link: ${documentError}`, 400);
+	if (documentError) throw new SharedContentError(`Could not add this item: ${documentError}`, 400);
 
 	const contentJson = JSON.stringify(nextDocument);
 	const updatedPage = await updatePageContentAtVersion(
@@ -146,7 +150,7 @@ async function appendSharedLink(pageId: unknown, input: SharedContentInput) {
 		{ isLocked: page.isLocked, contentJson: page.contentJson }
 	);
 	if (!updatedPage) {
-		throw new SharedContentError('This page changed while the link was being added. Please choose it again.', 409);
+		throw new SharedContentError('This page changed while the item was being added. Please choose it again.', 409);
 	}
 	return updatedPage;
 }

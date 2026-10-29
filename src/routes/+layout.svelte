@@ -76,6 +76,7 @@
 	let shareLinkTitle = $state('');
 	let shareTargetPageId = $state('');
 	let shareTargetError = $state('');
+	let isUnlockingSharePage = $state(false);
 	let isSavingSharedItem = $state(false);
 	let isProcessingNativeShare = false;
 
@@ -125,16 +126,44 @@
 		});
 	}
 
-	async function addSharedLinkToPage() {
+	async function unlockSharePage() {
+		const targetPageId = shareTargetPageId;
+		if (!targetPageId || isUnlockingSharePage || isSavingSharedItem) return;
+		isUnlockingSharePage = true;
+		shareTargetError = '';
+		try {
+			if (!(await requestEditorFlush(targetPageId))) {
+				throw new Error('Save the current page changes before unlocking this page.');
+			}
+			await invalidateAll();
+			const target = data.activePages?.find((candidate) => candidate.id === targetPageId);
+			if (!target) throw new Error('That page is no longer available.');
+			if (!target.isLocked) return;
+			const response = await fetch(`/api/pages/${encodeURIComponent(targetPageId)}/lock`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ isLocked: false, expectedVersion: target.version })
+			});
+			const result = await response.json();
+			await invalidateAll();
+			if (!response.ok || !result.success) throw new Error(result.error || 'Aporia could not unlock this page.');
+		} catch (error) {
+			shareTargetError = error instanceof Error ? error.message : 'Aporia could not unlock this page.';
+		} finally {
+			isUnlockingSharePage = false;
+		}
+	}
+
+	async function addSharedContentToPage() {
 		const shared = activeLinkShare;
 		const targetPageId = shareTargetPageId;
-		if (!shared || !targetPageId || isSavingSharedItem) return;
+		if (!shared || !targetPageId || isSavingSharedItem || isUnlockingSharePage) return;
 
 		isSavingSharedItem = true;
 		shareTargetError = '';
 		try {
 			if (!(await requestEditorFlush(targetPageId))) {
-				throw new Error('Save the current page changes before adding this link.');
+				throw new Error('Save the current page changes before adding this item.');
 			}
 			const response = await fetch('/api/share-target', {
 				method: 'POST',
@@ -143,7 +172,7 @@
 			});
 			const result = await response.json();
 			if (!response.ok || !result.success || typeof result.pageId !== 'string') {
-				throw new Error(result.error || 'Aporia could not add this link.');
+				throw new Error(result.error || 'Aporia could not add this item.');
 			}
 
 			finishNativeShare(shared);
@@ -151,7 +180,8 @@
 			await goto(`/${encodeURIComponent(result.pageId)}`);
 			void processNativeShares();
 		} catch (error) {
-			shareTargetError = error instanceof Error ? error.message : 'Aporia could not add this link.';
+			shareTargetError = error instanceof Error ? error.message : 'Aporia could not add this item.';
+			await invalidateAll();
 		} finally {
 			isSavingSharedItem = false;
 		}
@@ -160,7 +190,7 @@
 	async function addSharedFilesToPage() {
 		const shared = activeLinkShare;
 		const targetPageId = shareTargetPageId;
-		if (!shared?.images?.length || !targetPageId || isSavingSharedItem) return;
+		if (!shared?.images?.length || !targetPageId || isSavingSharedItem || isUnlockingSharePage) return;
 
 		isSavingSharedItem = true;
 		shareTargetError = '';
@@ -198,6 +228,7 @@
 			void processNativeShares();
 		} catch (error) {
 			shareTargetError = error instanceof Error ? error.message : 'Aporia could not add these files.';
+			await invalidateAll();
 		} finally {
 			isSavingSharedItem = false;
 		}
@@ -213,30 +244,13 @@
 
 		isProcessingNativeShare = true;
 		try {
-			while (queue.length > 0) {
-				const shared = queue[0];
-				if (shared.url || shared.images?.length) {
-					if (activeLinkShare?.id !== shared.id) {
-						activeLinkShare = shared;
-						shareLinkTitle = shared.url ? suggestedSharedLinkTitle(shared) : '';
-						shareTargetPageId = currentPageId && !currentPage?.isLocked ? currentPageId : '';
-						shareTargetError = '';
-					}
-					break;
-				}
-				const response = await fetch('/api/share-target', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(shared)
-				});
-				const result = await response.json();
-				if (!response.ok || !result.success || typeof result.pageId !== 'string') {
-					throw new Error(result.error || 'Aporia could not save this shared item.');
-				}
-
-				queue.shift();
-				if (shared.id) window.location.href = `aporia-native://share-ack?id=${encodeURIComponent(shared.id)}`;
-				await goto(`/${encodeURIComponent(result.pageId)}`);
+			const shared = queue[0];
+			if (activeLinkShare?.id !== shared.id) {
+				await invalidateAll();
+				activeLinkShare = shared;
+				shareLinkTitle = shared.url ? suggestedSharedLinkTitle(shared) : '';
+				shareTargetPageId = currentPageId || '';
+				shareTargetError = '';
 			}
 		} catch (error) {
 			console.error('Failed to save Android shared content:', error);
@@ -439,9 +453,8 @@
 
 	// Tree structure derived from active database pages
 	let pageTree = $derived(buildTree(data.activePages || []));
-	let sharePageOptions = $derived(
-		flattenPageTree(pageTree).filter(({ page }) => page.isLocked !== 1)
-	);
+	let sharePageOptions = $derived(flattenPageTree(pageTree));
+	let selectedSharePage = $derived(data.activePages?.find((candidate) => candidate.id === shareTargetPageId));
 
 	function flattenPageTree(nodes: any[], depth = 0): Array<{ page: any; depth: number }> {
 		return nodes.flatMap((node) => [
@@ -1282,23 +1295,24 @@
 				<div class="notion-import-modal-header">
 					<div>
 						<h2 id="share-link-title">
-							{activeLinkShare.images?.length ? `Add ${sharedItemsLabel(activeLinkShare)} to a page` : 'Add link to a page'}
+							{activeLinkShare.images?.length ? `Add ${sharedItemsLabel(activeLinkShare)} to a page` : activeLinkShare.url ? 'Add link to a page' : 'Add text to a page'}
 						</h2>
 						<p class="share-link-url">
 							{activeLinkShare.url || (activeLinkShare.images?.length === 1
 								? activeLinkShare.images[0].name
-								: sharedItemsLabel(activeLinkShare))}
+								: activeLinkShare.images?.length ? sharedItemsLabel(activeLinkShare) : activeLinkShare.text || activeLinkShare.title)}
 						</p>
 					</div>
 				</div>
 
-				{#if !activeLinkShare.images?.length}
+				{#if activeLinkShare.url && !activeLinkShare.images?.length}
 					<label class="share-link-label" for="share-link-bookmark-title">Link title</label>
 					<input
 						id="share-link-bookmark-title"
 						class="share-link-input"
 						maxlength="160"
 						bind:value={shareLinkTitle}
+						disabled={isSavingSharedItem || isUnlockingSharePage}
 					/>
 				{/if}
 
@@ -1312,13 +1326,17 @@
 							class="share-target-option"
 							class:selected={shareTargetPageId === option.page.id}
 							style={`padding-left:${10 + Math.min(option.depth, 5) * 16}px`}
+							disabled={isSavingSharedItem || isUnlockingSharePage}
+							aria-label={`${option.page.title}${option.page.isLocked ? ', locked' : ''}`}
 							onclick={() => { shareTargetPageId = option.page.id; shareTargetError = ''; }}
 						>
+							<PageIcon icon={option.page.icon} color={option.page.iconColor} size={16} />
 							<span class="share-target-option-title">{option.page.title}</span>
+							{#if option.page.isLocked}<Lock size={14} aria-hidden="true" />{/if}
 							{#if shareTargetPageId === option.page.id}<span aria-hidden="true">✓</span>{/if}
 						</button>
 					{:else}
-						<p class="share-target-empty">No unlocked pages available.</p>
+						<p class="share-target-empty">No pages available.</p>
 					{/each}
 				</div>
 
@@ -1326,20 +1344,20 @@
 					<p class="notion-import-modal-error" role="alert">{shareTargetError}</p>
 				{/if}
 				<div class="share-link-actions">
-					<button type="button" class="share-link-discard" disabled={isSavingSharedItem} onclick={() => activeLinkShare && finishNativeShare(activeLinkShare, true)}>
+					<button type="button" class="share-link-discard" disabled={isSavingSharedItem || isUnlockingSharePage} onclick={() => activeLinkShare && finishNativeShare(activeLinkShare, true)}>
 						Discard
 					</button>
 					<button
 						type="button"
 						class="share-link-add"
-						disabled={!shareTargetPageId || isSavingSharedItem}
-						onclick={() => activeLinkShare?.images?.length ? addSharedFilesToPage() : addSharedLinkToPage()}
+						disabled={!selectedSharePage || isSavingSharedItem || isUnlockingSharePage}
+						onclick={() => selectedSharePage?.isLocked ? unlockSharePage() : activeLinkShare?.images?.length ? addSharedFilesToPage() : addSharedContentToPage()}
 					>
-						{isSavingSharedItem
+						{isUnlockingSharePage ? 'Unlocking…' : isSavingSharedItem
 							? 'Adding…'
-							: activeLinkShare.images?.length
+							: selectedSharePage?.isLocked ? 'Unlock page' : activeLinkShare.images?.length
 								? `Add ${sharedItemsLabel(activeLinkShare)}`
-									: 'Add link'}
+									: activeLinkShare.url ? 'Add link' : 'Add text'}
 					</button>
 				</div>
 			</div>
@@ -2178,6 +2196,8 @@
 	}
 
 	.share-target-option-title {
+		flex: 1;
+		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;

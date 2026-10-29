@@ -2,7 +2,39 @@
 
 Aporia exposes its saved pages through one authenticated MCP endpoint at `/mcp`. The endpoint runs inside the normal Aporia container and uses its existing database. Your assistant gets a separate bearer key; it does not get your browser password or session cookie.
 
-The server exposes `list_pages`, `search_pages`, `read_page`, `create_page`, `update_page`, `move_page`, `trash_page`, and `restore_page`. Existing-page edits require the version returned by a read. If another client changes the page first, Aporia reports a conflict and keeps the stale edit from overwriting it. Trash includes descendants; permanent deletion remains in the browser. Page content is stored as TipTap JSON, so an assistant should preserve nodes and formatting it did not intend to change.
+The server exposes eleven tools. Existing-page changes require `expectedVersion` from a read, list, or previous write. If another client changes the page first, Aporia reports a conflict and keeps the stale change from overwriting it. Trash includes descendants; permanent deletion remains in the browser. Page content is stored as TipTap JSON, so an assistant should preserve nodes and formatting it did not intend to change.
+
+| Tool | What it does |
+| --- | --- |
+| `list_pages` | List active or trashed pages, optionally by parent, with pagination and current versions |
+| `search_pages` | Search active page titles and text |
+| `read_page` | Read complete TipTap content, Markdown, metadata, and lock/layout state |
+| `create_page` | Create a page with optional content, parent, icon, icon color, full-width layout, and lock |
+| `update_page` | Change title, icon, icon color, layout, and/or replace the document; omitted fields stay unchanged |
+| `append_page_content` | Add top-level TipTap blocks while preserving existing content and formatting |
+| `set_page_lock` | Lock or unlock a page explicitly |
+| `set_page_layout` | Set full-width or normal-width layout |
+| `move_page` | Move or reorder a page |
+| `trash_page` | Move a page and its descendants to Trash |
+| `restore_page` | Restore a page and its trashed descendants |
+
+For an authorized edit to a locked page, Hermes should read it, call `set_page_lock` with `isLocked: false`, edit using the returned version, then call `set_page_lock` with `isLocked: true` and the edit's returned version. Locks are never silently bypassed by content, metadata, layout, move, or Trash tools. A lock change only affects that page. Trashed pages must be restored before changing their lock or content. Setting the same lock or layout leaves the version unchanged.
+
+`append_page_content` takes a nonempty `blocks` array, for example:
+
+```json
+{
+  "id": "page-id",
+  "expectedVersion": "version-from-last-read-or-write",
+  "blocks": [{ "type": "paragraph", "content": [{ "type": "text", "text": "New note" }] }]
+}
+```
+
+The server validates the combined document and its asset references before saving. Retrying with the old version reports a conflict instead of appending twice. After an uncertain response, read the page and check whether the addition committed before trying again.
+
+Icons accept emoji or names such as `lucide:book-open`; `null` resets the icon to its default appearance. `iconColor` accepts `null` for default or one of `#e86666`, `#f97316`, `#eab308`, `#22c55e`, `#3b82f6`, `#8b5cf6`, `#ec4899`, `#64748b`. Content updates can edit all supported editor blocks, including tasks and database blocks. Uploading new files, importing workspaces, backups, browser preferences, and permanent deletion remain browser operations.
+
+After deploying an updated Aporia build, reload Hermes' MCP connection or start a fresh Hermes session so it discovers the new tools and input fields. The endpoint URL and bearer key stay the same.
 
 ## Enable the endpoint
 

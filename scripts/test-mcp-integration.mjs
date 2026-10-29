@@ -38,6 +38,176 @@ async function connect(name) {
 	return client;
 }
 
+async function verifyPageControls(client, clientTwo, sessionCookie) {
+	const call = async (name, args) => {
+		const response = await client.callTool({ name, arguments: args });
+		assert.equal(response.isError, undefined, JSON.stringify(response));
+		assert.equal('contentJson' in response.structuredContent.result.page, false);
+		return response.structuredContent.result;
+	};
+	const expectError = async (name, args, code) => {
+		const response = await client.callTool({ name, arguments: args });
+		assert.equal(response.isError, true, JSON.stringify(response));
+		assert.equal(response.structuredContent.result.error.code, code);
+	};
+	const document = { type: 'doc', content: [
+		{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Keep this heading' }] },
+		{ type: 'paragraph', content: [{ type: 'text', text: 'Keep this formatting', marks: [{ type: 'bold' }] }] }
+	] };
+	const args = { operationId: 'integration-page-controls', title: 'Page controls', content: document,
+		icon: 'lucide:book-open', iconColor: '#8b5cf6', isFullWidth: true, isLocked: true };
+	let { page } = await call('create_page', args);
+	assert.equal(page.icon, args.icon);
+	assert.equal(page.iconColor, args.iconColor);
+	assert.equal(page.isFullWidth, 1);
+	assert.equal(page.isLocked, 1);
+	assert.equal((await call('create_page', args)).page.id, page.id, 'customized creation must be retryable');
+	await expectError('create_page', { ...args, icon: 'lucide:star' }, 'INVALID_INPUT');
+	const invalidColor = await client.callTool({ name: 'update_page', arguments: { id: page.id, expectedVersion: page.version, iconColor: '#123456' } });
+	assert.equal(invalidColor.isError, true, 'unsupported colors must be rejected');
+	const invalidLock = await client.callTool({ name: 'set_page_lock', arguments: { id: page.id, expectedVersion: page.version, isLocked: 'false' } });
+	assert.equal(invalidLock.isError, true, 'lock state must be a boolean');
+	await expectError('set_page_lock', { id: 'missing-page', expectedVersion: page.version, isLocked: false }, 'NOT_FOUND');
+	const unchanged = await call('set_page_lock', { id: page.id, expectedVersion: page.version, isLocked: true });
+	assert.equal(unchanged.changed, false);
+	assert.equal(unchanged.page.version, page.version, 'same-state lock must preserve version');
+	assert.equal(unchanged.page.updatedAt, page.updatedAt);
+	const block = { type: 'paragraph', content: [{ type: 'text', text: 'Appended note' }] };
+	for (const [name, fields] of [
+		['update_page', { title: 'Blocked rename' }], ['update_page', { icon: 'lucide:star' }],
+		['move_page', { parentId: null }], ['trash_page', {}],
+		['set_page_layout', { isFullWidth: false }], ['append_page_content', { blocks: [block] }]
+	]) await expectError(name, { id: page.id, expectedVersion: page.version, ...fields }, 'LOCKED');
+	const lockedVersion = page.version;
+	page = (await call('set_page_lock', { id: page.id, expectedVersion: page.version, isLocked: false })).page;
+	assert.equal(page.isLocked, 0);
+	assert.notEqual(page.version, lockedVersion);
+	await expectError('set_page_lock', { id: page.id, expectedVersion: lockedVersion, isLocked: true }, 'CONFLICT');
+	await expectError('update_page', { id: page.id, expectedVersion: lockedVersion, title: 'Stale rename' }, 'CONFLICT');
+	page = (await call('update_page', { id: page.id, expectedVersion: page.version, title: 'Updated controls', icon: '⭐', iconColor: '#22c55e' })).page;
+	assert.equal(page.icon, '⭐');
+	assert.equal(page.iconColor, '#22c55e');
+	assert.equal(page.isFullWidth, 1, 'metadata edit must preserve layout');
+	const metadataVersion = page.version;
+	page = (await call('set_page_layout', { id: page.id, expectedVersion: page.version, isFullWidth: false })).page;
+	assert.equal(page.isFullWidth, 0);
+	assert.notEqual(page.version, metadataVersion);
+	const sameLayout = await call('set_page_layout', { id: page.id, expectedVersion: page.version, isFullWidth: false });
+	assert.equal(sameLayout.changed, false);
+	assert.equal(sameLayout.page.version, page.version);
+	const beforeAppend = page.version;
+	page = (await call('append_page_content', { id: page.id, expectedVersion: page.version, blocks: [block] })).page;
+	assert.equal(page.title, 'Updated controls');
+	assert.equal(page.icon, '⭐');
+	const read = await call('read_page', { id: page.id });
+	assert.deepEqual(read.document, { ...document, content: [...document.content, block] }, 'append must preserve all existing nodes and marks');
+	await expectError('append_page_content', { id: page.id, expectedVersion: beforeAppend, blocks: [block] }, 'CONFLICT');
+	await expectError('append_page_content', { id: page.id, expectedVersion: page.version, blocks: [{ type: 'unknownBlock' }] }, 'INVALID_INPUT');
+	const emptyAppend = await client.callTool({ name: 'append_page_content', arguments: { id: page.id, expectedVersion: page.version, blocks: [] } });
+	assert.equal(emptyAppend.isError, true);
+	const afterInvalid = await call('read_page', { id: page.id });
+	assert.equal(afterInvalid.page.version, page.version, 'rejected appends must not change saved state');
+	assert.deepEqual(afterInvalid.document, read.document, 'retry and invalid append must not duplicate or remove content');
+	page = (await call('update_page', { id: page.id, expectedVersion: page.version, icon: null, iconColor: null, isFullWidth: true })).page;
+	assert.equal(page.icon, null);
+	assert.equal(page.iconColor, null);
+	assert.equal(page.isFullWidth, 1);
+	const noop = await call('update_page', { id: page.id, expectedVersion: page.version, icon: null, iconColor: null });
+	assert.equal(noop.changed, false);
+	assert.equal(noop.page.version, page.version);
+	await expectError('update_page', { id: page.id, expectedVersion: page.version }, 'INVALID_INPUT');
+
+	// Two clients starting from the same version must not both change the page.
+	const [lockRace, editRace] = await Promise.all([
+		client.callTool({ name: 'set_page_lock', arguments: { id: page.id, expectedVersion: page.version, isLocked: true } }),
+		clientTwo.callTool({ name: 'update_page', arguments: { id: page.id, expectedVersion: page.version, title: 'Concurrent title' } })
+	]);
+	assert.equal([lockRace, editRace].filter(response => !response.isError).length, 1, 'only one concurrent write can win');
+	assert.equal([lockRace, editRace].find(response => response.isError).structuredContent.result.error.code, 'CONFLICT');
+	page = (await call('read_page', { id: page.id })).page;
+	page = (await call('set_page_lock', { id: page.id, expectedVersion: page.version, isLocked: true })).page;
+	const staleBrowserUnlock = await fetch(`${baseUrl}/api/pages/${page.id}/lock`, {
+		method: 'POST', headers: { Cookie: sessionCookie, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ expectedVersion: metadataVersion, isLocked: false })
+	});
+	assert.equal(staleBrowserUnlock.status, 409, 'stale browser unlock must not bypass MCP changes');
+	const browserUnlock = await fetch(`${baseUrl}/api/pages/${page.id}/lock`, {
+		method: 'POST', headers: { Cookie: sessionCookie, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ expectedVersion: page.version, isLocked: false })
+	});
+	assert.equal(browserUnlock.status, 200);
+	const unlocked = await browserUnlock.json();
+	await expectError('set_page_lock', { id: page.id, expectedVersion: page.version, isLocked: true }, 'CONFLICT');
+	page = (await call('trash_page', { id: page.id, expectedVersion: unlocked.version })).page;
+	for (const [name, fields] of [
+		['set_page_lock', { isLocked: false }], ['set_page_layout', { isFullWidth: false }],
+		['append_page_content', { blocks: [block] }]
+	]) await expectError(name, { id: page.id, expectedVersion: page.version, ...fields }, 'NOT_FOUND');
+}
+
+async function verifyShareTargets(client, sessionCookie) {
+	const original = { type: 'paragraph', content: [{ type: 'text', text: 'Preserved page content', marks: [{ type: 'bold' }] }] };
+	const created = await client.callTool({ name: 'create_page', arguments: {
+		operationId: 'integration-share-parent', title: 'Locked share parent', isLocked: true,
+		content: { type: 'doc', content: [original] }
+	} });
+	let page = created.structuredContent.result.page;
+	const childPage = await client.callTool({ name: 'create_page', arguments: {
+		operationId: 'integration-share-child', title: 'Locked share child', parentId: page.id, isLocked: true
+	} });
+	assert.equal(childPage.isError, undefined, 'locked parents must retain selectable child destinations');
+	const post = async (payload) => fetch(`${baseUrl}/api/share-target`, {
+		method: 'POST', headers: { Cookie: sessionCookie, Origin: baseUrl, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ targetPageId: page.id, ...payload })
+	});
+	const postFiles = async (files, shareId) => {
+		const form = new FormData();
+		form.set('targetPageId', page.id);
+		form.set('shareId', shareId);
+		for (const file of files) form.append('files', file);
+		return fetch(`${baseUrl}/api/share-target`, { method: 'POST', headers: { Cookie: sessionCookie, Origin: baseUrl }, body: form });
+	};
+	const photo = new File([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aGo0AAAAASUVORK5CYII=', 'base64')], 'photo.png', { type: 'image/png' });
+	const attachment = new File(['Shared file body'], 'shared.txt', { type: 'text/plain' });
+	assert.equal((await post({ text: 'Blocked text' })).status, 423);
+	assert.equal((await post({ url: 'https://example.com/shared' })).status, 423);
+	assert.equal((await postFiles([photo], 'blocked-photo')).status, 423);
+	assert.equal((await postFiles([attachment], 'blocked-file')).status, 423);
+	const unlock = await fetch(`${baseUrl}/api/pages/${page.id}/lock`, {
+		method: 'POST', headers: { Cookie: sessionCookie, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ isLocked: false, expectedVersion: page.version })
+	});
+	assert.equal(unlock.status, 200, 'the share dialog can use the normal versioned unlock endpoint');
+	assert.equal((await post({ url: 'https://example.com/shared', bookmarkTitle: 'Shared bookmark' })).status, 200);
+	assert.equal((await postFiles([photo, attachment], 'share-file-regression')).status, 200);
+	assert.equal((await postFiles([photo, attachment], 'share-file-regression')).status, 200, 'file retries should remain idempotent');
+	assert.equal((await post({ text: 'First line\n\nLast line <literal>' })).status, 200, 'plain text can be added to an existing destination');
+	const read = (await client.callTool({ name: 'read_page', arguments: { id: page.id } })).structuredContent.result;
+	assert.equal(read.page.isLocked, 0, 'explicitly unlocking in the picker leaves the page unlocked');
+	assert.deepEqual(read.document.content[0], original, 'sharing must preserve existing nodes and formatting');
+	assert.deepEqual(read.document.content[1], { type: 'linkBookmark', attrs: { url: 'https://example.com/shared', title: 'Shared bookmark' } });
+	assert.equal(read.document.content[2].type, 'image');
+	assert.equal(read.document.content[3].type, 'fileAttachment');
+	assert.deepEqual(read.document.content.slice(4), [
+		{ type: 'paragraph', content: [{ type: 'text', text: 'First line' }] },
+		{ type: 'paragraph' },
+		{ type: 'paragraph', content: [{ type: 'text', text: 'Last line <literal>' }] }
+	]);
+	for (const node of read.document.content.slice(2, 4)) {
+		const asset = await fetch(`${baseUrl}/assets/${node.attrs.assetId}`, { headers: { Cookie: sessionCookie } });
+		assert.equal(asset.status, 200, 'shared photos and attachments must be stored as reachable assets');
+		await asset.arrayBuffer();
+	}
+	const childRead = (await client.callTool({ name: 'read_page', arguments: { id: childPage.structuredContent.result.page.id } })).structuredContent.result;
+	assert.equal(childRead.page.isLocked, 1, 'unlocking a parent must not unlock its children');
+	assert.equal((await post({ text: '' })).status, 400, 'empty text shares must be rejected');
+	assert.equal((await post({ url: 'javascript:alert(1)', text: 'unsafe' })).status, 400);
+	const trashed = await client.callTool({ name: 'trash_page', arguments: { id: page.id, expectedVersion: read.page.version } });
+	assert.equal(trashed.isError, undefined);
+	assert.equal((await post({ text: 'Must not reach Trash' })).status, 404);
+	console.log('Share regressions passed: locked destinations require explicit unlock, nested locks stay independent, links/photos/files/text preserve content, file retries do not duplicate, and Trash is excluded.');
+}
+
 try {
 	let ready = false;
 	let readinessDetail = 'server did not respond';
@@ -66,7 +236,8 @@ try {
 	const client = await connect('aporia-integration-test');
 	const tools = await client.listTools();
 	assert.deepEqual(new Set(tools.tools.map((tool) => tool.name)), new Set([
-		'list_pages', 'search_pages', 'read_page', 'create_page', 'update_page', 'move_page', 'trash_page', 'restore_page'
+		'list_pages', 'search_pages', 'read_page', 'create_page', 'update_page', 'move_page', 'trash_page', 'restore_page',
+		'set_page_lock', 'set_page_layout', 'append_page_content'
 	]));
 	const clientTwo = await connect('aporia-parallel-test');
 	const [listOne, listTwo] = await Promise.all([
@@ -75,6 +246,8 @@ try {
 	]);
 	assert.equal(listOne.isError, undefined);
 	assert.equal(listTwo.isError, undefined);
+	await verifyPageControls(client, clientTwo, sessionCookie);
+	await verifyShareTargets(client, sessionCookie);
 
 	const operationId = 'integration-create-0001';
 	const initialContent = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Created through MCP' }] }] };
@@ -157,6 +330,11 @@ try {
 	} });
 	assert.equal(staleAfterRestore.isError, true, 'restore should invalidate previous workspace versions');
 	assert.match(staleAfterRestore.content[0].text, /CONFLICT/);
+	const staleLockAfterRestore = await client.callTool({ name: 'set_page_lock', arguments: {
+		id: pageId, expectedVersion: read.structuredContent.result.page.version, isLocked: true
+	} });
+	assert.equal(staleLockAfterRestore.isError, true);
+	assert.equal(staleLockAfterRestore.structuredContent.result.error.code, 'CONFLICT');
 
 	const latest = await client.callTool({ name: 'read_page', arguments: { id: pageId } });
 	const trashed = await client.callTool({ name: 'trash_page', arguments: { id: pageId, expectedVersion: latest.structuredContent.result.page.version } });
@@ -206,7 +384,7 @@ try {
 	const debugResponse = await fetch(`${baseUrl}/api/test-db`, { headers: { Cookie: sessionCookie } });
 	verify(debugResponse.status === 404, 'the mutating database debug GET must be removed');
 	assert.deepEqual(reviewFailures, [], reviewFailures.join('\n'));
-	console.log('MCP integration passed: protected HTTP, two clients, all eight tools, summary-sized list/search/write results, page moves/cycle rejection, idempotent create, browser/MCP conflicts, backup invalidation, Trash and restore.');
+	console.log('MCP integration passed: protected HTTP, two clients, all eleven tools, lock/unlock and browser races, icon/color/layout controls, preserving appended content, summary-sized results, moves/cycle rejection, idempotent create, browser/MCP conflicts, backup invalidation, Trash and restore.');
 	console.log('Review regressions passed: root filtering, literal search punctuation, nested Trash ordering, and removed debug route.');
 } catch (error) {
 	console.error(error);

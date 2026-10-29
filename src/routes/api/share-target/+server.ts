@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import {
 	appendSharedFilesToPage,
-	appendSharedLinkToPage,
+	appendSharedContentToPage,
 	createPageFromSharedContent,
 	SharedContentError,
 	type SharedContentInput
@@ -46,7 +46,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
 	try {
 		const input = payload as SharedContentInput & { targetPageId?: unknown };
 		if (typeof input.targetPageId === 'string') {
-			const page = await appendSharedLinkToPage(input.targetPageId, input);
+			const page = await appendSharedContentToPage(input.targetPageId, input);
 			return json({ success: true, pageId: page.id });
 		}
 		const page = await createPageFromSharedContent(payload as SharedContentInput);
