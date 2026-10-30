@@ -18,4 +18,6 @@ Install a JDK 17 and Android SDK with Android platform 35 and build tools 35.0.0
 
 The script builds the same automatically signed debug APK as before, then copies it to `Aporia.apk` in this directory and clears the generated `app\build` output folder. The filename is just a friendly name; the app itself is still the tested debug build. Install it with Android's package installer or `adb install -r .\Aporia.apk`.
 
+Committing an updated `Aporia.apk` to `main` automatically creates or updates its GitHub Release, using `versionName` from `app\build.gradle` for the release tag. Building it locally does not publish it until the updated file is committed and pushed.
+
 Use an HTTPS Caddy address. The app rejects HTTP because Aporia's production session cookie is secure. Android apps do not trust user-installed CA certificates by default; this app opts in to the phone's user CA store so a Caddy internal CA installed on the phone can validate. Normal certificate-chain and hostname checks remain enabled. A new hostname has a separate WebView cookie store, so you may need to sign in again after changing servers.

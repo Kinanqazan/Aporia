@@ -1,0 +1,48 @@
+name: Publish Android APK release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - android/Aporia.apk
+      - .github/workflows/android-release.yml
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create or update Android release from checked-in APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          apk_path="android/Aporia.apk"
+          version_name="$(sed -nE "s/^[[:space:]]*versionName[[:space:]]+['\"]([^'\"]+)['\"].*/\1/p" android/app/build.gradle | head -n 1)"
+          test -n "$version_name"
+          release_tag="android-v${version_name}"
+          release_title="Aporia Android v${version_name}"
+          release_notes="Download Aporia.apk and install it on Android. On first launch, enter the HTTPS address of your self-hosted Aporia server. This APK is the client only; the server and database are not included."
+
+          test -s "$apk_path"
+
+          git tag --force "$release_tag" "$GITHUB_SHA"
+          git push --force origin "refs/tags/$release_tag"
+
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$release_tag" "$apk_path" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$release_tag" --repo "$GITHUB_REPOSITORY" --title "$release_title" --notes "$release_notes" --latest
+          else
+            gh release create "$release_tag" "$apk_path" --repo "$GITHUB_REPOSITORY" --title "$release_title" --notes "$release_notes" --verify-tag --latest
+          fi
