@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, getContext } from 'svelte';
 	import { Editor, Extension, ResizableNodeView, mergeAttributes } from '@tiptap/core';
 	import type { JSONContent, ResizableNodeViewDirection } from '@tiptap/core';
 	import { Selection, Plugin, TextSelection, type Transaction } from '@tiptap/pm/state';
@@ -44,6 +44,8 @@
 	import { CURATED_ICONS } from '$lib/icons';
 	import { ICON_COLORS } from '$lib/icon-colors';
 	import PageIcon from '$lib/components/PageIcon.svelte';
+	import AndroidFormattingSheet from '$lib/editor/AndroidFormattingSheet.svelte';
+	import { createAndroidFormattingSelection } from '$lib/editor/android-formatting-selection';
 	import { constrainImageSizeToWidth } from '$lib/editor/image-resize';
 	import { createAutosaveController } from '$lib/editor/autosave-controller.js';
 	import { startUploadActivity, type UploadActivity } from '$lib/editor/upload-activity';
@@ -192,12 +194,60 @@
 		debounceMs: 600,
 		successIndicatorMs: 300
 	});
+	const pageMutation = getContext<{ run?: (pageId: string, fallbackVersion: string, mutate: (version: string) => Promise<string>) => Promise<void> }>('page-mutation');
+	const runPageMutation = (pageId: string, fallbackVersion: string, mutate: (version: string) => Promise<string>) =>
+		autosaveController.runVersionedMutation(pageId, fallbackVersion, mutate);
+	pageMutation.run = runPageMutation;
+	onDestroy(() => { if (pageMutation.run === runPageMutation) delete pageMutation.run; });
 	let toggleCount = $state(0);
 	let openToggleCount = $state(0);
 
 	// Bubble Menu elements and states
 	let bubbleMenuElement = $state<HTMLDivElement>();
 	let isColorMenuOpen = $state(false);
+	let hasNativeFormatting = $state(false);
+	let androidFormattingSession = $state<ReturnType<typeof createAndroidFormattingSelection> | null>(null);
+	type FormattingWindow = Window & {
+		AporiaFormatting?: { setSelectionAvailable: (available: boolean) => void; setPanelOpen: (open: boolean) => void };
+		__APORIA_FORMATTING__?: { open: () => boolean; close: () => void };
+	};
+
+	function canFormatNativeSelection() {
+		if (!hasNativeFormatting || typeof window === 'undefined') return false;
+		const selected = window.getSelection();
+		return !!editor && editor.isEditable && !isLocked && !androidFormattingSession &&
+			editor.state.selection instanceof TextSelection && !editor.state.selection.empty &&
+			editor.view.dom.contains(document.activeElement) &&
+			!!selected && !selected.isCollapsed && !!selected.anchorNode && !!selected.focusNode &&
+			editor.view.dom.contains(selected.anchorNode) && editor.view.dom.contains(selected.focusNode);
+	}
+
+	function syncNativeFormattingSelection() {
+		if (!hasNativeFormatting || typeof window === 'undefined') return;
+		(window as FormattingWindow).AporiaFormatting?.setSelectionAvailable(canFormatNativeSelection());
+	}
+
+	function openAndroidFormatting() {
+		if (!canFormatNativeSelection() || !editor || !(editor.state.selection instanceof TextSelection)) return false;
+		const session = createAndroidFormattingSelection(editor.state.selection);
+		// Register synchronously: native menu dismissal happens before the sheet renders.
+		editor.registerPlugin(session.plugin);
+		androidFormattingSession = session;
+		(window as FormattingWindow).AporiaFormatting?.setPanelOpen(true);
+		syncNativeFormattingSelection();
+		return true;
+	}
+
+	function closeAndroidFormatting() {
+		if (androidFormattingSession && editor && !editor.isDestroyed) {
+			editor.unregisterPlugin(androidFormattingSession.key);
+		}
+		androidFormattingSession = null;
+		if (typeof window !== 'undefined') {
+			(window as FormattingWindow).AporiaFormatting?.setPanelOpen(false);
+			syncNativeFormattingSelection();
+		}
+	}
 
 	// Table interaction states
 	let isTableHovered = $state(false);
@@ -249,9 +299,29 @@
 	// Slash Command states
 	let isSlashMenuOpen = $state(false);
 	let slashMenuPosition = $state({ top: 0, left: 0 });
+	let slashMenuOpensAbove = $state(false);
+	let slashMenuMaxHeight = $state(320);
 	let slashQuery = $state('');
 	let slashSelectedIndex = $state(0);
 	let slashCommandCallback = $state<((props: any) => void) | null>(null);
+	let slashMenuElement = $state<HTMLDivElement>();
+
+	function positionSlashMenu(anchor: DOMRect) {
+		const edgeGap = 8;
+		const viewportWidth = document.documentElement.clientWidth;
+		const viewportHeight = document.documentElement.clientHeight;
+		const menuWidth = Math.min(280, viewportWidth - edgeGap * 2);
+		const preferredHeight = Math.min(320, viewportHeight - edgeGap * 2);
+		const spaceAbove = Math.max(0, anchor.top - edgeGap - 6);
+		const spaceBelow = Math.max(0, viewportHeight - anchor.bottom - edgeGap - 6);
+
+		slashMenuOpensAbove = spaceBelow < preferredHeight && spaceAbove > spaceBelow;
+		slashMenuMaxHeight = Math.min(320, slashMenuOpensAbove ? spaceAbove : spaceBelow);
+		slashMenuPosition = {
+			top: slashMenuOpensAbove ? anchor.top - 6 : anchor.bottom + 6,
+			left: Math.max(edgeGap, Math.min(anchor.left, viewportWidth - menuWidth - edgeGap))
+		};
+	}
 
 	let imageFileInput = $state<HTMLInputElement>();
 	let attachmentFileInput = $state<HTMLInputElement>();
@@ -1107,6 +1177,26 @@
 		})
 	);
 
+	$effect(() => {
+		slashSelectedIndex;
+		slashQuery;
+		if (!isSlashMenuOpen || !slashMenuElement) return;
+
+		const selectedItem = slashMenuElement.querySelector<HTMLElement>('.slash-menu-item.selected');
+		if (!selectedItem) return;
+
+		const menuRect = slashMenuElement.getBoundingClientRect();
+		const visibleTop = menuRect.top + slashMenuElement.clientTop;
+		const visibleBottom = visibleTop + slashMenuElement.clientHeight;
+		const itemRect = selectedItem.getBoundingClientRect();
+
+		if (itemRect.top < visibleTop) {
+			slashMenuElement.scrollTop -= visibleTop - itemRect.top;
+		} else if (itemRect.bottom > visibleBottom) {
+			slashMenuElement.scrollTop += itemRect.bottom - visibleBottom;
+		}
+	});
+
 	function triggerSelectedCommand() {
 		if (filteredItems.length > 0 && slashCommandCallback) {
 			const item = filteredItems[slashSelectedIndex];
@@ -1169,6 +1259,7 @@
 	let gutterLeft = $state(0);
 	let isActionMenuOpen = $state(false);
 	let openUpward = $state(false);
+	let blockMenuMaxHeight = $state(380);
 	let blockTypeSearchQuery = $state('');
 	let blockTypeSearchInput = $state<HTMLInputElement | null>(null);
 	type BlockActionType =
@@ -1322,6 +1413,7 @@
 		void flushPendingSave();
 		
 		if (editor && editorPageId !== data.pageRecord.id) {
+			closeAndroidFormatting();
 			if (editorPageId && autosaveController.isDirty(editorPageId)) draftsByPage.set(editorPageId, JSON.stringify(editor.getJSON()));
 			if (!autosaveController.isDirty(data.pageRecord.id)) {
 				autosaveController.markSaved({
@@ -1533,7 +1625,7 @@
 				TableCell,
 				BubbleMenu.configure({
 					element: bubbleMenuElement,
-					shouldShow: ({ state }) => !isLocked && state.selection instanceof TextSelection && !state.selection.empty,
+					shouldShow: ({ state }) => !hasNativeFormatting && !isLocked && state.selection instanceof TextSelection && !state.selection.empty,
 					// Do not debounce the first selection: its rect is the anchor for this menu.
 					updateDelay: 0,
 					resizeDelay: 0,
@@ -1559,11 +1651,7 @@
 									if (props.clientRect && editorElement) {
 										const rect = props.clientRect();
 										if (rect) {
-											const editorRect = editorElement.getBoundingClientRect();
-											slashMenuPosition = {
-												top: rect.bottom - editorRect.top + 6,
-												left: rect.left - editorRect.left
-											};
+											positionSlashMenu(rect);
 										}
 									}
 								},
@@ -1575,11 +1663,7 @@
 									if (props.clientRect && editorElement) {
 										const rect = props.clientRect();
 										if (rect) {
-											const editorRect = editorElement.getBoundingClientRect();
-											slashMenuPosition = {
-												top: rect.bottom - editorRect.top + 6,
-												left: rect.left - editorRect.left
-											};
+											positionSlashMenu(rect);
 										}
 									}
 								},
@@ -1683,6 +1767,7 @@
 					return false;
 				}
 			},
+			onSelectionUpdate: syncNativeFormattingSelection,
 			onUpdate: ({ editor, transaction }) => {
 				canUndo = editor.can().undo();
 				const jsonContent = editor.getJSON();
@@ -1713,6 +1798,7 @@
 			}
 		}
 		if (isLocked || isLockRequestInFlight) {
+			closeAndroidFormatting();
 			isIconPickerOpen = false;
 			isColorMenuOpen = false;
 			isSlashMenuOpen = false;
@@ -1832,6 +1918,15 @@
 	});
 
 	onMount(() => {
+		const formattingWindow = window as FormattingWindow;
+		hasNativeFormatting = !!formattingWindow.AporiaFormatting;
+		const nativeFormatting = { open: openAndroidFormatting, close: closeAndroidFormatting };
+		formattingWindow.__APORIA_FORMATTING__ = nativeFormatting;
+		formattingWindow.AporiaFormatting?.setPanelOpen(false);
+		formattingWindow.AporiaFormatting?.setSelectionAvailable(false);
+		document.addEventListener('selectionchange', syncNativeFormattingSelection);
+		document.addEventListener('focusin', syncNativeFormattingSelection);
+		document.addEventListener('focusout', syncNativeFormattingSelection);
 		autosaveController.markSaved({
 			pageId: data.pageRecord.id,
 			contentJson: data.pageRecord.contentJson
@@ -1881,6 +1976,11 @@
 		window.addEventListener('aporia-flush-page', handleEditorFlushRequest);
 
 		return () => {
+			document.removeEventListener('selectionchange', syncNativeFormattingSelection);
+			document.removeEventListener('focusin', syncNativeFormattingSelection);
+			document.removeEventListener('focusout', syncNativeFormattingSelection);
+			if (formattingWindow.__APORIA_FORMATTING__ === nativeFormatting) delete formattingWindow.__APORIA_FORMATTING__;
+			formattingWindow.AporiaFormatting?.setSelectionAvailable(false);
 			window.removeEventListener('pagehide', handlePageHide);
 			window.removeEventListener('aporia-flush-page', handleEditorFlushRequest);
 		};
@@ -1888,6 +1988,7 @@
 
 	onDestroy(() => {
 		cancelGutterHide();
+		closeAndroidFormatting();
 		void flushPendingSave({ keepalive: true }).finally(() => {
 			for (const activities of pendingUploadActivities.values()) {
 				for (const activity of activities) activity.abandon();
@@ -2780,6 +2881,10 @@
 	}
 </script>
 
+{#if androidFormattingSession && editor && !isLocked}
+	<AndroidFormattingSheet {editor} session={androidFormattingSession} {colors} {highlights} onclose={closeAndroidFormatting} />
+{/if}
+
 <svelte:head>
 	<title>{title || 'Untitled'} - Aporia</title>
 </svelte:head>
@@ -2835,7 +2940,7 @@
 				aria-label={isLocked ? 'Unlock page' : 'Lock page'}
 				aria-keyshortcuts="Shift+L"
 			>
-				{#if isLocked}<Lock size={isMobile ? 26 : 18} />{:else}<Unlock size={isMobile ? 26 : 18} />{/if}
+				{#if isLocked}<Lock size={isMobile ? 26 : 22} />{:else}<Unlock size={isMobile ? 26 : 22} />{/if}
 			</button>
 		</div>
 	</div>
@@ -3008,9 +3113,11 @@
 					onclick={(e) => {
 						e.stopPropagation();
 						const rect = e.currentTarget.getBoundingClientRect();
-						const spaceBelow = window.innerHeight - rect.bottom;
-						// Leave room for the full block list when the viewport allows it.
-						openUpward = spaceBelow < 560;
+						const edgeGap = 12;
+						const spaceAbove = Math.max(0, rect.top - edgeGap);
+						const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - edgeGap);
+						openUpward = spaceAbove > spaceBelow;
+						blockMenuMaxHeight = Math.min(380, openUpward ? spaceAbove : spaceBelow);
 						isActionMenuOpen = !isActionMenuOpen;
 					}}
 					ondragstart={handleDragStart}
@@ -3022,7 +3129,7 @@
 
 				<!-- Floating Block Action Options Dropdown -->
 				{#if isActionMenuOpen}
-					<div class="block-action-menu" class:open-upward={openUpward}>
+					<div class="block-action-menu" class:open-upward={openUpward} style={`--block-menu-max-height: ${blockMenuMaxHeight}px`}>
 						<input
 							bind:this={blockTypeSearchInput}
 							class="menu-search-input"
@@ -3361,8 +3468,10 @@
 		<!-- Floating Slash Command suggestions menu -->
 		{#if isSlashMenuOpen && filteredItems.length > 0}
 			<div 
-				class="slash-command-menu" 
-				style="top: {slashMenuPosition.top}px; left: {slashMenuPosition.left}px;"
+				bind:this={slashMenuElement}
+				class="slash-command-menu"
+				class:opens-above={slashMenuOpensAbove}
+				style={`top: ${slashMenuPosition.top}px; left: ${slashMenuPosition.left}px; --slash-menu-max-height: ${slashMenuMaxHeight}px`}
 			>
 				{#each filteredItems as item, index}
 					<button 
@@ -3526,6 +3635,9 @@
 </article>
 
 <style>
+	:global(.android-formatting-selection) {
+		background: color-mix(in srgb, var(--accent-color) 22%, transparent);
+	}
 	.editor-page {
 		position: relative;
 		padding-top: 24px;
@@ -3620,7 +3732,7 @@
 		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 		padding: 6px 4px;
 		width: 170px;
-		max-height: min(560px, calc(100vh - 24px));
+		max-height: min(380px, var(--block-menu-max-height, calc(100vh - 24px)));
 		overflow-y: auto;
 		scrollbar-width: none;
 		-ms-overflow-style: none;
@@ -3786,6 +3898,28 @@
 	.page-lock-btn:disabled {
 		cursor: wait;
 		opacity: 0.55;
+	}
+
+	@media (min-width: 768px) {
+		.page-lock-controls {
+			border: 0;
+			border-radius: 999px;
+			background-color: var(--bg-sidebar);
+			color: var(--text-main);
+			box-shadow: inset 0 0 0 1px var(--border-color), 0 2px 8px rgb(0 0 0 / 12%);
+		}
+
+		.page-lock-btn {
+			width: 44px;
+			height: 40px;
+			border-radius: 999px;
+			color: var(--text-main);
+		}
+
+		.page-lock-btn :global(svg) {
+			width: 22px;
+			height: 22px;
+		}
 	}
 
 	.autosave-indicator.status-saving {
@@ -4754,27 +4888,37 @@
 
 	/* Slash Command Menu styling */
 	.slash-command-menu {
-		position: absolute;
-		background-color: var(--bg-sidebar);
+		position: fixed;
+		background-color: var(--bg-canvas);
 		border: 1px solid var(--border-color);
-		border-radius: 10px;
-		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+		border-radius: 8px;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
 		z-index: 120;
-		width: 280px;
-		max-height: 320px;
+		width: min(280px, calc(100vw - 16px));
+		max-height: min(320px, var(--slash-menu-max-height, calc(100dvh - 16px)));
 		overflow-y: auto;
-		padding: 6px;
+		scrollbar-width: none;
+		-ms-overflow-style: none;
+		padding: 0;
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
+	}
+
+	.slash-command-menu::-webkit-scrollbar {
+		display: none;
+	}
+
+	.slash-command-menu.opens-above {
+		transform: translateY(-100%);
 	}
 
 	.slash-menu-item {
 		display: flex;
 		align-items: center;
 		width: 100%;
-		padding: 6px 10px;
-		border-radius: 6px;
+		padding: 6px 8px;
+		border-radius: 4px;
 		text-align: left;
 		gap: 12px;
 		transition: background var(--transition-speed);
@@ -4803,13 +4947,13 @@
 	}
 
 	.slash-title {
-		font-size: 13.5px;
+		font-size: 13px;
 		font-weight: 550;
 		color: var(--text-main);
 	}
 
 	.slash-desc {
-		font-size: 11px;
+		font-size: 10px;
 		color: var(--text-muted);
 		margin-top: 1px;
 	}

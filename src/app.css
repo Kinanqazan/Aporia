@@ -239,7 +239,7 @@ textarea {
 }
 
 .sidebar-header {
-	height: calc(68px + env(safe-area-inset-top));
+	height: calc(64px + env(safe-area-inset-top));
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
@@ -585,12 +585,21 @@ textarea {
 
 .page-item-row.active {
 	/* Keep the tap area generous while painting a slimmer, edge-to-edge band. */
-	background: linear-gradient(to bottom,
-		transparent 2px,
-		var(--active-sidebar) 2px,
-		var(--active-sidebar) calc(100% - 2px),
-		transparent calc(100% - 2px));
+	background: transparent;
+	isolation: isolate;
 	font-weight: 500;
+}
+
+.page-item-row.active::before {
+	content: '';
+	position: absolute;
+	z-index: -1;
+	top: 2px;
+	left: calc(0px - var(--page-highlight-indent, 0px));
+	right: 0;
+	bottom: 2px;
+	background: var(--active-sidebar);
+	pointer-events: none;
 }
 
 .page-item-row.active .page-title {
@@ -679,6 +688,7 @@ textarea {
 
 /* Sidebar footer */
 .sidebar-footer {
+	position: relative;
 	display: flex;
 	flex-direction: column;
 	padding: 8px 4px;
@@ -947,7 +957,7 @@ textarea {
 }
 
 .mobile .sidebar-header {
-	height: calc(80px + env(safe-area-inset-top));
+	height: calc(72px + env(safe-area-inset-top));
 	padding-top: env(safe-area-inset-top);
 }
 
@@ -1115,13 +1125,13 @@ textarea {
 }
 
 .mobile .sidebar-footer .footer-icon-btn {
-	width: 36px;
-	height: 36px;
+	width: 40px;
+	height: 40px;
 }
 
 .mobile .sidebar-footer .footer-icon-btn svg {
-	width: 18px;
-	height: 18px;
+	width: 20px;
+	height: 20px;
 }
 
 .mobile .sidebar-footer .text-size-trigger {
@@ -1129,6 +1139,7 @@ textarea {
 }
 
 .mobile .footer-row {
+	grid-template-columns: repeat(auto-fit, 40px);
 	justify-content: space-around;
 }
 
@@ -1158,6 +1169,16 @@ textarea {
 	opacity: 1;
 }
 
+.mobile .page-row-disclosure:hover {
+	background: transparent;
+	color: var(--text-muted);
+}
+
+.mobile .page-row-disclosure:active {
+	background: var(--hover-icon);
+	color: var(--text-main);
+}
+
 .mobile .page-symbol-slot .page-emoji {
 	font-size: 22px;
 }
@@ -1175,7 +1196,7 @@ textarea {
 }
 
 .mobile .sidebar-nav {
-	padding: 16px 0 20px;
+	padding: 8px 0 20px;
 }
 
 .mobile .pages-list {
@@ -1188,13 +1209,13 @@ textarea {
 }
 
 .mobile .page-item-row {
-	min-height: 50px;
+	min-height: 46px;
 	padding-block: 4px;
 	padding-inline: 24px;
 }
 
 .mobile .page-children .page-item-row {
-	min-height: 50px;
+	min-height: 46px;
 	padding-block: 4px;
 }
 
@@ -1223,6 +1244,10 @@ textarea {
 	font-size: var(--editor-font-size, 16px);
 	color: var(--text-main);
 	line-height: 1.6;
+}
+
+.ProseMirror[contenteditable='true'] {
+	padding-bottom: 120px;
 }
 
 /* Base text elements */

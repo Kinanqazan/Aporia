@@ -15,6 +15,39 @@ function deferred() {
 	return { promise, resolve };
 }
 
+test('a page mutation waits for saves and updates the version before later edits save', async () => {
+	/** @type {Array<{ pageId: string, contentJson: string, expectedVersion?: string }>} */
+	const saves = [];
+	/** @type {{ finish: ((version: string) => void) | null }} */
+	const pendingMutation = { finish: null };
+	const controller = createAutosaveController({
+		debounceMs: 60_000,
+		onStatusChange: () => {},
+		save: async (payload) => {
+			saves.push(payload);
+			return { success: true, version: saves.length === 1 ? 'v2' : 'v4' };
+		}
+	});
+	controller.markSaved({ pageId: 'page', contentJson: 'original' }, 'v1');
+	controller.queue({ pageId: 'page', contentJson: 'first edit' });
+	let mutationVersion;
+	const mutation = controller.runVersionedMutation('page', 'v1', (version) => {
+		mutationVersion = version;
+		return new Promise((resolve) => { pendingMutation.finish = resolve; });
+	});
+	while (!pendingMutation.finish) await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(mutationVersion, 'v2');
+	controller.queue({ pageId: 'page', contentJson: 'later edit' });
+	const flush = controller.flush();
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(saves.length, 1);
+	pendingMutation.finish('v3');
+	await mutation;
+	assert.equal(await flush, true);
+	assert.equal(saves[1].expectedVersion, 'v3');
+	controller.destroy();
+});
+
 test('a failed older request never replaces a newer pending edit', async () => {
 	/** @type {SaveRequest[]} */
 	const requests = [];

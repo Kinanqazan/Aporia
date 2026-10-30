@@ -1,7 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import PageIcon from '$lib/components/PageIcon.svelte';
-	import { onMount } from 'svelte';
+	import { onMount, setContext } from 'svelte';
 	import { page } from '$app/stores';
 	import { enhance } from '$app/forms';
 	import { invalidateAll, goto, afterNavigate } from '$app/navigation';
@@ -40,7 +40,12 @@
 	// App Layout States
 	let isSidebarOpen = $state(true);
 	let isDarkMode = $state(initialDarkMode());
-	let editorTextSize = $state(16);
+	function initialEditorTextSize() {
+		const pageId = $page.params.id;
+		const size = pageId ? data.editorTextSizes?.[pageId] : undefined;
+		return size === 14 || size === 16 || size === 18 || size === 20 ? size : 16;
+	}
+	let editorTextSize = $state(initialEditorTextSize());
 	let isMobile = $state(false);
 	let isNativeAndroidApp = $state(false);
 	let isTrashOpen = $state(false);
@@ -386,6 +391,7 @@
 	let isCurrentPageFullWidth = $state(false);
 	let canvasEl = $state<HTMLDivElement | null>(null);
 	let isFullWidthRequestInFlight = $state(false);
+	const pageMutation = setContext<{ run?: (pageId: string, fallbackVersion: string, mutate: (version: string) => Promise<string>) => Promise<void> }>('page-mutation', {});
 	let isAuthRoute = $derived($page.url.pathname === '/login' || $page.url.pathname === '/setup' || $page.url.pathname === '/change-password');
 
 	$effect(() => {
@@ -709,18 +715,25 @@
 		if (!currentPageId || !currentPage || isFullWidthRequestInFlight) return;
 
 		const previousValue = isCurrentPageFullWidth;
-		isCurrentPageFullWidth = !previousValue;
+		const pageId = currentPageId;
+		const pageVersion = currentPage.version;
+		const nextValue = !previousValue;
+		isCurrentPageFullWidth = nextValue;
 		isFullWidthRequestInFlight = true;
 
 		try {
-			const response = await fetch(`/api/pages/${currentPageId}/layout`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ isFullWidth: isCurrentPageFullWidth })
-			});
-			const result = await response.json();
-			if (!response.ok || !result.success) throw new Error(result.error || `HTTP ${response.status}`);
-			isCurrentPageFullWidth = result.isFullWidth;
+			const mutate = async (expectedVersion: string) => {
+				const response = await fetch(`/api/pages/${pageId}/layout`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ isFullWidth: nextValue, expectedVersion })
+				});
+				const result = await response.json();
+				if (!response.ok || !result.success) throw new Error(result.error || `HTTP ${response.status}`);
+				return result.version as string;
+			};
+			if (pageMutation.run) await pageMutation.run(pageId, pageVersion, mutate);
+			else await mutate(pageVersion);
 			await invalidateAll();
 		} catch (error) {
 			isCurrentPageFullWidth = previousValue;
@@ -1024,8 +1037,8 @@
 				<span id="phone-page-options-hint" hidden>Press and hold for page options, or press Shift+F10.</span>
 			{/if}
 			<div class="pages-list">
-				{#each pageTree as pageNode}
-					{@render renderNode(pageNode)}
+				{#each pageTree as pageNode (pageNode.id)}
+					{@render renderNode(pageNode, 0)}
 				{/each}
 				
 				{#if pageTree.length === 0}
@@ -1520,7 +1533,7 @@
 
 
 <!-- Snippet: Recursive Node rendering -->
-{#snippet renderNode(node: PageNode & { version: string; children?: any[] })}
+{#snippet renderNode(node: PageNode & { version: string; children?: any[] }, depth: number)}
 	<div class="page-tree-node">
 		<!-- Page item row container -->
 		<div 
@@ -1529,6 +1542,7 @@
 			aria-selected={currentPageId === node.id}
 			tabindex="-1"
 			class:active={currentPageId === node.id}
+			style:--page-highlight-indent="{depth * 4}px"
 			class:dragging={draggedPageId === node.id}
 			class:drop-before={dropTarget?.id === node.id && dropTarget?.placement === 'before'}
 			class:drop-inside={dropTarget?.id === node.id && dropTarget?.placement === 'inside'}
@@ -1650,8 +1664,8 @@
 		<!-- Recursive Child Rendering -->
 		{#if node.children && node.children.length > 0 && expandedNodes.has(node.id)}
 			<div class="page-children">
-				{#each node.children as child}
-					{@render renderNode(child)}
+				{#each node.children as child (child.id)}
+					{@render renderNode(child, depth + 1)}
 				{/each}
 			</div>
 		{/if}
@@ -2619,27 +2633,21 @@
 	}
 
 	.footer-row {
-		display: flex;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, 36px);
 		align-items: center;
 		justify-content: space-between;
+		gap: 2px;
 		width: 100%;
 		padding: 4px 8px;
 	}
 
 	.footer-left-actions {
-		display: flex;
-		align-items: center;
-		gap: 2px;
+		display: contents;
 	}
 
 	.footer-right-actions {
-		display: flex;
-		align-items: center;
-		gap: 2px;
-	}
-
-	.editor-text-size-menu {
-		position: relative;
+		display: contents;
 	}
 
 	.full-width-trigger.active,
@@ -2666,7 +2674,7 @@
 
 	.text-size-trigger {
 		font-family: Georgia, serif;
-		font-size: 22px;
+		font-size: 20px;
 		font-weight: 600;
 		font-style: italic;
 	}
@@ -2735,8 +2743,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 40px;
-		height: 40px;
+		width: 36px;
+		height: 36px;
 		border-radius: 6px;
 		color: var(--text-muted);
 		transition: background var(--transition-speed), color var(--transition-speed);
@@ -2744,8 +2752,8 @@
 	}
 
 	.footer-icon-btn :global(svg) {
-		width: 20px;
-		height: 20px;
+		width: 18px;
+		height: 18px;
 	}
 
 	.footer-icon-btn:hover {

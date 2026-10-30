@@ -7,7 +7,7 @@
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
-		"test": "node --test src/lib/editor/database-model.test.js src/lib/editor/autosave-controller.test.js src/lib/editor/details-open-state.test.js src/lib/editor/details-clipboard.test.ts src/lib/editor/task-list-move.test.ts src/lib/editor/task-list-order.test.ts src/lib/server/task-checkbox-change.test.js src/lib/server/mcp/auth.test.ts src/lib/server/mcp/document.test.ts src/lib/server/mcp/versions.test.ts src/lib/sidebar-spacing.test.js src/lib/sidebar-gesture.test.js src/lib/sidebar-create-navigation.test.js src/lib/page-long-press.test.ts src/lib/startup-state.test.js src/lib/search-controller.test.js src/lib/editor/upload-activity.test.ts",
+		"test": "node --test src/lib/editor/database-model.test.js src/lib/editor/autosave-controller.test.js src/lib/editor/details-open-state.test.js src/lib/editor/details-clipboard.test.ts src/lib/editor/android-formatting-selection.test.ts src/lib/editor/task-list-move.test.ts src/lib/editor/task-list-order.test.ts src/lib/server/task-checkbox-change.test.js src/lib/server/mcp/auth.test.ts src/lib/server/mcp/document.test.ts src/lib/server/mcp/versions.test.ts src/lib/sidebar-spacing.test.js src/lib/sidebar-gesture.test.js src/lib/sidebar-create-navigation.test.js src/lib/page-long-press.test.ts src/lib/startup-state.test.js src/lib/search-controller.test.js src/lib/editor/upload-activity.test.ts",
 		"test:mcp": "npm run build -- --configLoader runner && node scripts/test-mcp-integration.mjs",
 		"test:uploads": "npm run build -- --configLoader runner && node scripts/test-upload-cleanup.mjs",
 		"test:backup": "npm run build -- --configLoader runner && node scripts/test-backup-restore.mjs",

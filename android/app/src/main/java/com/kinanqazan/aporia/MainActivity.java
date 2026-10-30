@@ -7,6 +7,7 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Color;
+import android.graphics.Bitmap;
 import android.graphics.Insets;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -68,12 +69,17 @@ public class MainActivity extends Activity {
 	private static final Pattern SHARED_URL_PATTERN = Pattern.compile("https?://[^\\s<>\\\"']+", Pattern.CASE_INSENSITIVE);
 	private static final int INK = Color.rgb(25, 25, 25);
 	private static final int PAPER = Color.rgb(250, 249, 247);
+	private static final int RECOVERY_BACKGROUND = Color.rgb(246, 234, 233);
 	private static final int ACCENT = Color.rgb(166, 77, 83);
 
 	private final Handler mainHandler = new Handler(Looper.getMainLooper());
 	private FrameLayout root;
 	private WebView webView;
 	private View connectionRecoveryView;
+	private Button retryConnectionButton;
+	private TextView connectionRecoveryMessage;
+	private boolean mainFrameLoadFailed;
+	private final Runnable retryFeedbackTimeout = this::restoreRetryButton;
 	private EditText serverAddressInput;
 	private ValueCallback<Uri[]> fileChooserCallback;
 	private String serverUrl = "";
@@ -171,6 +177,8 @@ public class MainActivity extends Activity {
 
 	@Override
 	public void onBackPressed() {
+		if (webView instanceof FormattingWebView
+				&& ((FormattingWebView) webView).dismissFormattingPanel()) return;
 		if (webView != null && webView.canGoBack()) {
 			webView.goBack();
 			return;
@@ -267,9 +275,13 @@ public class MainActivity extends Activity {
 	}
 
 	private void showWebApp() {
+		mainHandler.removeCallbacks(retryFeedbackTimeout);
 		root.removeAllViews();
 		connectionRecoveryView = null;
-		webView = new WebView(this);
+		retryConnectionButton = null;
+		connectionRecoveryMessage = null;
+		mainFrameLoadFailed = false;
+		webView = new FormattingWebView(this);
 		webView.setBackgroundColor(Color.WHITE);
 		WebSettings settings = webView.getSettings();
 		settings.setJavaScriptEnabled(true);
@@ -674,14 +686,21 @@ public class MainActivity extends Activity {
 	}
 
 	private void showConnectionError(String message) {
-		if (isFinishing() || webView == null || connectionRecoveryView != null) return;
+		if (isFinishing() || webView == null) return;
 
-		applySystemBarColor(PAPER);
+		mainFrameLoadFailed = true;
+		mainHandler.removeCallbacks(retryFeedbackTimeout);
+		restoreRetryButton();
+		applySystemBarColor(RECOVERY_BACKGROUND);
 		webView.setVisibility(View.INVISIBLE);
+		if (connectionRecoveryView != null) {
+			if (message != null && connectionRecoveryMessage != null) connectionRecoveryMessage.setText(message);
+			return;
+		}
 
 		ScrollView screen = new ScrollView(this);
 		screen.setFillViewport(true);
-		screen.setBackgroundColor(PAPER);
+		screen.setBackgroundColor(RECOVERY_BACKGROUND);
 		LinearLayout content = new LinearLayout(this);
 		content.setOrientation(LinearLayout.VERTICAL);
 		content.setGravity(Gravity.CENTER);
@@ -690,14 +709,15 @@ public class MainActivity extends Activity {
 				ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.MATCH_PARENT));
 
 		ImageView logo = new ImageView(this);
-		logo.setImageResource(R.mipmap.ic_launcher);
+		logo.setImageResource(R.drawable.aporia_splash_mark);
+		logo.setColorFilter(Color.WHITE);
 		logo.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-		logo.setPadding(dp(15), dp(15), dp(15), dp(15));
+		logo.setPadding(dp(22), dp(22), dp(22), dp(22));
 		GradientDrawable logoBackground = new GradientDrawable();
-		logoBackground.setColor(Color.rgb(242, 230, 228));
+		logoBackground.setColor(ACCENT);
 		logoBackground.setShape(GradientDrawable.OVAL);
 		logo.setBackground(logoBackground);
-		content.addView(logo, new LinearLayout.LayoutParams(dp(84), dp(84)));
+		content.addView(logo, new LinearLayout.LayoutParams(dp(92), dp(92)));
 
 		TextView title = new TextView(this);
 		title.setText("Aporia can't connect");
@@ -723,18 +743,13 @@ public class MainActivity extends Activity {
 		explanationParams.topMargin = dp(10);
 		explanationParams.bottomMargin = dp(28);
 		content.addView(explanation, explanationParams);
+		connectionRecoveryMessage = explanation;
 
 		Button retry = makeRecoveryButton("Try again", true);
 		content.addView(retry, new LinearLayout.LayoutParams(
 				LinearLayout.LayoutParams.MATCH_PARENT, dp(52)));
-		retry.setOnClickListener(view -> {
-			root.removeView(connectionRecoveryView);
-			connectionRecoveryView = null;
-			webView.setVisibility(View.VISIBLE);
-			applySystemBarColor(Color.WHITE);
-			root.requestApplyInsets();
-			webView.reload();
-		});
+		retryConnectionButton = retry;
+		retry.setOnClickListener(view -> retryConnection());
 
 		Button changeServer = makeRecoveryButton("Change server address", false);
 		LinearLayout.LayoutParams changeServerParams = new LinearLayout.LayoutParams(
@@ -746,6 +761,37 @@ public class MainActivity extends Activity {
 		connectionRecoveryView = screen;
 		root.addView(screen, new FrameLayout.LayoutParams(
 				FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+		root.requestApplyInsets();
+	}
+
+	private void retryConnection() {
+		if (webView == null || connectionRecoveryView == null || retryConnectionButton == null
+				|| !retryConnectionButton.isEnabled()) return;
+		mainFrameLoadFailed = false;
+		retryConnectionButton.setText("Trying again…");
+		retryConnectionButton.setEnabled(false);
+		webView.setVisibility(View.INVISIBLE);
+		webView.reload();
+		mainHandler.removeCallbacks(retryFeedbackTimeout);
+		mainHandler.postDelayed(retryFeedbackTimeout, 2000);
+	}
+
+	private void restoreRetryButton() {
+		if (retryConnectionButton == null) return;
+		retryConnectionButton.setText("Try again");
+		retryConnectionButton.setEnabled(true);
+	}
+
+	private void clearConnectionRecovery(WebView view) {
+		if (connectionRecoveryView == null) return;
+		mainHandler.removeCallbacks(retryFeedbackTimeout);
+		root.removeView(connectionRecoveryView);
+		connectionRecoveryView = null;
+		retryConnectionButton = null;
+		connectionRecoveryMessage = null;
+		mainFrameLoadFailed = false;
+		view.setVisibility(View.VISIBLE);
+		applySystemBarColor(Color.WHITE);
 		root.requestApplyInsets();
 	}
 
@@ -798,6 +844,12 @@ public class MainActivity extends Activity {
 
 	private class AporiaWebViewClient extends WebViewClient {
 		@Override
+		public void onPageStarted(WebView view, String url, Bitmap favicon) {
+			super.onPageStarted(view, url, favicon);
+			if (view instanceof FormattingWebView) ((FormattingWebView) view).resetFormattingState();
+		}
+
+		@Override
 		public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
 			return handleWebNavigation(request.getUrl());
 		}
@@ -810,7 +862,10 @@ public class MainActivity extends Activity {
 		@Override
 		public void onPageFinished(WebView view, String url) {
 			super.onPageFinished(view, url);
-			if (isSameOrigin(Uri.parse(url))) syncSystemBarsFromPage(view);
+			if (isSameOrigin(Uri.parse(url))) {
+				if (connectionRecoveryView != null && !mainFrameLoadFailed) clearConnectionRecovery(view);
+				syncSystemBarsFromPage(view);
+			}
 			deliverPendingShares();
 		}
 
@@ -822,8 +877,11 @@ public class MainActivity extends Activity {
 
 		@Override
 		public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-			super.onReceivedError(view, request, error);
-			if (request.isForMainFrame()) showConnectionError(null);
+			if (request.isForMainFrame()) {
+				showConnectionError(null);
+			} else {
+				super.onReceivedError(view, request, error);
+			}
 		}
 
 		@Override

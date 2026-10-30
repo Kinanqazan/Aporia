@@ -8,6 +8,8 @@ The app receives shared text, web links, images, and files from Android's Share 
 
 The Android APK is a WebView client that loads the configured Aporia server. Changes to the link picker and bookmark editor are delivered by deploying the updated web app to your server; rebuilding the APK is only needed when the native Android app changes.
 
+Selecting editable document text adds **Format** to Android's text selection menu (possibly under **⋮**). It opens a panel for bold, italic, strikethrough, inline code, links, text color, and highlights. Cut, Copy, Paste, and Select all keep their native behavior. This feature requires both the updated APK and the updated web app deployed on your server. The panel closes with its Close button, a tap outside, or Android Back.
+
 ## Build the APK
 
 Install a JDK 17 and Android SDK with Android platform 35 and build tools 35.0.0. Set `JAVA_HOME` and `ANDROID_HOME` (or `ANDROID_SDK_ROOT`), then run this from the `android` directory:

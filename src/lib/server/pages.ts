@@ -152,7 +152,8 @@ export async function updatePageAtVersion(
 	if (!parsed || parsed.generation !== getWorkspaceGeneration()) return null;
 	const current = await getPageById(id);
 	if (!current || current.isInTrash || current.revision !== parsed.revision) return null;
-	if (current.isLocked && updates.isLocked === undefined) return null;
+	if (current.isLocked && updates.isLocked === undefined &&
+		!Object.keys(updates).every((key) => key === 'isFullWidth')) return null;
 	if (updates.iconColor !== undefined) updates.iconColor = normalizeIconColor(updates.iconColor);
 	const changed = (Object.keys(updates) as Array<keyof typeof updates>).some((key) => updates[key] !== current[key]);
 	const now = new Date().toISOString();

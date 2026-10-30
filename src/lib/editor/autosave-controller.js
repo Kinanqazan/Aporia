@@ -25,6 +25,8 @@ export function createAutosaveController({
 	const pendingSaves = new Map();
 	/** @type {Promise<boolean> | null} */
 	let drainPromise = null;
+	/** @type {Promise<void> | null} */
+	let mutationBarrier = null;
 	/** @type {AutosavePayload | null} */
 	let activePayload = null;
 	/** @type {Map<string, string>} */
@@ -113,6 +115,7 @@ export function createAutosaveController({
 	/** @param {FlushOptions} options */
 	async function drain(options) {
 		while (pendingSaves.size > 0) {
+			if (mutationBarrier) await mutationBarrier;
 			const nextPayload = [...pendingSaves.values()].find((pending) => !conflictedPages.has(pending.pageId));
 			if (!nextPayload) break;
 			// A preceding save may have advanced the version after this edit was queued.
@@ -181,6 +184,21 @@ export function createAutosaveController({
 	/** @param {string} pageId */
 	function getVersion(pageId) { return versionsByPage.get(pageId); }
 
+	/** @param {string} pageId @param {string} fallbackVersion @param {(version: string) => Promise<string>} mutate */
+	async function runVersionedMutation(pageId, fallbackVersion, mutate) {
+		if (!(await flush())) throw new Error('Could not save pending edits');
+		/** @type {() => void} */
+		let release = () => {};
+		mutationBarrier = new Promise((resolve) => { release = resolve; });
+		try {
+			const version = await mutate(getVersion(pageId) ?? fallbackVersion);
+			versionsByPage.set(pageId, version);
+		} finally {
+			mutationBarrier = null;
+			release();
+		}
+	}
+
 	return {
 		queue,
 		flush,
@@ -188,6 +206,7 @@ export function createAutosaveController({
 		isDirty,
 		hasConflict,
 		getVersion,
+		runVersionedMutation,
 		destroy
 	};
 }
