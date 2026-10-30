@@ -3,15 +3,47 @@ import test from 'node:test';
 import { getSchema } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { EditorState, TextSelection } from '@tiptap/pm/state';
-import { createAndroidFormattingSelection } from './android-formatting-selection.ts';
+import { createAndroidFormattingSelection, createAndroidFormattingSelectionTracker, getAndroidFormattingSelection } from './android-formatting-selection.ts';
 
 const schema = getSchema([StarterKit]);
 function setup() {
 	const doc = schema.node('doc', null, [schema.node('paragraph', null, schema.text('one two three'))]);
-	const session = createAndroidFormattingSelection(TextSelection.create(doc, 5, 8));
-	const state = EditorState.create({ doc, plugins: [session.plugin] });
+	const selection = TextSelection.create(doc, 5, 8);
+	const session = createAndroidFormattingSelection(selection);
+	const state = EditorState.create({ doc, selection, plugins: [session.plugin] });
 	return { state, session };
 }
+
+test('Format uses the live editor range after Android transfers focus to its action menu', () => {
+	const { state } = setup();
+	const selection = getAndroidFormattingSelection(state, true, false);
+	assert.ok(selection);
+	assert.equal(state.doc.textBetween(selection.from, selection.to), 'two');
+	assert.equal(getAndroidFormattingSelection(state, false, false), null);
+	assert.equal(getAndroidFormattingSelection(state, true, true), null);
+});
+
+test('pending native Format target survives WebView collapsing the selection before the click callback', () => {
+	const { state } = setup();
+	const tracker = createAndroidFormattingSelectionTracker();
+	tracker.remember(state.selection as TextSelection);
+	const collapse = state.tr.setSelection(TextSelection.create(state.doc, 1));
+	const collapsedState = state.apply(collapse);
+	tracker.map(collapse);
+
+	const selection = tracker.getSelection(collapsedState);
+	assert.ok(selection);
+	assert.equal(collapsedState.doc.textBetween(selection.from, selection.to), 'two');
+
+	const insert = collapsedState.tr.insertText('prefix ', 1);
+	const editedState = collapsedState.apply(insert);
+	tracker.map(insert);
+	const mapped = tracker.getSelection(editedState);
+	assert.ok(mapped);
+	assert.equal(editedState.doc.textBetween(mapped.from, mapped.to), 'two');
+	tracker.clear();
+	assert.equal(tracker.getSelection(editedState), null);
+});
 
 test('formatting retains its target after native menu dismissal collapses selection', () => {
 	const initial = setup();

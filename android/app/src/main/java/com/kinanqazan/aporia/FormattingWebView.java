@@ -48,7 +48,7 @@ final class FormattingWebView extends WebView {
 				} else if (item == null) {
 					menu.add(Menu.NONE, FORMAT_ITEM_ID, 10, "Format")
 							.setIcon(R.drawable.ic_format_text)
-							.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM | MenuItem.SHOW_AS_ACTION_WITH_TEXT);
+							.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS | MenuItem.SHOW_AS_ACTION_WITH_TEXT);
 				}
 			}
 

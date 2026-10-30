@@ -45,7 +45,7 @@
 	import { ICON_COLORS } from '$lib/icon-colors';
 	import PageIcon from '$lib/components/PageIcon.svelte';
 	import AndroidFormattingSheet from '$lib/editor/AndroidFormattingSheet.svelte';
-	import { createAndroidFormattingSelection } from '$lib/editor/android-formatting-selection';
+	import { createAndroidFormattingSelection, createAndroidFormattingSelectionTracker, getAndroidFormattingSelection } from '$lib/editor/android-formatting-selection';
 	import { constrainImageSizeToWidth } from '$lib/editor/image-resize';
 	import { createAutosaveController } from '$lib/editor/autosave-controller.js';
 	import { startUploadActivity, type UploadActivity } from '$lib/editor/upload-activity';
@@ -207,29 +207,70 @@
 	let isColorMenuOpen = $state(false);
 	let hasNativeFormatting = $state(false);
 	let androidFormattingSession = $state<ReturnType<typeof createAndroidFormattingSelection> | null>(null);
+	const androidFormattingSelectionTracker = createAndroidFormattingSelectionTracker();
+	let nativeEditorSelectionActive = false;
 	type FormattingWindow = Window & {
 		AporiaFormatting?: { setSelectionAvailable: (available: boolean) => void; setPanelOpen: (open: boolean) => void };
 		__APORIA_FORMATTING__?: { open: () => boolean; close: () => void };
 	};
 
 	function canFormatNativeSelection() {
-		if (!hasNativeFormatting || typeof window === 'undefined') return false;
-		const selected = window.getSelection();
-		return !!editor && editor.isEditable && !isLocked && !androidFormattingSession &&
-			editor.state.selection instanceof TextSelection && !editor.state.selection.empty &&
-			editor.view.dom.contains(document.activeElement) &&
-			!!selected && !selected.isCollapsed && !!selected.anchorNode && !!selected.focusNode &&
-			editor.view.dom.contains(selected.anchorNode) && editor.view.dom.contains(selected.focusNode);
+		if (!hasNativeFormatting || !editor || isLocked || !editor.isEditable || androidFormattingSession || !nativeEditorSelectionActive) return false;
+		return !!(getAndroidFormattingSelection(editor.state, editor.isEditable, isLocked) ??
+			androidFormattingSelectionTracker.getSelection(editor.state));
 	}
 
 	function syncNativeFormattingSelection() {
 		if (!hasNativeFormatting || typeof window === 'undefined') return;
+		if (!editor || isLocked || !editor.isEditable) {
+			androidFormattingSelectionTracker.clear();
+			nativeEditorSelectionActive = false;
+		}
 		(window as FormattingWindow).AporiaFormatting?.setSelectionAvailable(canFormatNativeSelection());
 	}
 
+	function handleEditorSelectionUpdate() {
+		if (editor && !isLocked && editor.isEditable) {
+			const current = getAndroidFormattingSelection(editor.state, editor.isEditable, isLocked);
+			if (current) {
+				androidFormattingSelectionTracker.remember(current);
+				nativeEditorSelectionActive = true;
+			}
+		}
+		syncNativeFormattingSelection();
+	}
+
+	function clearPendingAndroidFormattingSelection() {
+		androidFormattingSelectionTracker.clear();
+		nativeEditorSelectionActive = false;
+		if (hasNativeFormatting) {
+			(window as FormattingWindow).AporiaFormatting?.setSelectionAvailable(false);
+		}
+	}
+
+	function handleAndroidFormattingPointerDown() {
+		if (androidFormattingSession) return;
+		// Native action-menu taps do not dispatch into the WebView. Any DOM
+		// pointerdown is a new gesture and invalidates the cached text range.
+		clearPendingAndroidFormattingSelection();
+	}
+
+	function handleAndroidFormattingFocusIn(event: FocusEvent) {
+		if (androidFormattingSession) return;
+		if (event.target === document.body || event.target === document.documentElement) return;
+		if (!(event.target instanceof Node) || !editor?.view.dom.contains(event.target)) {
+			clearPendingAndroidFormattingSelection();
+		} else {
+			syncNativeFormattingSelection();
+		}
+	}
+
 	function openAndroidFormatting() {
-		if (!canFormatNativeSelection() || !editor || !(editor.state.selection instanceof TextSelection)) return false;
-		const session = createAndroidFormattingSelection(editor.state.selection);
+		if (!hasNativeFormatting || !editor || isLocked || androidFormattingSession || !nativeEditorSelectionActive) return false;
+		const selection = getAndroidFormattingSelection(editor.state, editor.isEditable, isLocked, !!androidFormattingSession) ??
+			androidFormattingSelectionTracker.getSelection(editor.state);
+		if (!selection) return false;
+		const session = createAndroidFormattingSelection(selection);
 		// Register synchronously: native menu dismissal happens before the sheet renders.
 		editor.registerPlugin(session.plugin);
 		androidFormattingSession = session;
@@ -243,6 +284,7 @@
 			editor.unregisterPlugin(androidFormattingSession.key);
 		}
 		androidFormattingSession = null;
+		clearPendingAndroidFormattingSelection();
 		if (typeof window !== 'undefined') {
 			(window as FormattingWindow).AporiaFormatting?.setPanelOpen(false);
 			syncNativeFormattingSelection();
@@ -1767,7 +1809,11 @@
 					return false;
 				}
 			},
-			onSelectionUpdate: syncNativeFormattingSelection,
+			onSelectionUpdate: handleEditorSelectionUpdate,
+			onTransaction: ({ transaction }) => {
+				androidFormattingSelectionTracker.map(transaction);
+				syncNativeFormattingSelection();
+			},
 			onUpdate: ({ editor, transaction }) => {
 				canUndo = editor.can().undo();
 				const jsonContent = editor.getJSON();
@@ -1898,7 +1944,11 @@
 					const height = typeof node.attrs.height === 'number' && node.attrs.height > 0 ? node.attrs.height : element.offsetHeight;
 					if (width <= 0 || height <= 0) return;
 
-					const constrained = constrainToContainingBlock(width, height);
+					const hasStoredSize = (typeof node.attrs.width === 'number' && node.attrs.width > 0) ||
+						(typeof node.attrs.height === 'number' && node.attrs.height > 0);
+					const maxWidth = getContainingBlockWidth();
+					const initialMaxWidth = hasStoredSize ? maxWidth : Math.min(maxWidth, 560);
+					const constrained = constrainImageSizeToWidth({ width, height }, initialMaxWidth);
 					if (constrained.width !== width || constrained.height !== height) {
 						element.style.width = `${constrained.width}px`;
 						element.style.height = `${constrained.height}px`;
@@ -1925,8 +1975,8 @@
 		formattingWindow.AporiaFormatting?.setPanelOpen(false);
 		formattingWindow.AporiaFormatting?.setSelectionAvailable(false);
 		document.addEventListener('selectionchange', syncNativeFormattingSelection);
-		document.addEventListener('focusin', syncNativeFormattingSelection);
-		document.addEventListener('focusout', syncNativeFormattingSelection);
+		document.addEventListener('focusin', handleAndroidFormattingFocusIn);
+		document.addEventListener('pointerdown', handleAndroidFormattingPointerDown, true);
 		autosaveController.markSaved({
 			pageId: data.pageRecord.id,
 			contentJson: data.pageRecord.contentJson
@@ -1977,8 +2027,10 @@
 
 		return () => {
 			document.removeEventListener('selectionchange', syncNativeFormattingSelection);
-			document.removeEventListener('focusin', syncNativeFormattingSelection);
-			document.removeEventListener('focusout', syncNativeFormattingSelection);
+			document.removeEventListener('focusin', handleAndroidFormattingFocusIn);
+			document.removeEventListener('pointerdown', handleAndroidFormattingPointerDown, true);
+			androidFormattingSelectionTracker.clear();
+			nativeEditorSelectionActive = false;
 			if (formattingWindow.__APORIA_FORMATTING__ === nativeFormatting) delete formattingWindow.__APORIA_FORMATTING__;
 			formattingWindow.AporiaFormatting?.setSelectionAvailable(false);
 			window.removeEventListener('pagehide', handlePageHide);

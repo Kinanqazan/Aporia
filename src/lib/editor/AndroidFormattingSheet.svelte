@@ -3,6 +3,7 @@
 	import type { Editor } from '@tiptap/core';
 	import type { Mark } from '@tiptap/pm/model';
 	import { ALargeSmall, ArrowLeft, Bold, Code, Highlighter, Italic, Link, Strikethrough, X } from 'lucide-svelte';
+	import { positionAndroidFormattingPopover } from './android-formatting-layout';
 	import type { createAndroidFormattingSelection } from './android-formatting-selection';
 
 	let { editor, session, colors, highlights, onclose } = $props<{
@@ -30,10 +31,6 @@
 		const range = session.getSelection(editor.state);
 		// Keep focus in the popover so formatting does not reopen Android's menu.
 		return range && editor.isEditable ? editor.chain().setTextSelection({ from: range.from, to: range.to }) : null;
-	}
-
-	function clamp(value: number, min: number, max: number) {
-		return Math.max(min, Math.min(value, max));
 	}
 
 	function placePopover() {
@@ -79,27 +76,12 @@
 		const viewportTop = viewport?.offsetTop ?? 0;
 		const viewportWidth = viewport?.width ?? window.innerWidth;
 		const viewportHeight = viewport?.height ?? window.innerHeight;
-		const margin = 8;
-		const gap = 8;
 		const box = dialog.getBoundingClientRect();
-		const width = box.width || Math.min(320, viewportWidth - margin * 2);
-		const height = box.height || 128;
-		const topLimit = viewportTop + margin;
-		const bottomLimit = viewportTop + viewportHeight - margin;
-		const above = rect.top - height - gap;
-		const below = rect.bottom + gap;
-		const fitsAbove = above >= topLimit;
-		const fitsBelow = below + height <= bottomLimit;
-		const top = fitsAbove ? above : fitsBelow ? below : clamp(
-			(rect.top - topLimit) > (bottomLimit - rect.bottom) ? rect.top - height - gap : below,
-			topLimit,
-			Math.max(topLimit, bottomLimit - height)
+		position = positionAndroidFormattingPopover(
+			{ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+			{ width: box.width || Math.min(320, viewportWidth - 16), height: box.height || 128 },
+			{ left: viewportLeft, top: viewportTop, width: viewportWidth, height: viewportHeight }
 		);
-		const center = rect.left + rect.width / 2;
-		position = {
-			left: clamp(center - width / 2, viewportLeft + margin, Math.max(viewportLeft + margin, viewportLeft + viewportWidth - width - margin)),
-			top
-		};
 	}
 
 	let positionFrame = 0;
@@ -227,6 +209,7 @@
 		max-width: calc(100vw - 16px);
 		max-height: min(220px, 55dvh);
 		box-sizing: border-box;
+		z-index: 2147483647;
 		overflow: auto;
 		padding: 6px 8px 8px;
 		border: 1px solid var(--border-color);
