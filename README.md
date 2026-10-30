@@ -1,6 +1,6 @@
 # Aporia 📝
 
-> A minimalist, debloated Notion alternative built for personal use. Self-hosted, lightning-fast, and 100% private.
+> A minimalist, debloated Notion alternative for personal knowledge management. Self-hosted, fast, and private.
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?style=for-the-badge&logo=vercel)](https://aporia-notes.vercel.app/)
 [![Svelte 5](https://img.shields.io/badge/Svelte-5-orange?style=for-the-badge&logo=svelte)](https://svelte.dev)
@@ -18,7 +18,7 @@ Built for speed, clarity, and simplicity, Aporia combines modern block-based edi
 
 * ⚡ **Lightning-Fast & Responsive:** Powered by Svelte 5 and TipTap for instant page loads and fluid, effortless editing.
 * 🎯 **Clean & Distraction-Free:** A sleek, uncluttered UI focused purely on your content, tasks, and ideas.
-* 🔒 **Self-Hosted & Private:** Runs on a single local SQLite database—giving you complete ownership over your data.
+* 🔒 **Self-Hosted & Private:** Run Aporia on a server you control. Its SQLite database stays with your instance, which you can access from a browser or the Android app.
 
 ---
 
@@ -45,12 +45,16 @@ Try Aporia directly in your browser: **[aporia-notes.vercel.app](https://aporia-
 
 - ✍️ **Block-Based Editor:** Rich-text editing powered by TipTap with support for headings, code blocks, task lists, tables, callouts, and inline styling.
 - ⚡ **Instant Full-Text Search:** Powered by SQLite FTS5 for lightning-fast search across all titles and page contents.
-- 🔒 **Local-First & Self-Hosted:** Single-user authentication model with secure session management. Your data stays in your local SQLite database.
+- 🔒 **Self-Hosted:** Aporia runs on a server you control. Your browser and Android app connect to that instance, where your workspace data is stored.
 - 📥 **Notion Import & Data Backup:** Easily export/import your workspace and import from Notion.
 - 🎨 **Svelte 5 & Runes:** Built on Svelte 5 for top-tier performance and fine-grained reactivity.
 - 🐳 **Production Ready:** Ships with a multi-stage Dockerfile and Docker Compose configurations.
 
 For personal AI assistant access, see [the MCP connection guide](docs/mcp.md). It covers the private bearer key, the Hermes container, and desktop Codex.
+
+### Android app
+
+For a better phone experience, install the [Aporia Android APK](https://github.com/Kinanqazan/Aporia/releases/latest/download/Aporia.apk). On first launch, enter the HTTPS address of your self-hosted Aporia server. The APK is a client for your server; it does not include the server or its database. See [the Android guide](android/README.md) for installation, server connection, and build details.
 
 ---
 
@@ -116,9 +120,9 @@ docker compose ps
 docker compose logs -f aporia
 ```
 
-Open `http://<your-host>:3001` in a browser. On the first visit, create the username and password for your private workspace. Account setup closes after the first account is created.
+The container listens on `127.0.0.1:3001` on the Docker host. Configure the HTTPS reverse proxy in the next step before connecting from another device.
 
-### 5. Optional: HTTPS with Caddy Reverse Proxy
+### 5. Configure HTTPS with Caddy Reverse Proxy
 Add the following site block to your `Caddyfile`:
 
 ```caddy
@@ -132,6 +136,8 @@ Reload Caddy:
 caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
 ```
+
+Open `https://aporia.example.com` in a browser or enter that address in the Android app. The phone must be able to reach the hostname, and the Android app requires HTTPS. On the first visit, create the username and password for your private workspace. Account setup closes after the first account is created.
 
 ---
 

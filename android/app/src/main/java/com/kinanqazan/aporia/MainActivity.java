@@ -8,6 +8,8 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Insets;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -31,6 +33,7 @@ import android.webkit.URLUtil;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -70,6 +73,7 @@ public class MainActivity extends Activity {
 	private final Handler mainHandler = new Handler(Looper.getMainLooper());
 	private FrameLayout root;
 	private WebView webView;
+	private View connectionRecoveryView;
 	private EditText serverAddressInput;
 	private ValueCallback<Uri[]> fileChooserCallback;
 	private String serverUrl = "";
@@ -107,7 +111,7 @@ public class MainActivity extends Activity {
 				}
 			}
 
-			boolean showingWebApp = webView != null;
+			boolean showingWebApp = webView != null && connectionRecoveryView == null;
 			view.setPadding(left, showingWebApp ? 0 : top, right, showingWebApp ? 0 : bottom);
 			return insets;
 		});
@@ -264,6 +268,7 @@ public class MainActivity extends Activity {
 
 	private void showWebApp() {
 		root.removeAllViews();
+		connectionRecoveryView = null;
 		webView = new WebView(this);
 		webView.setBackgroundColor(Color.WHITE);
 		WebSettings settings = webView.getSettings();
@@ -668,16 +673,95 @@ public class MainActivity extends Activity {
 		}
 	}
 
-	private void showConnectionError(String description) {
-		if (isFinishing()) return;
-		new AlertDialog.Builder(this)
-				.setTitle("Could not reach Aporia")
-				.setMessage("Check that this server address is current and reachable over HTTPS.\n\n" + description)
-				.setNegativeButton("Change server", (dialog, which) -> showServerDialog())
-				.setPositiveButton("Retry", (dialog, which) -> {
-					if (webView != null) webView.reload();
-				})
-				.show();
+	private void showConnectionError(String message) {
+		if (isFinishing() || webView == null || connectionRecoveryView != null) return;
+
+		applySystemBarColor(PAPER);
+		webView.setVisibility(View.INVISIBLE);
+
+		ScrollView screen = new ScrollView(this);
+		screen.setFillViewport(true);
+		screen.setBackgroundColor(PAPER);
+		LinearLayout content = new LinearLayout(this);
+		content.setOrientation(LinearLayout.VERTICAL);
+		content.setGravity(Gravity.CENTER);
+		content.setPadding(dp(32), dp(24), dp(32), dp(24));
+		screen.addView(content, new ScrollView.LayoutParams(
+				ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.MATCH_PARENT));
+
+		ImageView logo = new ImageView(this);
+		logo.setImageResource(R.mipmap.ic_launcher);
+		logo.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+		logo.setPadding(dp(15), dp(15), dp(15), dp(15));
+		GradientDrawable logoBackground = new GradientDrawable();
+		logoBackground.setColor(Color.rgb(242, 230, 228));
+		logoBackground.setShape(GradientDrawable.OVAL);
+		logo.setBackground(logoBackground);
+		content.addView(logo, new LinearLayout.LayoutParams(dp(84), dp(84)));
+
+		TextView title = new TextView(this);
+		title.setText("Aporia can't connect");
+		title.setTextColor(INK);
+		title.setTextSize(25);
+		title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+		title.setGravity(Gravity.CENTER);
+		LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
+				LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+		titleParams.topMargin = dp(24);
+		content.addView(title, titleParams);
+
+		TextView explanation = new TextView(this);
+		explanation.setText(message == null || message.isEmpty()
+				? "Away from home? Connect Tailscale, then try again. If you're connected, check the saved server address."
+				: message);
+		explanation.setTextColor(Color.rgb(96, 91, 89));
+		explanation.setTextSize(16);
+		explanation.setGravity(Gravity.CENTER);
+		explanation.setLineSpacing(dp(3), 1f);
+		LinearLayout.LayoutParams explanationParams = new LinearLayout.LayoutParams(
+				LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+		explanationParams.topMargin = dp(10);
+		explanationParams.bottomMargin = dp(28);
+		content.addView(explanation, explanationParams);
+
+		Button retry = makeRecoveryButton("Try again", true);
+		content.addView(retry, new LinearLayout.LayoutParams(
+				LinearLayout.LayoutParams.MATCH_PARENT, dp(52)));
+		retry.setOnClickListener(view -> {
+			root.removeView(connectionRecoveryView);
+			connectionRecoveryView = null;
+			webView.setVisibility(View.VISIBLE);
+			applySystemBarColor(Color.WHITE);
+			root.requestApplyInsets();
+			webView.reload();
+		});
+
+		Button changeServer = makeRecoveryButton("Change server address", false);
+		LinearLayout.LayoutParams changeServerParams = new LinearLayout.LayoutParams(
+				LinearLayout.LayoutParams.MATCH_PARENT, dp(52));
+		changeServerParams.topMargin = dp(10);
+		content.addView(changeServer, changeServerParams);
+		changeServer.setOnClickListener(view -> showServerDialog());
+
+		connectionRecoveryView = screen;
+		root.addView(screen, new FrameLayout.LayoutParams(
+				FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+		root.requestApplyInsets();
+	}
+
+	private Button makeRecoveryButton(String label, boolean primary) {
+		Button button = new Button(this);
+		button.setText(label);
+		button.setAllCaps(false);
+		button.setTextSize(16);
+		button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+		button.setTextColor(primary ? Color.WHITE : ACCENT);
+		GradientDrawable background = new GradientDrawable();
+		background.setColor(primary ? ACCENT : Color.rgb(241, 233, 231));
+		background.setCornerRadius(dp(14));
+		button.setBackground(background);
+		button.setElevation(0);
+		return button;
 	}
 
 	private boolean handleWebNavigation(Uri uri) {
@@ -739,13 +823,13 @@ public class MainActivity extends Activity {
 		@Override
 		public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
 			super.onReceivedError(view, request, error);
-			if (request.isForMainFrame()) showConnectionError(error.getDescription().toString());
+			if (request.isForMainFrame()) showConnectionError(null);
 		}
 
 		@Override
 		public void onReceivedSslError(WebView view, SslErrorHandler handler, android.net.http.SslError error) {
 			handler.cancel();
-			showConnectionError("The server certificate could not be verified.");
+			showConnectionError("Aporia couldn't verify the server's secure connection. Check your server address and try again.");
 		}
 	}
 
