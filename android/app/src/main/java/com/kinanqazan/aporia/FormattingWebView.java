@@ -47,7 +47,8 @@ final class FormattingWebView extends WebView {
 					if (item != null) menu.removeItem(FORMAT_ITEM_ID);
 				} else if (item == null) {
 					menu.add(Menu.NONE, FORMAT_ITEM_ID, 10, "Format")
-							.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
+							.setIcon(R.drawable.ic_format_text)
+							.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM | MenuItem.SHOW_AS_ACTION_WITH_TEXT);
 				}
 			}
 

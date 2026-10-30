@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { Editor } from '@tiptap/core';
 	import type { Mark } from '@tiptap/pm/model';
-	import { Bold, Italic, Strikethrough, Code, Link, X } from 'lucide-svelte';
+	import { ALargeSmall, ArrowLeft, Bold, Code, Highlighter, Italic, Link, Strikethrough, X } from 'lucide-svelte';
 	import type { createAndroidFormattingSelection } from './android-formatting-selection';
 
 	let { editor, session, colors, highlights, onclose } = $props<{
@@ -16,8 +16,8 @@
 	let revision = $state(0);
 	let showLink = $state(false);
 	let linkUrl = $state('');
-	let viewportBottom = $state(0);
-	let viewportHeight = $state<number>();
+	let picker = $state<'text' | 'highlight' | null>(null);
+	let position = $state({ left: 8, top: 8 });
 	const selected = $derived.by(() => { revision; return session.getSelection(editor.state); });
 
 	function active(mark: string) {
@@ -28,51 +28,174 @@
 
 	function chain() {
 		const range = session.getSelection(editor.state);
-		// Do not focus the editor: the native menu has been dismissed and the
-		// sheet owns focus. Commands still apply to the original selected range.
+		// Keep focus in the popover so formatting does not reopen Android's menu.
 		return range && editor.isEditable ? editor.chain().setTextSelection({ from: range.from, to: range.to }) : null;
 	}
 
-	onMount(() => {
-		const update = () => revision++;
+	function clamp(value: number, min: number, max: number) {
+		return Math.max(min, Math.min(value, max));
+	}
+
+	function placePopover() {
+		if (!dialog?.open) return;
+		const range = session.getSelection(editor.state);
+		if (!range) return;
+
+		let rect: DOMRect | null = null;
+		try {
+			const domRange = document.createRange();
+			const from = editor.view.domAtPos(range.from);
+			const to = editor.view.domAtPos(range.to);
+			domRange.setStart(from.node, from.offset);
+			domRange.setEnd(to.node, to.offset);
+			const viewport = window.visualViewport;
+			const visibleTop = viewport?.offsetTop ?? 0;
+			const visibleBottom = visibleTop + (viewport?.height ?? window.innerHeight);
+			const visibleRects = Array.from(domRange.getClientRects()).filter((item) => item.bottom > visibleTop && item.top < visibleBottom);
+			if (visibleRects.length) {
+				const left = Math.min(...visibleRects.map((item) => item.left));
+				const top = Math.min(...visibleRects.map((item) => item.top));
+				const right = Math.max(...visibleRects.map((item) => item.right));
+				const bottom = Math.max(...visibleRects.map((item) => item.bottom));
+				rect = new DOMRect(left, top, right - left, bottom - top);
+			} else {
+				const candidate = domRange.getBoundingClientRect();
+				if (candidate.width || candidate.height) rect = candidate;
+			}
+		} catch {
+			// Fall back to the editor's coordinates if the DOM range is temporarily unavailable.
+			try {
+				const from = editor.view.coordsAtPos(range.from);
+				const to = editor.view.coordsAtPos(range.to);
+				rect = new DOMRect(from.left, from.top, Math.max(1, to.right - from.left), Math.max(from.bottom, to.bottom) - from.top);
+			} catch {
+				rect = null;
+			}
+		}
+		if (!rect) return;
+
 		const viewport = window.visualViewport;
-		const updateViewport = () => {
-			viewportBottom = viewport ? Math.max(0, window.innerHeight - viewport.offsetTop - viewport.height) : 0;
-			viewportHeight = (viewport?.height ?? window.innerHeight) * 0.65;
+		const viewportLeft = viewport?.offsetLeft ?? 0;
+		const viewportTop = viewport?.offsetTop ?? 0;
+		const viewportWidth = viewport?.width ?? window.innerWidth;
+		const viewportHeight = viewport?.height ?? window.innerHeight;
+		const margin = 8;
+		const gap = 8;
+		const box = dialog.getBoundingClientRect();
+		const width = box.width || Math.min(320, viewportWidth - margin * 2);
+		const height = box.height || 128;
+		const topLimit = viewportTop + margin;
+		const bottomLimit = viewportTop + viewportHeight - margin;
+		const above = rect.top - height - gap;
+		const below = rect.bottom + gap;
+		const fitsAbove = above >= topLimit;
+		const fitsBelow = below + height <= bottomLimit;
+		const top = fitsAbove ? above : fitsBelow ? below : clamp(
+			(rect.top - topLimit) > (bottomLimit - rect.bottom) ? rect.top - height - gap : below,
+			topLimit,
+			Math.max(topLimit, bottomLimit - height)
+		);
+		const center = rect.left + rect.width / 2;
+		position = {
+			left: clamp(center - width / 2, viewportLeft + margin, Math.max(viewportLeft + margin, viewportLeft + viewportWidth - width - margin)),
+			top
 		};
-		updateViewport();
-		viewport?.addEventListener('resize', updateViewport);
-		viewport?.addEventListener('scroll', updateViewport);
-		window.addEventListener('resize', updateViewport);
+	}
+
+	let positionFrame = 0;
+	function schedulePosition() {
+		cancelAnimationFrame(positionFrame);
+		positionFrame = requestAnimationFrame(placePopover);
+	}
+
+	function applyTextColor(value: string) {
+		if (value === 'var(--text-main)') chain()?.unsetColor().run();
+		else chain()?.setColor(value).run();
+		picker = null;
+	}
+
+	function applyHighlight(value: string) {
+		if (value === 'transparent') chain()?.unsetHighlight().run();
+		else chain()?.setHighlight({ color: value }).run();
+		picker = null;
+	}
+
+	onMount(() => {
+		const update = () => {
+			revision++;
+			schedulePosition();
+		};
+		const outsidePointer = (event: PointerEvent) => {
+			if (event.target instanceof Node && !dialog.contains(event.target)) onclose();
+		};
+		const cancel = (event: Event) => {
+			event.preventDefault();
+			onclose();
+		};
+		const viewport = window.visualViewport;
+		dialog.show();
 		editor.on('transaction', update);
-		dialog.showModal();
+		document.addEventListener('scroll', schedulePosition, true);
+		document.addEventListener('pointerdown', outsidePointer, true);
+		dialog.addEventListener('cancel', cancel);
+		viewport?.addEventListener('resize', schedulePosition);
+		viewport?.addEventListener('scroll', schedulePosition);
+		window.addEventListener('resize', schedulePosition);
+		schedulePosition();
 		return () => {
-			viewport?.removeEventListener('resize', updateViewport);
-			viewport?.removeEventListener('scroll', updateViewport);
-			window.removeEventListener('resize', updateViewport);
+			cancelAnimationFrame(positionFrame);
+			document.removeEventListener('scroll', schedulePosition, true);
+			document.removeEventListener('pointerdown', outsidePointer, true);
+			dialog.removeEventListener('cancel', cancel);
+			viewport?.removeEventListener('resize', schedulePosition);
+			viewport?.removeEventListener('scroll', schedulePosition);
+			window.removeEventListener('resize', schedulePosition);
 			editor.off('transaction', update);
-			dialog.close();
+			if (dialog.open) dialog.close();
 		};
 	});
 </script>
 
-<dialog bind:this={dialog} class="format-sheet" style:bottom={`${viewportBottom}px`} style:max-height={viewportHeight ? `${viewportHeight}px` : undefined} aria-label="Format selected text" onclose={onclose}
-	onclick={(event) => { if (event.target === dialog) onclose(); }}>
-	<div class="sheet-content">
-		<header><span>Format</span><button type="button" aria-label="Close formatting" onclick={onclose}><X size={20} /></button></header>
-		{#if !selected}
-			<p>The selected text was removed.</p>
-		{/if}
+<dialog bind:this={dialog} class="format-popover" style:left={`${position.left}px`} style:top={`${position.top}px`} aria-label="Format selected text" onclose={onclose}>
+	{#if !selected}
+		<p class="removed">The selected text was removed.</p>
+	{:else if picker}
+		<header>
+			<button type="button" class="back" aria-label="Back to formatting" onclick={() => { picker = null; schedulePosition(); }}><ArrowLeft size={18} /></button>
+			<span>{picker === 'text' ? 'Text color' : 'Highlight'}</span>
+			<button type="button" class="close" aria-label="Close formatting" onclick={onclose}><X size={18} /></button>
+		</header>
+		<div class="swatches" role="group" aria-label={picker === 'text' ? 'Text color choices' : 'Highlight choices'}>
+			{#if picker === 'text'}
+				{#each colors as color}
+					<button type="button" class="swatch" aria-label={color.name + ' text'} title={color.name} onclick={() => applyTextColor(color.value)}>
+						<span style:color={color.value}>A</span>
+					</button>
+				{/each}
+			{:else}
+				{#each highlights as highlight}
+					<button type="button" class="swatch" aria-label={highlight.name} title={highlight.name} onclick={() => applyHighlight(highlight.value)}>
+						<span class="highlight" style:background-color={highlight.value}>A</span>
+					</button>
+				{/each}
+			{/if}
+		</div>
+	{:else}
+		<header class="main-header">
+			<span>Format</span>
+			<button type="button" class="close" aria-label="Close formatting" onclick={onclose}><X size={18} /></button>
+		</header>
 		<div class="format-actions" role="group" aria-label="Text formatting">
-			<button type="button" aria-label="Bold" aria-pressed={active('bold')} disabled={!selected} onclick={() => chain()?.toggleBold().run()}><Bold size={20} /></button>
-			<button type="button" aria-label="Italic" aria-pressed={active('italic')} disabled={!selected} onclick={() => chain()?.toggleItalic().run()}><Italic size={20} /></button>
-			<button type="button" aria-label="Strikethrough" aria-pressed={active('strike')} disabled={!selected} onclick={() => chain()?.toggleStrike().run()}><Strikethrough size={20} /></button>
-			<button type="button" aria-label="Inline code" aria-pressed={active('code')} disabled={!selected} onclick={() => chain()?.toggleCode().run()}><Code size={20} /></button>
-			<button type="button" aria-label="Link" aria-expanded={showLink} disabled={!selected} onclick={() => {
+			<button type="button" aria-label="Bold" aria-pressed={active('bold')} disabled={!selected} onclick={() => chain()?.toggleBold().run()}><Bold size={19} /></button>
+			<button type="button" aria-label="Italic" aria-pressed={active('italic')} disabled={!selected} onclick={() => chain()?.toggleItalic().run()}><Italic size={19} /></button>
+			<button type="button" aria-label="Strikethrough" aria-pressed={active('strike')} disabled={!selected} onclick={() => chain()?.toggleStrike().run()}><Strikethrough size={19} /></button>
+			<button type="button" aria-label="Inline code" aria-pressed={active('code')} disabled={!selected} onclick={() => chain()?.toggleCode().run()}><Code size={19} /></button>
+			<button type="button" aria-label="Link" disabled={!selected} onclick={() => {
 				const range = session.getSelection(editor.state);
 				linkUrl = range ? editor.state.doc.nodeAt(range.from)?.marks.find((mark: Mark) => mark.type.name === 'link')?.attrs.href ?? '' : '';
 				showLink = !showLink;
-			}}><Link size={20} /></button>
+				schedulePosition();
+			}}><Link size={19} /></button>
 		</div>
 		{#if showLink}
 			<form class="link-form" onsubmit={(event) => {
@@ -81,68 +204,57 @@
 				if (linkUrl.trim()) action?.setLink({ href: linkUrl.trim() }).run();
 				else action?.unsetLink().run();
 				showLink = false;
+				schedulePosition();
 			}}>
 				<input aria-label="Link address" inputmode="url" placeholder="https://…" bind:value={linkUrl} />
 				<button type="submit" disabled={!selected}>Apply</button>
-				<button type="button" disabled={!selected} onclick={() => { chain()?.unsetLink().run(); showLink = false; }}>Remove</button>
+				<button type="button" disabled={!selected} onclick={() => { chain()?.unsetLink().run(); showLink = false; schedulePosition(); }}>Remove</button>
 			</form>
 		{/if}
-		<div class="palette" role="group" aria-label="Text color">
-			<p>Text color</p>
-			<div class="swatches">
-				{#each colors as color}
-					<button type="button" aria-label={color.name + ' text'} title={color.name} disabled={!selected}
-						onclick={() => color.value === 'var(--text-main)' ? chain()?.unsetColor().run() : chain()?.setColor(color.value).run()}>
-						<span style:color={color.value}>A</span>
-					</button>
-				{/each}
-			</div>
+		<div class="palette-actions" aria-label="Color options">
+			<button type="button" disabled={!selected} onclick={() => { picker = 'text'; schedulePosition(); }}><ALargeSmall size={18} /><span>Text color</span></button>
+			<button type="button" disabled={!selected} onclick={() => { picker = 'highlight'; schedulePosition(); }}><Highlighter size={18} /><span>Highlight</span></button>
 		</div>
-		<div class="palette" role="group" aria-label="Highlight">
-			<p>Highlight</p>
-			<div class="swatches">
-				{#each highlights as highlight}
-					<button type="button" aria-label={highlight.name} title={highlight.name} disabled={!selected}
-						onclick={() => highlight.value === 'transparent' ? chain()?.unsetHighlight().run() : chain()?.setHighlight({ color: highlight.value }).run()}>
-						<span class="highlight" style:background-color={highlight.value}>A</span>
-					</button>
-				{/each}
-			</div>
-		</div>
-	</div>
+	{/if}
 </dialog>
 
 <style>
-	.format-sheet {
+	.format-popover {
 		position: fixed;
-		inset: auto 0 0;
-		margin: 0 auto;
-		width: min(100%, 480px);
-		max-width: 100%;
-		max-height: 65dvh;
+		inset: auto;
+		margin: 0;
+		width: max-content;
+		max-width: calc(100vw - 16px);
+		max-height: min(220px, 55dvh);
 		box-sizing: border-box;
-		overflow-y: auto;
-		padding: 0;
+		overflow: auto;
+		padding: 6px 8px 8px;
 		border: 1px solid var(--border-color);
-		border-bottom: 0;
-		border-radius: 16px 16px 0 0;
+		border-radius: 12px;
 		background: var(--bg-sidebar);
 		color: var(--text-main);
-		box-shadow: 0 -4px 24px #0003;
+		box-shadow: 0 4px 20px #0008;
 	}
-	.format-sheet::backdrop { background: #0004; }
-	.sheet-content { padding: 12px 16px max(16px, env(safe-area-inset-bottom)); }
-	header { display: flex; align-items: center; justify-content: space-between; font-weight: 600; }
-	button { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--text-main); }
+	.format-popover::backdrop { background: transparent; }
+	header { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 2px 4px; font-size: 12px; font-weight: 600; }
+	header .close { margin-left: auto; }
+	.main-header { padding-left: 6px; }
+	button { min-width: 42px; min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-radius: 8px; color: var(--text-main); }
 	button:hover, button[aria-pressed='true'] { background: var(--active-sidebar); color: var(--accent-color); }
 	button:focus-visible, input:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
 	button:disabled { opacity: 0.4; }
-	.format-actions { display: flex; gap: 6px; padding: 4px 0 8px; border-bottom: 1px solid var(--border-color); }
-	.palette p { margin: 12px 0 4px; font-size: 12px; color: var(--text-muted); }
-	.swatches { display: grid; grid-template-columns: repeat(5, minmax(44px, 1fr)); gap: 2px; }
-	.swatches span { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 5px; font-size: 19px; font-weight: 700; }
+	button.close, button.back { min-width: 32px; min-height: 30px; width: 32px; height: 30px; }
+	.format-actions { display: flex; gap: 2px; justify-content: space-between; }
+	.format-actions button { flex: 1 1 42px; }
+	.palette-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px; }
+	.palette-actions button { padding: 0 9px; min-width: 0; font-size: 12px; white-space: nowrap; background: color-mix(in srgb, var(--active-sidebar) 52%, transparent); }
+	.palette-actions button:hover { color: var(--accent-color); }
+	.swatches { display: grid; grid-template-columns: repeat(5, 42px); gap: 2px; }
+	.swatch { width: 42px; height: 42px; min-width: 42px; min-height: 42px; }
+	.swatch span { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 5px; font-size: 18px; font-weight: 700; }
 	.highlight { border: 1px solid var(--border-color); }
-	.link-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-	.link-form input { flex: 1 1 100%; min-width: 0; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-canvas); color: var(--text-main); }
-	.link-form button { padding: 0 12px; }
+	.removed { margin: 4px 2px; font-size: 13px; }
+	.link-form { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+	.link-form input { flex: 1 1 100%; min-width: 0; padding: 8px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-canvas); color: var(--text-main); }
+	.link-form button { padding: 0 8px; min-height: 36px; }
 </style>
