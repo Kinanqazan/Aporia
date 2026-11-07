@@ -1676,7 +1676,12 @@
 				</form>
 			{:else}
 				<!-- Clickable link containing text title -->
-				<a href="/{node.id}" class="page-item-link" aria-describedby={isMobile ? 'phone-page-options-hint' : undefined} onclick={() => { if (isMobile && (isSettingsOpen || isTrashOpen)) isSidebarOpen = false; isSettingsOpen = false; isTrashOpen = false; }}>
+				<a href="/{node.id}" class="page-item-link" aria-describedby={isMobile ? 'phone-page-options-hint' : undefined} onclick={(event) => {
+					if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+					if (isMobile) isSidebarOpen = false;
+					isSettingsOpen = false;
+					isTrashOpen = false;
+				}}>
 					<span class="page-title">{node.title}</span>
 				</a>
 			{/if}
