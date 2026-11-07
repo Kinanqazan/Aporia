@@ -131,6 +131,10 @@ export function sidebarGesture(node, options) {
 		if (!result.dragged) return;
 		if (event.cancelable) event.preventDefault();
 		event.stopPropagation();
+		if (result.open && !options.open) {
+			const active = node.ownerDocument.activeElement;
+			if (active instanceof HTMLElement) active.blur();
+		}
 		render(result.open ? 1 : 0);
 		options.onOpenChange(result.open);
 	}
