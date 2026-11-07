@@ -1980,12 +1980,16 @@
 		flex-direction: column;
 	}
 
+	:global(:where(.app-container:not(.mobile))) .settings-panel {
+		padding-top: calc(36px + env(safe-area-inset-top));
+	}
+
 	.settings-panel-header {
 		display: flex;
 		align-items: center;
 		gap: 10px;
 		padding: 4px 0 8px;
-		margin-bottom: 4px;
+		margin-bottom: 12px;
 	}
 
 	.settings-panel-heading {
@@ -2852,8 +2856,8 @@
 		position: absolute;
 		top: 1px;
 		right: 1px;
-		background-color: var(--border-color);
-		color: var(--text-muted);
+		background-color: #b52d2d;
+		color: #fff;
 		font-size: 9px;
 		min-width: 14px;
 		height: 14px;
