@@ -38,7 +38,7 @@
 		Heading1, Heading2, Heading3, Type, Quote, Code, 
 		List, ListOrdered, Bold, Italic, Link as LinkIcon, Bookmark, Palette,
 		CheckSquare, Minus, Table as TableIcon, ChevronRight, Lock, Unlock,
-		ChevronDown, Database, Image as ImageIcon, Paperclip, X, ZoomIn, ZoomOut, RotateCcw, Undo2
+		ChevronDown, ChevronsDownUp, ChevronsUpDown, Database, Image as ImageIcon, Paperclip, X, ZoomIn, ZoomOut, RotateCcw, Undo2
 	} from 'lucide-svelte';
 
 	import { CURATED_ICONS } from '$lib/icons';
@@ -3109,13 +3109,12 @@
 						class="toggle-page-action"
 						onclick={() => setAllToggles(openToggleCount !== toggleCount)}
 						title={openToggleCount === toggleCount ? 'Collapse all toggles' : 'Expand all toggles'}
+						aria-label={openToggleCount === toggleCount ? 'Collapse all toggles' : 'Expand all toggles'}
 					>
 						{#if openToggleCount === toggleCount}
-							<ChevronRight size={15} />
-							<span>Collapse all</span>
+							<ChevronsDownUp size={18} />
 						{:else}
-							<ChevronDown size={15} />
-							<span>Expand all</span>
+							<ChevronsUpDown size={18} />
 						{/if}
 					</button>
 				</div>
@@ -4305,12 +4304,12 @@
 	.toggle-page-action {
 		display: inline-flex;
 		align-items: center;
-		gap: 4px;
-		padding: 5px 7px;
+		justify-content: center;
+		width: 32px;
+		height: 32px;
+		padding: 0;
 		border-radius: 5px;
-		font-size: 12px;
 		color: var(--text-muted);
-		white-space: nowrap;
 	}
 
 	.toggle-page-action:hover:not(:disabled) {

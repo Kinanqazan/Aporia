@@ -3,6 +3,7 @@ import { getActivePages, getTrashPages } from '$lib/server/pages';
 import { sqlite } from '$lib/server/database';
 import { parseExpandedSidebarState } from '$lib/sidebar-state.js';
 import { pageVersion } from '$lib/server/mcp/versions';
+import { getUsername, hasValidSession, SESSION_COOKIE_NAME } from '$lib/server/auth';
 
 export const load: LayoutServerLoad = async ({ cookies }) => {
 	const activePages = await getActivePages();
@@ -53,6 +54,7 @@ export const load: LayoutServerLoad = async ({ cookies }) => {
 	}
 
 	return {
+		username: hasValidSession(cookies.get(SESSION_COOKIE_NAME)) ? getUsername() : undefined,
 		activePages: activePages.map((page) => ({ ...page, version: pageVersion(page.revision) })),
 		trashPages: trashPages.map((page) => ({ ...page, version: pageVersion(page.revision) })),
 		sidebarWidth,

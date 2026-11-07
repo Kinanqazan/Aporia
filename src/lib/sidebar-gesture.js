@@ -101,7 +101,7 @@ export function sidebarGesture(node, options) {
 		startX = touch.clientX;
 		swipe = createSidebarSwipe({
 			x: touch.clientX, y: touch.clientY, time: event.timeStamp, width: rect.width,
-			progress: clamp((rect.right - node.getBoundingClientRect().left) / rect.width, 0, 1),
+			progress: clamp(((node.querySelector('.main-content')?.getBoundingClientRect().left ?? node.getBoundingClientRect().left) - node.getBoundingClientRect().left) / rect.width, 0, 1),
 			open: options.open
 		});
 	}

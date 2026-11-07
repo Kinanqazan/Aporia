@@ -1,11 +1,11 @@
 import { env } from '$env/dynamic/private';
 import { assets, pages } from './schema';
-import { db } from './database';
+import { db, sqlite } from './database';
 import { eq } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
 import { dirname, extname, join, resolve } from 'path';
 import { mkdir, readFile, rename, rm, writeFile } from 'fs/promises';
-import { withCleanupActivity, withUploadActivity } from './upload-activity';
+import { UploadActivityError, withCleanupActivity, withUploadActivity } from './upload-activity';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -196,11 +196,41 @@ export async function cleanupUnusedAssets(): Promise<{ deletedCount: number; del
 }
 
 async function removeUnusedAssets(): Promise<{ deletedCount: number; deletedBytes: number }> {
-	// The cleanup reservation excludes uploads and imports during this scan.
-	const allAssets = await db.select().from(assets);
-	const referencedIds = new Set<string>();
-	const documents = await db.select({ contentJson: pages.contentJson }).from(pages);
+	const unusedAssets = await findUnusedAssets();
+	let deletedBytes = 0;
 
+	for (const asset of unusedAssets) {
+		await rm(pathForStorageKey(asset.storageKey), { force: true });
+		await db.delete(assets).where(eq(assets.id, asset.id));
+		deletedBytes += asset.byteSize;
+	}
+
+	return { deletedCount: unusedAssets.length, deletedBytes };
+}
+
+export async function countUnusedAssets(): Promise<number> {
+	// A consistent read snapshot is sufficient for a preview; deletion scans again
+	// under the exclusive cleanup reservation. Do not block concurrent saves.
+	return sqlite.transaction(() => {
+		const busy = sqlite.prepare('SELECT id FROM upload_activity WHERE expires_at > ? LIMIT 1').get(Date.now());
+		if (busy) throw new UploadActivityError('An upload, import, or cleanup is still finishing. Please try again shortly.');
+		const documents = sqlite.prepare('SELECT content_json AS contentJson FROM pages').all() as Array<{ contentJson: string }>;
+		const referencedIds = referencedAssetIds(documents);
+		const ids = sqlite.prepare('SELECT id FROM assets').all() as Array<{ id: string }>;
+		return ids.filter((asset) => !referencedIds.has(asset.id)).length;
+	}).deferred();
+}
+
+async function findUnusedAssets(): Promise<AssetRecord[]> {
+	// Deletion holds the cleanup reservation throughout the scan and removal.
+	const allAssets = await db.select().from(assets);
+	const documents = await db.select({ contentJson: pages.contentJson }).from(pages);
+	const referencedIds = referencedAssetIds(documents);
+	return allAssets.filter((asset) => !referencedIds.has(asset.id));
+}
+
+function referencedAssetIds(documents: Array<{ contentJson: string }>): Set<string> {
+	const referencedIds = new Set<string>();
 	for (const document of documents) {
 		try {
 			const content = JSON.parse(document.contentJson);
@@ -214,16 +244,7 @@ async function removeUnusedAssets(): Promise<{ deletedCount: number; deletedByte
 		}
 	}
 
-	const unusedAssets = allAssets.filter((asset) => !referencedIds.has(asset.id));
-	let deletedBytes = 0;
-
-	for (const asset of unusedAssets) {
-		await rm(pathForStorageKey(asset.storageKey), { force: true });
-		await db.delete(assets).where(eq(assets.id, asset.id));
-		deletedBytes += asset.byteSize;
-	}
-
-	return { deletedCount: unusedAssets.length, deletedBytes };
+	return referencedIds;
 }
 
 export async function validateImageReferences(document: unknown): Promise<string | null> {

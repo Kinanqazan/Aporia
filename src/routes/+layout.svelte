@@ -25,7 +25,8 @@
 		FileUp,
 		LogOut,
 		Maximize2,
-		Archive
+		Archive,
+		Type
 	} from 'lucide-svelte';
 	import type { PageNode } from '$lib/server/pages';
 	import { parseExpandedSidebarState, serializeExpandedSidebarState } from '$lib/sidebar-state.js';
@@ -52,7 +53,17 @@
 	let isSettingsOpen = $state(false);
 	let isEditorTextSizeOpen = $state(false);
 	let isCleanupInProgress = $state(false);
+	let pendingTrashAction = $state<'empty' | 'uploads' | null>(null);
+	let trashConfirmCancelButton = $state<HTMLButtonElement | null>(null);
+	let trashActionTrigger = $state<HTMLButtonElement | null>(null);
+	let isEmptyTrashInProgress = $state(false);
 	let cleanupMessage = $state('');
+	let cleanupMessageIsSuccess = $state(false);
+	let cleanupMessageTimer: ReturnType<typeof setTimeout> | undefined;
+	let unusedUploadCount = $state<number | null>(null);
+	let isCountingUnusedUploads = $state(false);
+	let unusedUploadCountError = $state('');
+	let refreshUnusedUploadCountAgain = false;
 	let notionImportInput = $state<HTMLInputElement | null>(null);
 	let notionImportFile = $state<File | null>(null);
 	let notionImportPreview = $state<{
@@ -365,6 +376,15 @@
 		if (pendingPageDelete) pageDeleteCancelButton?.focus();
 	});
 
+	$effect(() => {
+		if (pendingTrashAction) trashConfirmCancelButton?.focus();
+	});
+
+	function closeTrashConfirmation() {
+		pendingTrashAction = null;
+		requestAnimationFrame(() => trashActionTrigger?.focus());
+	}
+
 	function closePageDeleteConfirmation() {
 		const pageId = pendingPageDelete?.id;
 		pendingPageDelete = null;
@@ -541,6 +561,8 @@
 			}
 		};
 		window.addEventListener('click', handleClickOutside);
+		const refreshTrashOnFocus = () => { if (isTrashOpen) void refreshUnusedUploadCount(); };
+		window.addEventListener('focus', refreshTrashOnFocus);
 
 		// Sidebar width cookie migration & restoration
 		if (!document.cookie.includes('sidebar-width=')) {
@@ -589,14 +611,20 @@
 		}
 
 		return () => {
+			clearTimeout(cleanupMessageTimer);
 			window.removeEventListener('resize', handleResize);
 			window.removeEventListener('aporia-native-share', handleNativeShare);
 			window.removeEventListener('click', handleClickOutside);
+			window.removeEventListener('focus', refreshTrashOnFocus);
 		};
 	});
 
 	afterNavigate((navigation) => {
 		searchController.cancel();
+		if (navigation.type !== 'enter' && navigation.from?.url.pathname !== navigation.to?.url.pathname) {
+			isSettingsOpen = false;
+			isTrashOpen = false;
+		}
 		isSearchOpen = false;
 		isSidebarSearchVisible = false;
 		sidebarCreateNavigation.afterNavigate();
@@ -775,12 +803,37 @@
 		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	}
 
+	async function refreshUnusedUploadCount() {
+		if (isCountingUnusedUploads) { refreshUnusedUploadCountAgain = true; return; }
+		isCountingUnusedUploads = true;
+		unusedUploadCount = null;
+		unusedUploadCountError = '';
+		try {
+			if (currentPageId && !(await requestEditorFlush(currentPageId, 'cleanup'))) {
+				throw new Error('Finish uploads and save your page changes before counting unused uploads.');
+			}
+			const response = await fetch('/api/assets/cleanup', { cache: 'no-store' });
+			const result = await response.json();
+			if (!response.ok || !result.success) throw new Error(result.error || 'Unable to count unused uploads');
+			unusedUploadCount = result.count;
+		} catch (error) {
+			unusedUploadCountError = error instanceof Error ? error.message : 'Unable to count unused uploads';
+		} finally {
+			isCountingUnusedUploads = false;
+			if (refreshUnusedUploadCountAgain) {
+				refreshUnusedUploadCountAgain = false;
+				void refreshUnusedUploadCount();
+			}
+		}
+	}
+
 	async function cleanUnusedUploads() {
 		if (isCleanupInProgress) return;
-		if (!window.confirm('Delete uploaded items that are not used by any page? This cannot be undone.')) return;
 
 		isCleanupInProgress = true;
+		clearTimeout(cleanupMessageTimer);
 		cleanupMessage = '';
+		cleanupMessageIsSuccess = false;
 		try {
 			if (isSavingSharedItem || isNotionImportInProgress || isBackupRestoring) {
 				throw new Error('Finish the current upload or import before cleaning unused uploads.');
@@ -794,6 +847,9 @@
 			cleanupMessage = result.removed === 0
 				? 'No unused uploaded items found.'
 				: `Removed ${result.removed} unused item${result.removed === 1 ? '' : 's'} (${formatBytes(result.bytesFreed)}).`;
+			cleanupMessageIsSuccess = true;
+			cleanupMessageTimer = setTimeout(() => { cleanupMessage = ''; }, 4000);
+			await refreshUnusedUploadCount();
 		} catch (error) {
 			cleanupMessage = error instanceof Error ? error.message : 'Unable to clean uploads';
 		} finally {
@@ -1047,78 +1103,27 @@
 			</div>
 		</div>
 
-		<!-- Trash bin panel overlay inside sidebar -->
-		{#if isTrashOpen}
-			<div class="trash-panel">
-				<div class="trash-panel-header">
-					<span>Trash Bin</span>
-					<div class="trash-header-actions">
-						<form method="POST" action="/?/emptyTrash" use:enhance>
-							<button type="submit" class="empty-trash-btn" title="Empty Trash">Empty</button>
-						</form>
-						<button class="close-trash-btn" onclick={() => isTrashOpen = false}>✕</button>
-					</div>
-				</div>
-				<div class="trash-list">
-					{#each data.trashPages || [] as trashPage}
-						<div class="trash-item">
-							<span class="trash-item-emoji">
-								<PageIcon icon={trashPage.icon} color={trashPage.iconColor} size={18} />
-							</span>
-							<span class="trash-item-title" title={trashPage.title}>{trashPage.title}</span>
-							<div class="trash-item-actions">
-								<form method="POST" action="/?/restore" use:enhance>
-									<input type="hidden" name="id" value={trashPage.id} />
-					<input type="hidden" name="expectedVersion" value={trashPage.version} />
-									<button type="submit" class="trash-action-btn" title="Restore Page">
-										<RotateCcw size={12} />
-									</button>
-								</form>
-								<form method="POST" action="/?/delete" use:enhance>
-									<input type="hidden" name="id" value={trashPage.id} />
-									<button type="submit" class="trash-action-btn delete-perm" title="Delete permanently">
-										<Trash size={12} />
-									</button>
-								</form>
-							</div>
-						</div>
-					{:else}
-						<div class="empty-trash-message">Trash is empty</div>
-					{/each}
-				</div>
-				<div class="trash-panel-footer">
-					<button class="trash-cleanup-btn" disabled={isCleanupInProgress} onclick={cleanUnusedUploads}>
-						<Trash2 size={14} />
-						<span>{isCleanupInProgress ? 'Cleaning unused uploads…' : 'Clean unused uploads'}</span>
-					</button>
-					{#if cleanupMessage}
-						<p class="trash-cleanup-message">{cleanupMessage}</p>
-					{/if}
-				</div>
-			</div>
-		{/if}
 
 		<!-- Trash & Export -->
 		<div class="sidebar-footer">
 			<div class="footer-row">
+				<button type="button" class="sidebar-profile" onclick={() => {
+					isSettingsOpen = !isSettingsOpen;
+					isEditorTextSizeOpen = false;
+					isTrashOpen = false;
+					if (isMobile) isSidebarOpen = false;
+				}} aria-label="Open settings" title="Settings">
+					<span class="sidebar-profile-avatar" aria-hidden="true">{(data.username?.trim().split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((part) => [...part][0]).join('') || 'A').toUpperCase()}</span>
+				</button>
 				<div class="footer-left-actions">
-					<form
-						method="POST"
-						action="/?/create"
-						use:enhance={sidebarCreateNavigation.enhance}
-						class="sidebar-create-page-form"
-					>
-						<input type="hidden" name="parentId" value="null" />
-						<input type="hidden" name="title" value="Untitled" />
-						<button type="submit" class="footer-icon-btn" title="Create new page" aria-label="Create new page">
-							<Plus size={18} />
-						</button>
-					</form>
 					<button
 						class="footer-icon-btn"
 						onclick={() => {
 							isTrashOpen = !isTrashOpen;
+							if (isTrashOpen) { clearTimeout(cleanupMessageTimer); cleanupMessage = ''; void refreshUnusedUploadCount(); }
 							isSettingsOpen = false;
+							isEditorTextSizeOpen = false;
+							if (isMobile) isSidebarOpen = false;
 						}}
 						title="Trash Bin"
 					>
@@ -1129,19 +1134,6 @@
 					</button>
 				</div>
 				<div class="footer-right-actions">
-					<button
-						class="footer-icon-btn"
-						onclick={toggleTheme}
-						title={isDarkMode ? 'Use light mode' : 'Use dark mode'}
-						aria-label={isDarkMode ? 'Use light mode' : 'Use dark mode'}
-					>
-						<span class="theme-icon theme-icon-light-mode" aria-hidden="true">
-							<Moon size={18} />
-						</span>
-						<span class="theme-icon theme-icon-dark-mode" aria-hidden="true">
-							<Sun size={18} />
-						</span>
-					</button>
 					<div class="editor-text-size-menu" bind:this={editorTextSizeMenuEl}>
 						<button
 							class="footer-icon-btn text-size-trigger"
@@ -1149,13 +1141,11 @@
 							disabled={!currentPageId}
 							onclick={() => {
 								isEditorTextSizeOpen = !isEditorTextSizeOpen;
-								isSettingsOpen = false;
-								isTrashOpen = false;
 							}}
 							title={currentPageId ? 'Editor text size' : 'Open a page to change editor text size'}
 							aria-label="Editor text size"
 						>
-							<span class="text-size-letter">A</span>
+							<Type size={20} />
 						</button>
 						{#if isEditorTextSizeOpen && currentPageId}
 							<div class="text-size-popover" role="group" aria-label="Editor text size">
@@ -1189,106 +1179,17 @@
 							<Maximize2 size={18} />
 						</button>
 					{/if}
-					<button
-						class="footer-icon-btn"
-						onclick={() => {
-							isSettingsOpen = !isSettingsOpen;
-							isEditorTextSizeOpen = false;
-							isTrashOpen = false;
-						}}
-						title="Settings"
-						aria-label="Open settings"
-					>
-						<Settings size={18} />
-					</button>
 				</div>
+				<form method="POST" action="/?/create" use:enhance={sidebarCreateNavigation.enhance} class="sidebar-create-page-form">
+					<input type="hidden" name="parentId" value="null" />
+					<input type="hidden" name="title" value="Untitled" />
+					<button type="submit" class="footer-icon-btn" title="Create new page" aria-label="Create new page">
+						<Plus size={18} />
+					</button>
+				</form>
 			</div>
 		</div>
 
-		{#if isSettingsOpen}
-			<div class="settings-panel" aria-label="Settings">
-				<div class="settings-panel-header">
-					<div class="settings-panel-heading">
-						<span class="settings-panel-title">Settings</span>
-					</div>
-					<button type="button" class="close-settings-btn" onclick={() => isSettingsOpen = false} aria-label="Close settings">×</button>
-				</div>
-
-				{#if isNativeAndroidApp}
-					<div class="settings-section">
-						<span class="settings-section-title">App</span>
-						<a
-							href="aporia-native://change-server"
-							class="settings-action"
-							onclick={() => isSettingsOpen = false}
-						>
-							<Settings size={16} />
-							<span>Change server address</span>
-						</a>
-					</div>
-				{/if}
-
-				<div class="settings-section">
-					<span class="settings-section-title">Backup &amp; Export</span>
-					<a href="/api/backup/export" download class="settings-action" onclick={() => isSettingsOpen = false}>
-						<Archive size={16} />
-						<span>Backup workspace</span>
-					</a>
-					<input
-						bind:this={backupRestoreInput}
-						class="notion-import-input"
-						type="file"
-						accept=".zip,.aporia.zip,application/zip"
-						onchange={selectBackupRestore}
-					/>
-					<button class="settings-action" disabled={isBackupRestoring} onclick={() => backupRestoreInput?.click()}>
-						<RotateCcw size={16} />
-						<span>{isBackupRestoring ? 'Restoring backup…' : 'Restore backup'}</span>
-					</button>
-					{#if currentPageId}
-						<a href="/api/export?id={currentPageId}" download class="settings-action" onclick={() => isSettingsOpen = false}>
-							<FileDown size={16} />
-							<span>Export current page (MD)</span>
-						</a>
-					{/if}
-					<a href="/api/export?all=true" download class="settings-action" onclick={() => isSettingsOpen = false}>
-						<Download size={16} />
-						<span>Export workspace (MD)</span>
-					</a>
-					<input
-						bind:this={notionImportInput}
-						class="notion-import-input"
-						type="file"
-						accept=".zip,.html,.htm,.md,.markdown,.csv,application/zip,application/x-zip-compressed,text/html,text/markdown,text/csv"
-						onchange={selectNotionImport}
-					/>
-					<button class="settings-action" disabled={isNotionPreviewInProgress || isNotionImportInProgress} onclick={() => notionImportInput?.click()}>
-						<FileUp size={16} />
-						<span>{isNotionPreviewInProgress ? 'Reading Notion export…' : 'Import from Notion'}</span>
-					</button>
-				</div>
-
-				<div class="settings-section settings-account-section">
-					<span class="settings-section-title">Account</span>
-					<a href="/change-password" class="settings-action" onclick={() => isSettingsOpen = false}>
-						<Lock size={16} />
-						<span>Change password</span>
-					</a>
-					<form method="POST" action="/logout">
-						<button type="submit" class="settings-action">
-							<LogOut size={16} />
-							<span>Log out</span>
-						</button>
-					</form>
-					<form method="POST" action="/logout-all">
-						<button type="submit" class="settings-action settings-danger">
-							<LogOut size={16} />
-							<span>Log out all devices</span>
-						</button>
-					</form>
-				</div>
-			</div>
-		{/if}
 
 		<!-- Resizer handle -->
 		{#if !isMobile}
@@ -1472,6 +1373,40 @@
 		</div>
 	{/if}
 
+	{#if pendingTrashAction}
+		<div class="page-delete-confirmation-backdrop">
+			<div class="page-delete-confirmation-dialog" role="alertdialog" aria-modal="true" aria-labelledby="trash-confirm-title" aria-describedby="trash-confirm-description" tabindex="-1" onkeydown={(event) => {
+				if (event.key === 'Escape' && !isEmptyTrashInProgress) { event.preventDefault(); event.stopPropagation(); closeTrashConfirmation(); }
+				if (event.key === 'Tab') {
+					const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');
+					const first = buttons[0];
+					const last = buttons[buttons.length - 1];
+					if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+					else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+				}
+			}}>
+				<h2 id="trash-confirm-title">{pendingTrashAction === 'empty' ? 'Empty trash?' : 'Clean unused uploads?'}</h2>
+				<p id="trash-confirm-description">This cannot be undone.</p>
+				<div class="page-delete-confirmation-actions">
+					<button bind:this={trashConfirmCancelButton} type="button" class="page-delete-cancel" disabled={isEmptyTrashInProgress} onclick={closeTrashConfirmation}>Cancel</button>
+					{#if pendingTrashAction === 'empty'}
+						<form method="POST" action="/?/emptyTrash" use:enhance={() => {
+							isEmptyTrashInProgress = true;
+							return async ({ update }) => {
+								try { await update(); void refreshUnusedUploadCount(); }
+								finally { isEmptyTrashInProgress = false; closeTrashConfirmation(); }
+							};
+						}}>
+							<button type="submit" class="page-delete-confirm" disabled={isEmptyTrashInProgress}>Delete</button>
+						</form>
+					{:else}
+						<button type="button" class="page-delete-confirm" onclick={() => { closeTrashConfirmation(); void cleanUnusedUploads(); }}>Delete</button>
+					{/if}
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	<!-- Mobile Overlay -->
 	{#if isMobile}
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -1480,9 +1415,151 @@
 	{/if}
 
 	<!-- Main Canvas Area -->
-	<main class="main-content">
+	<main class="main-content" class:utility-view={isSettingsOpen || isTrashOpen}>
+		<!-- Trash view -->
+		{#if isTrashOpen}
+			<div class="trash-panel">
+				<div class="trash-panel-header">
+					<button type="button" class="utility-menu-btn" onclick={() => isSidebarOpen = !isSidebarOpen} aria-label="Toggle sidebar"><Menu size={20} /></button>
+					<span>Trash Bin</span>
+				</div>
+				<div class="trash-list">
+					{#each data.trashPages || [] as trashPage}
+						<div class="trash-item">
+							<span class="trash-item-emoji">
+								<PageIcon icon={trashPage.icon} color={trashPage.iconColor} size={18} />
+							</span>
+							<span class="trash-item-title" title={trashPage.title}>{trashPage.title}</span>
+							<div class="trash-item-actions">
+								<form method="POST" action="/?/restore" use:enhance={() => async ({ update }) => { await update(); void refreshUnusedUploadCount(); }}>
+									<input type="hidden" name="id" value={trashPage.id} />
+					<input type="hidden" name="expectedVersion" value={trashPage.version} />
+									<button type="submit" class="trash-action-btn" title="Restore Page">
+										<RotateCcw size={12} />
+									</button>
+								</form>
+								<form method="POST" action="/?/delete" use:enhance={() => async ({ update }) => { await update(); void refreshUnusedUploadCount(); }}>
+									<input type="hidden" name="id" value={trashPage.id} />
+									<button type="submit" class="trash-action-btn delete-perm" title="Delete permanently">
+										<Trash size={12} />
+									</button>
+								</form>
+							</div>
+						</div>
+					{:else}
+						<div class="empty-trash-message">Trash is empty</div>
+					{/each}
+				</div>
+				<div class="trash-panel-footer">
+					<button type="button" class="trash-cleanup-btn empty-trash-btn" disabled={!data.trashPages?.length || isEmptyTrashInProgress} onclick={(event) => { trashActionTrigger = event.currentTarget; pendingTrashAction = 'empty'; }}><Trash2 size={18} /><span>Empty trash</span><span class="unused-upload-count">{data.trashPages?.length ?? 0}</span></button>
+					<button class="trash-cleanup-btn unused-cleanup-btn" disabled={isCleanupInProgress || isCountingUnusedUploads || unusedUploadCount === 0} onclick={(event) => { trashActionTrigger = event.currentTarget; pendingTrashAction = 'uploads'; }} title="Count based on saved pages">
+						<Trash size={18} />
+						<span>{isCleanupInProgress ? 'Cleaning unused uploads…' : 'Clean unused uploads'}</span>
+						{#if unusedUploadCount !== null}<span class="unused-upload-count">{unusedUploadCount}</span>{:else if isCountingUnusedUploads}<span class="unused-upload-count">…</span>{/if}
+					</button>
+					{#if unusedUploadCountError}<p class="trash-cleanup-message">{unusedUploadCountError} <button type="button" class="count-retry" onclick={refreshUnusedUploadCount}>Retry</button></p>{/if}
+					{#if cleanupMessage}
+						<p class="trash-cleanup-message" class:cleanup-toast={cleanupMessageIsSuccess} role="status">{cleanupMessage}</p>
+					{/if}
+				</div>
+			</div>
+		{/if}
+
+		{#if isSettingsOpen}
+			<div class="settings-panel" aria-label="Settings">
+				<div class="settings-panel-header">
+					<button type="button" class="utility-menu-btn" onclick={() => isSidebarOpen = !isSidebarOpen} aria-label="Toggle sidebar"><Menu size={20} /></button>
+					<div class="settings-panel-heading">
+						<span class="settings-panel-title">Settings</span>
+					</div>
+				</div>
+
+				<div class="settings-section settings-appearance">
+					<button type="button" class="settings-action" onclick={toggleTheme}>
+						<span class="theme-icon theme-icon-light-mode" aria-hidden="true"><Moon size={18} /></span>
+						<span class="theme-icon theme-icon-dark-mode" aria-hidden="true"><Sun size={18} /></span>
+						<span>{isDarkMode ? 'Use light mode' : 'Use dark mode'}</span>
+					</button>
+				</div>
+
+				{#if isNativeAndroidApp}
+					<div class="settings-section">
+						<span class="settings-section-title">App</span>
+						<a
+							href="aporia-native://change-server"
+							class="settings-action"
+							onclick={() => isSettingsOpen = false}
+						>
+							<Settings size={16} />
+							<span>Change server address</span>
+						</a>
+					</div>
+				{/if}
+
+				<div class="settings-section">
+					<span class="settings-section-title">Backup &amp; Export</span>
+					<a href="/api/backup/export" download class="settings-action" onclick={() => isSettingsOpen = false}>
+						<Archive size={16} />
+						<span>Backup workspace</span>
+					</a>
+					<input
+						bind:this={backupRestoreInput}
+						class="notion-import-input"
+						type="file"
+						accept=".zip,.aporia.zip,application/zip"
+						onchange={selectBackupRestore}
+					/>
+					<button class="settings-action" disabled={isBackupRestoring} onclick={() => backupRestoreInput?.click()}>
+						<RotateCcw size={16} />
+						<span>{isBackupRestoring ? 'Restoring backup…' : 'Restore backup'}</span>
+					</button>
+					{#if currentPageId}
+						<a href="/api/export?id={currentPageId}" download class="settings-action" onclick={() => isSettingsOpen = false}>
+							<FileDown size={16} />
+							<span>Export current page (MD)</span>
+						</a>
+					{/if}
+					<a href="/api/export?all=true" download class="settings-action" onclick={() => isSettingsOpen = false}>
+						<Download size={16} />
+						<span>Export workspace (MD)</span>
+					</a>
+					<input
+						bind:this={notionImportInput}
+						class="notion-import-input"
+						type="file"
+						accept=".zip,.html,.htm,.md,.markdown,.csv,application/zip,application/x-zip-compressed,text/html,text/markdown,text/csv"
+						onchange={selectNotionImport}
+					/>
+					<button class="settings-action" disabled={isNotionPreviewInProgress || isNotionImportInProgress} onclick={() => notionImportInput?.click()}>
+						<FileUp size={16} />
+						<span>{isNotionPreviewInProgress ? 'Reading Notion export…' : 'Import from Notion'}</span>
+					</button>
+				</div>
+
+				<div class="settings-section settings-account-section">
+					<span class="settings-section-title">Account</span>
+					<a href="/change-password" class="settings-action" onclick={() => isSettingsOpen = false}>
+						<Lock size={16} />
+						<span>Change password</span>
+					</a>
+					<form method="POST" action="/logout">
+						<button type="submit" class="settings-action">
+							<LogOut size={16} />
+							<span>Log out</span>
+						</button>
+					</form>
+					<form method="POST" action="/logout-all">
+						<button type="submit" class="settings-action settings-danger">
+							<LogOut size={16} />
+							<span>Log out all devices</span>
+						</button>
+					</form>
+				</div>
+			</div>
+		{/if}
+
 		<!-- Header -->
-		<header class="header">
+		<header class="header" inert={isSettingsOpen || isTrashOpen}>
 			<div class="left-controls">
 				<button class="icon-btn menu-btn floating-control-pill" onclick={toggleSidebar} title="Open sidebar">
 					<Menu size={isMobile ? 26 : 19} />
@@ -1521,7 +1598,7 @@
 		</header>
 
 		<!-- Canvas Area -->
-		<div class="canvas-wrapper">
+		<div class="canvas-wrapper" inert={isSettingsOpen || isTrashOpen}>
 			<div class="canvas" class:full-width={isCurrentPageFullWidth} bind:this={canvasEl}>
 				{@render children()}
 			</div>
@@ -1599,7 +1676,7 @@
 				</form>
 			{:else}
 				<!-- Clickable link containing text title -->
-				<a href="/{node.id}" class="page-item-link" aria-describedby={isMobile ? 'phone-page-options-hint' : undefined}>
+				<a href="/{node.id}" class="page-item-link" aria-describedby={isMobile ? 'phone-page-options-hint' : undefined} onclick={() => { if (isMobile && (isSettingsOpen || isTrashOpen)) isSidebarOpen = false; isSettingsOpen = false; isTrashOpen = false; }}>
 					<span class="page-title">{node.title}</span>
 				</a>
 			{/if}
@@ -1681,21 +1758,10 @@
 </script>
 
 <style>
-	.theme-icon {
-		display: inline-flex;
-	}
-
-	.theme-icon-dark-mode {
-		display: none;
-	}
-
-	:global(html.dark) .theme-icon-light-mode {
-		display: none;
-	}
-
-	:global(html.dark) .theme-icon-dark-mode {
-		display: inline-flex;
-	}
+	.theme-icon { display: inline-flex; }
+	.theme-icon-dark-mode { display: none; }
+	:global(html.dark) .theme-icon-light-mode { display: none; }
+	:global(html.dark) .theme-icon-dark-mode { display: inline-flex; }
 
 	.auth-route-shell {
 		min-height: 100vh;
@@ -1888,48 +1954,32 @@
 		color: var(--text-main);
 	}
 
-	/* Trash Panel Overlay inside Sidebar */
-	.trash-panel {
-		position: absolute;
-		bottom: var(--header-height);
-		left: 0;
-		width: 100%;
-		max-height: min(42vh, 340px);
-		background: color-mix(in srgb, var(--bg-sidebar) 85%, transparent);
-		backdrop-filter: blur(20px);
-		-webkit-backdrop-filter: blur(20px);
-		border-top: 1px solid var(--border-color);
-		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
-		display: flex;
-		flex-direction: column;
-		z-index: 20;
-	}
-
+	.trash-panel,
 	.settings-panel {
 		position: absolute;
-		bottom: calc(var(--header-height) + 16px);
-		left: 0;
-		width: 100%;
-		max-height: min(72vh, 560px);
+		inset: 0;
 		overflow-y: auto;
-		background: color-mix(in srgb, var(--bg-sidebar) 92%, transparent);
-		backdrop-filter: blur(20px);
-		-webkit-backdrop-filter: blur(20px);
-		border: 1px solid var(--border-color);
-		border-left: 0;
-		border-right: 0;
-		border-radius: 10px 10px 0 0;
-		box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
-		padding: 10px;
-		z-index: 20;
+		background: var(--bg-canvas);
+		padding: calc(24px + env(safe-area-inset-top)) max(24px, calc((100% - 720px) / 2)) calc(24px + env(safe-area-inset-bottom));
+		z-index: 40;
 		scrollbar-width: thin;
+	}
+
+	.utility-view .header,
+	.utility-view .canvas-wrapper {
+		visibility: hidden;
+	}
+
+	.trash-panel {
+		display: flex;
+		flex-direction: column;
 	}
 
 	.settings-panel-header {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		padding: 4px 6px 8px;
+		gap: 10px;
+		padding: 4px 0 8px;
 		margin-bottom: 4px;
 	}
 
@@ -1940,42 +1990,43 @@
 	}
 
 	.settings-panel-title {
-		font-size: 17px;
+		font-size: 19px;
 		font-weight: 650;
 		color: var(--text-main);
 	}
 
-	.close-settings-btn {
+	.utility-menu-btn {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 34px;
-		height: 34px;
+		width: 38px;
+		height: 38px;
+		flex-shrink: 0;
 		border-radius: 8px;
-		font-size: 22px;
+		font-size: 14px;
 		line-height: 1;
 		color: var(--text-muted);
 	}
 
-	.close-settings-btn:hover {
+	.utility-menu-btn:hover {
 		background: var(--hover-sidebar);
 		color: var(--text-main);
 	}
 
 	.settings-section {
-		padding: 9px;
-		border-radius: 8px;
-		background: color-mix(in srgb, var(--bg-sidebar) 78%, transparent);
+		padding: 8px 0;
 	}
 
 	.settings-section + .settings-section {
-		margin-top: 8px;
+		margin-top: 12px;
 	}
+
+	.settings-appearance { padding-top: 0; }
 
 	.settings-section-title {
 		display: block;
-		padding: 0 5px 6px;
-		font-size: 12px;
+		padding: 0 9px 6px;
+		font-size: 13px;
 		font-weight: 600;
 		letter-spacing: 0.5px;
 		text-transform: uppercase;
@@ -1988,19 +2039,24 @@
 		gap: 10px;
 		width: 100%;
 		min-height: 38px;
-		padding: 7px 10px;
+		padding: 7px 8px;
 		border: 1px solid transparent;
 		border-radius: 6px;
 		color: var(--text-main);
-		font-size: 15px;
+		font-size: 16px;
 		text-align: left;
 		text-decoration: none;
 		transition: background var(--transition-speed);
 	}
 
-	.settings-action:hover {
+	:global(:where(.app-container:not(.mobile))) .settings-action:hover {
 		background: var(--hover-sidebar);
 		border-color: var(--border-color);
+	}
+
+	.settings-action:focus-visible {
+		outline: 2px solid var(--accent-color);
+		outline-offset: -2px;
 	}
 
 	.settings-action.settings-danger {
@@ -2017,9 +2073,7 @@
 	}
 
 	.settings-account-section {
-		padding: 8px 0 0;
-		border-radius: 0;
-		background: transparent;
+		padding: 8px 0;
 	}
 
 	.settings-action :global(svg) {
@@ -2336,33 +2390,12 @@
 	.trash-panel-header {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		padding: 10px 14px;
-		font-size: 14px;
-		font-weight: 600;
-		text-transform: uppercase;
-		color: var(--text-muted);
-		border-bottom: 1px solid var(--border-color);
-		background-color: var(--hover-sidebar);
-	}
-
-	.trash-header-actions {
-		display: flex;
-		align-items: center;
 		gap: 10px;
-	}
-
-	.empty-trash-btn {
-		font-size: 13px;
-		color: var(--error-color);
+		padding: 4px 6px 8px;
+		font-size: 19px;
 		font-weight: 600;
-		text-transform: uppercase;
-	}
-
-	.close-trash-btn {
-		font-size: 20px;
-		padding: 2px 4px;
-		color: var(--text-muted);
+		color: var(--text-main);
+		border-bottom: 1px solid var(--border-color);
 	}
 
 	.trash-list {
@@ -2375,8 +2408,10 @@
 	}
 
 	.trash-panel-footer {
-		padding: 9px 10px 10px;
-		border-top: 1px solid var(--border-color);
+		padding: 12px 6px 0;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
 	}
 
 	.trash-cleanup-btn {
@@ -2389,7 +2424,7 @@
 		border: 1px solid transparent;
 		border-radius: 5px;
 		color: var(--text-main);
-		font-size: 14px;
+		font-size: 15px;
 		text-align: left;
 		transition: background var(--transition-speed), border-color var(--transition-speed);
 	}
@@ -2406,19 +2441,38 @@
 	}
 
 	.trash-cleanup-btn:disabled {
-		opacity: 0.6;
-		cursor: wait;
+		opacity: 0.45;
+		cursor: default;
 	}
+
+	.empty-trash-btn:not(:disabled) { color: var(--error-color); }
+	.empty-trash-btn:not(:disabled) :global(svg) { color: var(--error-color); }
+	.unused-cleanup-btn:not(:disabled) { color: var(--error-color); }
+	.unused-cleanup-btn:not(:disabled) :global(svg) { color: var(--error-color); }
+	.unused-upload-count { margin-left: auto; color: var(--text-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+	.count-retry { color: var(--text-main); text-decoration: underline; }
 
 	.trash-cleanup-message {
 		margin: 4px 6px 0;
-		font-size: 12px;
+		font-size: 13px;
 		line-height: 1.45;
-		color: var(--text-muted);
+		color: var(--text-main);
 	}
 
-	.trash-cleanup-message {
+	.trash-cleanup-message.cleanup-toast {
+		position: absolute;
+		left: 50%;
+		top: 50%;
+		transform: translate(-50%, -50%);
+		max-width: calc(100% - 48px);
+		margin: 0;
+		padding: 9px 12px;
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+		background: var(--bg-sidebar);
 		color: var(--text-main);
+		box-shadow: 0 4px 16px rgb(0 0 0 / 12%);
+		pointer-events: none;
 	}
 
 	.trash-item {
@@ -2427,7 +2481,7 @@
 		gap: 9px;
 		padding: 7px 10px;
 		border-radius: 5px;
-		font-size: 15px;
+		font-size: 16px;
 		color: var(--text-main);
 	}
 
@@ -2473,7 +2527,7 @@
 	}
 
 	.empty-trash-message {
-		font-size: 14px;
+		font-size: 15px;
 		color: var(--text-muted);
 		text-align: center;
 		padding: 28px;
@@ -2634,13 +2688,52 @@
 
 	.footer-row {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, 36px);
+		grid-template-columns: repeat(5, minmax(0, 1fr));
 		align-items: center;
-		justify-content: space-between;
-		gap: 2px;
+		justify-items: center;
+		gap: 0;
 		width: 100%;
-		padding: 4px 8px;
+		padding: 4px 0 0;
 	}
+
+	.sidebar-profile {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		max-width: 36px;
+		min-width: 0;
+		min-height: 36px;
+		padding: 0;
+		border-radius: 6px;
+		color: var(--text-main);
+	}
+	.sidebar-profile:focus-visible { outline: 2px solid var(--text-main); outline-offset: 2px; }
+	.sidebar-profile-avatar {
+		display: grid;
+		place-items: center;
+		width: min(34px, 100%);
+		aspect-ratio: 1;
+		border-radius: 50%;
+		background: color-mix(in srgb, var(--text-main) 10%, var(--sidebar-surface));
+		color: var(--text-main);
+		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-main) 18%, transparent);
+		font-size: 16px;
+		font-weight: 600;
+		line-height: 1;
+		text-align: center;
+		transition: background var(--transition-speed), box-shadow var(--transition-speed);
+	}
+	.sidebar-profile:hover .sidebar-profile-avatar {
+		background: color-mix(in srgb, var(--text-main) 18%, var(--sidebar-surface));
+		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-main) 30%, transparent);
+	}
+	.footer-row .sidebar-create-page-form,
+	.footer-row .editor-text-size-menu { width: 100%; min-width: 0; }
+	.footer-row .footer-icon-btn { width: 100%; max-width: 36px; margin-inline: auto; }
+	:global(.mobile) .footer-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+	:global(.mobile) .footer-row .footer-icon-btn { max-width: 40px; }
+	:global(.mobile) .sidebar-profile { max-width: 40px; min-height: 40px; }
 
 	.footer-left-actions {
 		display: contents;
@@ -2672,13 +2765,6 @@
 		}
 	}
 
-	.text-size-trigger {
-		font-family: Georgia, serif;
-		font-size: 20px;
-		font-weight: 600;
-		font-style: italic;
-	}
-
 	.text-size-trigger.active,
 	.text-size-trigger:not(:disabled):hover {
 		background-color: var(--hover-sidebar);
@@ -2688,10 +2774,6 @@
 	.text-size-trigger:disabled {
 		opacity: 0.45;
 		cursor: not-allowed;
-	}
-
-	.text-size-letter {
-		line-height: 1;
 	}
 
 	.text-size-popover {
@@ -2752,8 +2834,8 @@
 	}
 
 	.footer-icon-btn :global(svg) {
-		width: 18px;
-		height: 18px;
+		width: 20px;
+		height: 20px;
 	}
 
 	.footer-icon-btn:hover {

@@ -23,7 +23,7 @@
 	/* Light Mode (Notion Aesthetic) */
 	--bg-canvas: #ffffff;
 	--bg-sidebar: #ffffff;
-	--sidebar-surface: #f7f6f2;
+	--sidebar-surface: #f2f3f2;
 	--text-main: #37352f;
 	--text-muted: #7c7b77;
 	--border-color: #b3b3b3;
@@ -65,7 +65,7 @@
 	/* Dark Mode (Notion Aesthetic) */
 	--bg-canvas: #151515;
 	--bg-sidebar: #202020;
-	--sidebar-surface: #242424;
+	--sidebar-surface: #1b1d1f;
 	--text-main: #e3e3e3;
 	--text-muted: #8f8f8f;
 	--border-color: #2d2d2d;
@@ -213,6 +213,7 @@ textarea {
 	z-index: 10;
 	flex-shrink: 0;
 	position: relative;
+	font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
 .sidebar-closed .sidebar {
@@ -272,7 +273,7 @@ textarea {
 	gap: 10px;
 	min-width: 0;
 	font-weight: 600;
-	font-size: 21px;
+	font-size: 19px;
 }
 
 .avatar {
@@ -289,8 +290,8 @@ textarea {
 }
 
 .workspace-logo {
-	width: 32px;
-	height: 32px;
+	width: 29px;
+	height: 29px;
 	flex-shrink: 0;
 	object-fit: contain;
 	filter: none;
@@ -429,8 +430,9 @@ textarea {
 	position: relative;
 }
 
-.page-item-row:hover {
+:where(.app-container:not(.mobile)) .page-item-row:hover {
 	background-color: var(--hover-sidebar);
+	border-radius: 9px;
 }
 
 .page-item-row.active {
@@ -452,8 +454,8 @@ textarea {
 }
 
 .workspace-logo {
-	width: 32px;
-	height: 32px;
+	width: 29px;
+	height: 29px;
 	flex-shrink: 0;
 	object-fit: contain;
 	filter: none;
@@ -579,8 +581,8 @@ textarea {
 	position: relative;
 }
 
-.page-item-row:hover {
-	background-color: transparent;
+:where(.app-container:not(.mobile)) .page-item-row:hover {
+	background-color: var(--hover-sidebar);
 }
 
 .page-item-row.active {
@@ -595,9 +597,10 @@ textarea {
 	position: absolute;
 	z-index: -1;
 	top: 2px;
-	left: calc(0px - var(--page-highlight-indent, 0px));
-	right: 0;
+	left: calc(8px - var(--page-highlight-indent, 0px));
+	right: 8px;
 	bottom: 2px;
+	border-radius: 9px;
 	background: var(--active-sidebar);
 	pointer-events: none;
 }
@@ -691,10 +694,9 @@ textarea {
 	position: relative;
 	display: flex;
 	flex-direction: column;
-	padding: 8px 4px;
-	padding-bottom: calc(8px + env(safe-area-inset-bottom));
-	gap: 2px;
-	border-top: 1px solid var(--border-color);
+	padding: 12px;
+	padding-bottom: calc(12px + env(safe-area-inset-bottom));
+	gap: 4px;
 	flex-shrink: 0;
 }
 
@@ -709,6 +711,7 @@ textarea {
 /* Main Canvas layout */
 .main-content {
 	flex: 1;
+	position: relative;
 	display: flex;
 	flex-direction: column;
 	height: 100%;
@@ -816,8 +819,12 @@ textarea {
 /* Mobile Overlay and Drawer overrides */
 /* Apply the closed drawer state before Svelte hydrates and adds the `.mobile` class. */
 @media (max-width: 767px) {
+	.app-container {
+		--mobile-sidebar-width: 85vw;
+	}
+
 	.sidebar {
-		width: min(74vw, 300px);
+		width: var(--mobile-sidebar-width);
 	}
 
 	.app-container:not(.mobile) .sidebar {
@@ -932,9 +939,11 @@ textarea {
 	position: absolute;
 	inset: 0;
 	background-color: rgba(0, 0, 0, 0.4);
-	z-index: 5;
+	z-index: 25;
 	opacity: var(--sidebar-progress, 0);
-	transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1);
+	transform: translateX(calc(var(--sidebar-progress, 0) * var(--mobile-sidebar-width)));
+	border-radius: 14px 0 0 14px;
+	transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1), transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .sidebar-closed .mobile-overlay {
@@ -950,10 +959,24 @@ textarea {
 	left: 0;
 	top: 0;
 	height: 100%;
-	z-index: 20;
+	z-index: 1;
 	margin-left: 0;
 	transform: translateX(calc((var(--sidebar-progress, 0) - 1) * 100%));
 	transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Carry the sidebar surface beneath the page's rounded edge as both move. */
+.mobile .sidebar::after {
+	content: '';
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 100%;
+	width: 14px;
+	background: var(--sidebar-surface);
+	opacity: var(--sidebar-progress, 0);
+	transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1);
+	pointer-events: none;
 }
 
 .mobile .sidebar-header {
@@ -962,12 +985,12 @@ textarea {
 }
 
 .mobile .user-workspace {
-	font-size: 24px;
+	font-size: 22px;
 }
 
 .mobile .workspace-logo {
-	width: 36px;
-	height: 36px;
+	width: 32px;
+	height: 32px;
 }
 
 .mobile .icon-btn.sidebar-search-toggle {
@@ -980,25 +1003,20 @@ textarea {
 	height: 24px;
 }
 
-.mobile.sidebar-closed .sidebar {
-	transform: translateX(calc((var(--sidebar-progress, 0) - 1) * 100%));
-}
-
-.mobile:not(.sidebar-closed) .sidebar {
-	transform: translateX(calc((var(--sidebar-progress, 1) - 1) * 100%));
-}
-
 .sidebar-dragging .sidebar {
 	will-change: transform;
 }
 
 .sidebar-dragging .sidebar,
+.sidebar-dragging .sidebar::after,
+.mobile.sidebar-dragging .main-content,
 .sidebar-dragging .mobile-overlay {
 	transition: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
 	.mobile .sidebar,
+	.mobile .sidebar::after,
 	.mobile-overlay {
 		transition: none;
 	}
@@ -1013,6 +1031,17 @@ textarea {
 	padding-left: 0 !important;
 	position: relative;
 	isolation: isolate;
+	z-index: 2;
+	flex: 0 0 100%;
+	transform: translateX(calc(var(--sidebar-progress, 0) * var(--mobile-sidebar-width)));
+	border-radius: 14px 0 0 14px;
+	transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.mobile .main-content {
+		transition: none;
+	}
 }
 
 /* Keep the fades above scrolling content and below the floating controls. */
@@ -1130,17 +1159,8 @@ textarea {
 }
 
 .mobile .sidebar-footer .footer-icon-btn svg {
-	width: 20px;
-	height: 20px;
-}
-
-.mobile .sidebar-footer .text-size-trigger {
-	font-size: 18px;
-}
-
-.mobile .footer-row {
-	grid-template-columns: repeat(auto-fit, 40px);
-	justify-content: space-around;
+	width: 22px;
+	height: 22px;
 }
 
 .mobile .canvas-wrapper {

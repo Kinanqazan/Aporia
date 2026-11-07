@@ -1,7 +1,16 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { cleanupUnusedAssets } from '$lib/server/assets';
+import { cleanupUnusedAssets, countUnusedAssets } from '$lib/server/assets';
 import { UploadActivityError } from '$lib/server/upload-activity';
+
+export const GET: RequestHandler = async () => {
+	try {
+		return json({ success: true, count: await countUnusedAssets() }, { headers: { 'Cache-Control': 'no-store' } });
+	} catch (error) {
+		const message = error instanceof Error ? error.message : 'Unable to count unused uploads';
+		return json({ success: false, error: message }, { status: error instanceof UploadActivityError ? error.status : 500, headers: { 'Cache-Control': 'no-store' } });
+	}
+};
 
 export const POST: RequestHandler = async ({ request, url }) => {
 	const origin = request.headers.get('origin');

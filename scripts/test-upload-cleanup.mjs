@@ -97,6 +97,13 @@ try {
 		assert.equal(result.removed, expectedCount);
 		return result;
 	}
+	async function assertUnusedCount(expectedCount) {
+		const response = await request('/api/assets/cleanup');
+		const result = await response.json();
+		assert.equal(response.status, 200, JSON.stringify(result));
+		assert.equal(result.count, expectedCount);
+		assert.match(response.headers.get('cache-control'), /no-store/);
+	}
 	async function assertAsset(node, present) {
 		const id = node.attrs.assetId;
 		assert.equal(Boolean(sqlite.prepare('SELECT id FROM assets WHERE id = ?').get(id)), present);
@@ -118,6 +125,7 @@ try {
 	const pendingFile = await upload('pending.pdf', '%PDF pending save', 'application/pdf');
 	const busyCleanup = await request('/api/assets/cleanup', { method: 'POST' });
 	assert.equal(busyCleanup.status, 409, 'Another tab must not delete an upload awaiting its first save');
+	assert.equal((await request('/api/assets/cleanup')).status, 409, 'Counting must not race a pending upload');
 	await assertAsset(pendingFile, true);
 	await activity('renew', pendingActivity);
 	await savePage('live', { type: 'doc', content: [pendingFile] });
@@ -178,7 +186,13 @@ try {
 	}] });
 	createPage('trash', { type: 'doc', content: [trashFile] }, true);
 
+	sqlite.exec(`CREATE TRIGGER reject_count_cleanup_reservation BEFORE INSERT ON upload_activity
+		WHEN NEW.kind = 'cleanup' BEGIN SELECT RAISE(FAIL, 'count must not reserve cleanup'); END`);
+	await assertUnusedCount(1);
+	sqlite.exec('DROP TRIGGER reject_count_cleanup_reservation');
+	await assertAsset(orphan, true);
 	const first = await cleanup(1);
+	await assertUnusedCount(0);
 	assert.equal(first.bytesFreed, Buffer.byteLength('PK fixture'));
 	await assertAsset(orphan, false);
 	for (const node of [removedFile, sharedFile, image, trashFile]) await assertAsset(node, true);
@@ -198,6 +212,7 @@ try {
 	const protectedOrphan = await upload('protected.txt', 'keep until content is readable', 'text/plain');
 	createPage('broken');
 	sqlite.prepare('UPDATE pages SET content_json = ? WHERE id = ?').run('{broken', 'broken');
+	assert.equal((await request('/api/assets/cleanup')).status, 500, 'Counting must fail safely for invalid page content');
 	const failedCleanup = await request('/api/assets/cleanup', { method: 'POST' });
 	assert.equal(failedCleanup.status, 500);
 	assert.match((await failedCleanup.json()).error, /page has invalid content/);
