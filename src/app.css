@@ -1762,7 +1762,7 @@ textarea {
 	justify-content: flex-start;
 	gap: 6px;
 	padding: 0;
-	margin-bottom: 10px;
+	margin-bottom: 18px;
 	background: transparent;
 	border: none;
 	user-select: none;
@@ -1789,7 +1789,7 @@ textarea {
 	align-items: center;
 	gap: 6px;
 	background-color: var(--bg-canvas);
-	border: 1px solid var(--text-muted);
+	border: 1px solid color-mix(in srgb, var(--text-muted) 75%, var(--bg-canvas));
 	border-radius: 6px;
 	padding: 0 10px;
 	width: 180px;
@@ -1801,7 +1801,7 @@ textarea {
 }
 
 .task-list-search-wrapper:focus-within {
-	border-color: var(--text-muted);
+	border-color: color-mix(in srgb, var(--text-muted) 75%, var(--bg-canvas));
 	box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
@@ -1853,8 +1853,8 @@ textarea {
 .task-filter-pill:hover,
 .task-filter-pill:focus-visible {
 	color: var(--text-main);
-	border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
-	background: color-mix(in srgb, var(--accent-color) 8%, var(--bg-canvas));
+	border-color: var(--text-muted);
+	background: var(--bg-canvas);
 }
 
 .task-filter-pill.active,
