@@ -8,6 +8,7 @@
 	import { 
 		Menu, 
 		Search, 
+		X,
 		Plus, 
 		Sun, 
 		Moon, 
@@ -620,13 +621,11 @@
 	});
 
 	afterNavigate((navigation) => {
-		searchController.cancel();
+		closeSidebarSearch();
 		if (navigation.type !== 'enter' && navigation.from?.url.pathname !== navigation.to?.url.pathname) {
 			isSettingsOpen = false;
 			isTrashOpen = false;
 		}
-		isSearchOpen = false;
-		isSidebarSearchVisible = false;
 		sidebarCreateNavigation.afterNavigate();
 		if (
 			navigation.type !== 'enter' &&
@@ -674,14 +673,14 @@
 
 	function selectSearchResult(result: any) {
 		isSearchOpen = false;
-		goto(`/${result.id}`);
+		goto(`/${result.id}?highlight=${encodeURIComponent(searchQuery)}`);
 	}
 
 	function startResizing(e: MouseEvent) {
 		e.preventDefault();
 		isResizing = true;
 		document.body.style.userSelect = 'none';
-		document.body.style.cursor = 'col-resize';
+		document.body.style.cursor = 'ew-resize';
 		
 		const handleMouseMove = (moveEvent: MouseEvent) => {
 			sidebarWidth = Math.max(160, Math.min(480, moveEvent.clientX));
@@ -709,7 +708,8 @@
 	}
 
 	function closeSidebarSearch() {
-		searchController.cancel();
+		searchQuery = '';
+		void searchController.update('');
 		isSidebarSearchVisible = false;
 		isSearchOpen = false;
 	}
@@ -1050,7 +1050,7 @@
 							onfocus={() => isSearchOpen = true}
 							onclick={(e) => e.stopPropagation()}
 						/>
-						<button type="button" class="sidebar-search-close" onclick={closeSidebarSearch} title="Close search" aria-label="Close search">×</button>
+						<button type="button" class="sidebar-search-close" onclick={closeSidebarSearch} title="Close search" aria-label="Close search"><X size={18} /></button>
 					</div>
 
 					{#if isSearchOpen && searchResults.length > 0}
@@ -1112,8 +1112,9 @@
 					isEditorTextSizeOpen = false;
 					isTrashOpen = false;
 					if (isMobile) isSidebarOpen = false;
-				}} aria-label="Open settings" title="Settings">
+				}} aria-label="Settings" aria-pressed={isSettingsOpen} title="Settings">
 					<span class="sidebar-profile-avatar" aria-hidden="true">{(data.username?.trim().split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((part) => [...part][0]).join('') || 'A').toUpperCase()}</span>
+					<span class="sidebar-profile-settings" aria-hidden="true"><Settings size={10} strokeWidth={2} /></span>
 				</button>
 				<div class="footer-left-actions">
 					<button
@@ -2559,7 +2560,7 @@
 		background-color: var(--hover-sidebar);
 		border: 1px solid var(--border-color);
 		border-radius: 8px;
-		padding: 5px 10px;
+		padding: 1px 4px 1px 10px;
 		gap: 8px;
 		width: 100%;
 	}
@@ -2580,7 +2581,7 @@
 	}
 
 	:global(.mobile) .sidebar-search-input-wrapper {
-		padding: 8px 12px;
+		padding: 3px 5px 3px 10px;
 		gap: 10px;
 		border-radius: 8px;
 	}
@@ -2601,14 +2602,12 @@
 
 	.sidebar-search-close {
 		flex-shrink: 0;
-		width: 20px;
-		height: 20px;
+		width: 32px;
+		height: 32px;
 		padding: 0;
 		border: 0;
 		background: transparent;
 		color: var(--text-muted);
-		font-size: 18px;
-		line-height: 1;
 		cursor: pointer;
 		display: flex;
 		align-items: center;
@@ -2706,6 +2705,7 @@
 	}
 
 	.sidebar-profile {
+		position: relative;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -2724,18 +2724,31 @@
 		width: min(34px, 100%);
 		aspect-ratio: 1;
 		border-radius: 50%;
-		background: color-mix(in srgb, var(--text-main) 10%, var(--sidebar-surface));
+		background: var(--sidebar-surface);
 		color: var(--text-main);
-		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-main) 18%, transparent);
+		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-main) 15%, transparent);
 		font-size: 16px;
 		font-weight: 600;
 		line-height: 1;
 		text-align: center;
 		transition: background var(--transition-speed), box-shadow var(--transition-speed);
 	}
-	.sidebar-profile:hover .sidebar-profile-avatar {
-		background: color-mix(in srgb, var(--text-main) 18%, var(--sidebar-surface));
-		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-main) 30%, transparent);
+	:global(:where(.app-container:not(.mobile))) .sidebar-profile:hover .sidebar-profile-avatar {
+		background: color-mix(in srgb, var(--text-main) 6%, var(--sidebar-surface));
+		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-main) 25%, transparent);
+	}
+	.sidebar-profile-settings {
+		position: absolute;
+		right: -2px;
+		bottom: -2px;
+		display: grid;
+		place-items: center;
+		width: 15px;
+		height: 15px;
+		border: 1px solid var(--sidebar-surface);
+		border-radius: 50%;
+		background: var(--sidebar-surface);
+		color: var(--text-muted);
 	}
 	.footer-row .sidebar-create-page-form,
 	.footer-row .editor-text-size-menu { width: 100%; min-width: 0; }

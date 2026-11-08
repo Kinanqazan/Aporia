@@ -228,14 +228,24 @@ textarea {
 	right: -4px;
 	width: 8px;
 	height: 100%;
-	cursor: col-resize;
+	cursor: ew-resize;
 	z-index: 20;
-	transition: background-color var(--transition-speed);
 }
 
-.sidebar-resizer:hover,
-.sidebar-resizer.resizing {
+.sidebar-resizer::after {
+	content: '';
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 3px;
+	width: 2px;
 	background-color: var(--accent-color);
+	opacity: 0;
+	transition: opacity var(--transition-speed);
+}
+
+.sidebar-resizer:hover::after,
+.sidebar-resizer.resizing::after {
 	opacity: 0.5;
 }
 
@@ -1706,7 +1716,7 @@ textarea {
 	color: var(--accent-color);
 	width: 1em;
 	height: 1em;
-	border: 1.5px solid var(--text-muted);
+	border: 1px solid var(--text-muted);
 	border-radius: 3px;
 	display: grid;
 	place-content: center;
@@ -1752,7 +1762,7 @@ textarea {
 	justify-content: flex-start;
 	gap: 6px;
 	padding: 0;
-	margin-bottom: 6px;
+	margin-bottom: 10px;
 	background: transparent;
 	border: none;
 	user-select: none;
@@ -1768,6 +1778,10 @@ textarea {
 	order: 2;
 }
 
+.ProseMirror .task-list-header:not(.is-hidden) + ul.task-list-content {
+	padding-left: 4px;
+}
+
 /* Search Box - Database Block Style */
 .task-list-search-wrapper {
 	position: relative;
@@ -1775,7 +1789,7 @@ textarea {
 	align-items: center;
 	gap: 6px;
 	background-color: var(--bg-canvas);
-	border: 1px solid var(--border-color);
+	border: 1px solid var(--text-muted);
 	border-radius: 6px;
 	padding: 0 10px;
 	width: 180px;
@@ -1787,7 +1801,7 @@ textarea {
 }
 
 .task-list-search-wrapper:focus-within {
-	border-color: var(--border-color);
+	border-color: var(--text-muted);
 	box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
@@ -1816,24 +1830,13 @@ textarea {
 }
 
 /* Filter Pills - Database Block Style */
-.task-list-filter-pills {
-	display: flex;
-	align-items: center;
-	gap: 5px;
-	background: transparent;
-	padding: 0;
-	height: 36px;
-	box-sizing: border-box;
-	flex-shrink: 0;
-}
-
 .task-filter-pill {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	gap: 5px;
 	height: 36px;
-	padding: 0 15px;
+	padding: 0 8px;
 	border: 1px solid var(--border-color);
 	border-radius: 6px;
 	font-size: 13px;
@@ -1844,6 +1847,7 @@ textarea {
 	line-height: 1;
 	white-space: nowrap;
 	box-sizing: border-box;
+	flex-shrink: 0;
 }
 
 .task-filter-pill:hover,
@@ -1904,7 +1908,7 @@ textarea {
 		display: flex;
 		flex-direction: row;
 		align-items: center;
-		justify-content: space-between;
+		justify-content: flex-start;
 		width: 100%;
 		padding: 0;
 		gap: 5px;
@@ -1912,7 +1916,8 @@ textarea {
 	}
 
 	.task-list-search-wrapper {
-		flex: 1 1 90px;
+		flex: 0 1 150px;
+		width: 150px;
 		min-width: 70px;
 		height: 36px;
 	}
@@ -1927,14 +1932,8 @@ textarea {
 		height: 14px;
 	}
 
-	.task-list-filter-pills {
-		height: 36px;
-		gap: 4px;
-		flex-shrink: 0;
-	}
-
 	.task-filter-pill {
-		padding: 0 10px;
+		padding: 0 8px;
 		font-size: 0.78rem;
 		height: 36px;
 	}

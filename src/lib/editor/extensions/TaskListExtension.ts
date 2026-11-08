@@ -750,44 +750,25 @@ export const EnhancedTaskList = TaskList.extend({
 
 			searchWrapper.appendChild(searchInput);
 
-			// Single Line Component 2: Filter Pills
-			const filterPills = document.createElement('div');
-			filterPills.className = 'task-list-filter-pills';
-
-			const createFilterButton = (label: string, filterVal: 'all' | 'todo' | 'done', isActive = false) => {
-				const btn = document.createElement('button');
-				btn.type = 'button';
-				btn.className = `task-filter-pill${isActive ? ' active' : ''}`;
-				btn.textContent = label;
-
-				btn.addEventListener('mousedown', (e) => {
-					e.stopPropagation();
-					e.preventDefault();
-				});
-				btn.addEventListener('pointerdown', (e) => {
-					e.stopPropagation();
-					e.preventDefault();
-				});
-				btn.addEventListener('click', (e: Event) => {
-					e.stopPropagation();
-					e.preventDefault();
-					setFilter(filterVal);
-				});
-
-				return btn;
+			// Cycle through all, incomplete, and completed items with one control.
+			const filterButton = document.createElement('button');
+			filterButton.type = 'button';
+			filterButton.className = 'task-filter-pill';
+			const keepEditorFocus = (e: Event) => {
+				e.stopPropagation();
+				e.preventDefault();
 			};
-
-			const btnAll = createFilterButton('All', 'all', true);
-			const btnTodo = createFilterButton('To Do', 'todo', false);
-			const btnDone = createFilterButton('Done', 'done', false);
-
-			filterPills.appendChild(btnAll);
-			filterPills.appendChild(btnTodo);
-			filterPills.appendChild(btnDone);
+			filterButton.addEventListener('mousedown', keepEditorFocus);
+			filterButton.addEventListener('pointerdown', keepEditorFocus);
+			filterButton.addEventListener('click', (e) => {
+				e.stopPropagation();
+				e.preventDefault();
+				setFilter(currentFilter === 'all' ? 'todo' : currentFilter === 'todo' ? 'done' : 'all');
+			});
 
 			// Assemble single-line header: Search Box -> Filter Pills -> Add Item (+) at Far Right
 			header.appendChild(searchWrapper);
-			header.appendChild(filterPills);
+			header.appendChild(filterButton);
 			header.appendChild(addBtn);
 
 			// Deactivate search field cursor on pointerdown outside search input
@@ -838,12 +819,15 @@ export const EnhancedTaskList = TaskList.extend({
 
 			const setFilter = (filter: 'all' | 'todo' | 'done') => {
 				currentFilter = filter;
-				btnAll.classList.toggle('active', filter === 'all');
-				btnTodo.classList.toggle('active', filter === 'todo');
-				btnDone.classList.toggle('active', filter === 'done');
+				const label = filter === 'all' ? 'All' : filter === 'todo' ? 'To Do' : 'Done';
+				filterButton.textContent = label;
+				filterButton.classList.toggle('active', filter !== 'all');
+				filterButton.setAttribute('aria-label', `Showing ${label} tasks. Click to change filter.`);
+				filterButton.title = 'Change task filter';
 				updateFiltering();
 			};
 
+			setFilter('all');
 			requestAnimationFrame(updateFiltering);
 
 			return {

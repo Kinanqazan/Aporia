@@ -48,6 +48,7 @@
 	import { createAndroidFormattingSelection, createAndroidFormattingSelectionTracker, getAndroidFormattingSelection } from '$lib/editor/android-formatting-selection';
 	import { constrainImageSizeToWidth } from '$lib/editor/image-resize';
 	import { createAutosaveController } from '$lib/editor/autosave-controller.js';
+	import { createSearchHighlightPlugin, searchHighlightKey } from '$lib/editor/search-highlight.js';
 	import { startUploadActivity, type UploadActivity } from '$lib/editor/upload-activity';
 	import {
 		restorePersistedDetailsOpenState,
@@ -1492,8 +1493,9 @@
 	$effect(() => {
 		const highlightQuery = $page.url.searchParams.get('highlight');
 		if (editor && highlightQuery) {
+			const targetEditor = editor;
 			setTimeout(() => {
-				if (!editor) return;
+				if (!editor || editor !== targetEditor || editor.isDestroyed) return;
 				const text = highlightQuery.trim();
 				if (!text) return;
 
@@ -1514,6 +1516,25 @@
 				});
 
 				if (pos !== -1) {
+					if (!editor.isEditable) {
+						// A read-only editor cannot focus to show a selection. Decorations are
+						// view-only and do not change the saved page or its lock state.
+						editor.view.dispatch(editor.state.tr.setMeta(searchHighlightKey, { from: pos, to: pos + text.length }));
+						const resolved = editor.state.doc.resolve(pos);
+						for (let depth = 1; depth <= resolved.depth; depth++) {
+							if (resolved.node(depth).type.name !== 'details') continue;
+							const details = editor.view.nodeDOM(resolved.before(depth));
+							if (details instanceof HTMLElement && !details.classList.contains('is-open')) {
+								details.querySelector<HTMLButtonElement>(':scope > button')?.click();
+							}
+						}
+						setTimeout(() => {
+							if (editor !== targetEditor || targetEditor.isDestroyed) return;
+							const match = editorElement?.querySelector<HTMLElement>('.search-result-highlight');
+							match?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+						}, 60);
+						return;
+					}
 					editor.commands.focus();
 
 					// Open any collapsed details/toggle blocks that contain this position
@@ -1571,6 +1592,7 @@
 			element: editorElement,
 			editable: !data.pageRecord.isLocked,
 			extensions: [
+				Extension.create({ name: 'searchResultHighlight', addProseMirrorPlugins: () => [createSearchHighlightPlugin()] }),
 				StarterKit.configure({
 					link: false,
 					dropcursor: false,
@@ -3686,6 +3708,11 @@
 </article>
 
 <style>
+	:global(.ProseMirror .search-result-highlight) {
+		background-color: #ffd866;
+		color: #211b00;
+		border-radius: 2px;
+	}
 	:global(.android-formatting-selection) {
 		background: color-mix(in srgb, var(--accent-color) 22%, transparent);
 	}
