@@ -5,6 +5,7 @@ import { randomBytes } from 'crypto';
 import { normalizeIconColor } from '$lib/icon-colors';
 import { parsePageVersion } from './mcp/page-version.js';
 import { getWorkspaceGeneration } from './mcp/versions.js';
+import { env } from '$env/dynamic/private';
 
 export function generateId(length: number = 10): string {
 	const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -303,6 +304,8 @@ export async function seedDemoWorkspace(): Promise<PageNode[]> {
 	const active = await getActivePages();
 	if (active.length > 0) return active;
 
+	const isPublicDemo = env.VERCEL === '1' && env.APORIA_DEMO_MODE === 'true';
+
 	// 1. Getting Started (Yellow icon)
 	const page1 = await createPage(null, 'Getting Started', 'lucide:rocket', '#eab308');
 	const content1 = {
@@ -582,9 +585,17 @@ export async function seedDemoWorkspace(): Promise<PageNode[]> {
 			}
 		]
 	};
+	if (isPublicDemo) {
+		const removeColors = (node: any) => {
+			if (node.marks) node.marks = node.marks.filter((mark: any) => mark.type !== 'textStyle' && mark.type !== 'highlight');
+			node.content?.forEach(removeColors);
+		};
+		removeColors(content1);
+	}
 	await updatePage(page1.id, {
 		contentJson: JSON.stringify(content1),
-		contentText: extractTextFromJson(JSON.stringify(content1))
+		contentText: extractTextFromJson(JSON.stringify(content1)),
+		...(isPublicDemo ? { iconColor: null, isLocked: 1 } : {})
 	});
 
 	// 2. Shopping (Green icon)
@@ -654,9 +665,11 @@ export async function seedDemoWorkspace(): Promise<PageNode[]> {
 			}
 		]
 	};
+	if (isPublicDemo) content2.content.splice(2, 2);
 	await updatePage(page2.id, {
 		contentJson: JSON.stringify(content2),
-		contentText: extractTextFromJson(JSON.stringify(content2))
+		contentText: extractTextFromJson(JSON.stringify(content2)),
+		...(isPublicDemo ? { iconColor: null, isLocked: 1 } : {})
 	});
 
 	// 3. Book Tracker (Blue icon)
@@ -706,7 +719,8 @@ export async function seedDemoWorkspace(): Promise<PageNode[]> {
 	};
 	await updatePage(page3.id, {
 		contentJson: JSON.stringify(content3),
-		contentText: extractTextFromJson(JSON.stringify(content3))
+		contentText: extractTextFromJson(JSON.stringify(content3)),
+		...(isPublicDemo ? { iconColor: null, isLocked: 1 } : {})
 	});
 
 	// 4. Project Ideas (Purple icon)
@@ -750,8 +764,8 @@ export async function seedDemoWorkspace(): Promise<PageNode[]> {
 	};
 	await updatePage(page4.id, {
 		contentJson: JSON.stringify(content4),
-		contentText: extractTextFromJson(JSON.stringify(content4))
+		contentText: extractTextFromJson(JSON.stringify(content4)),
+		...(isPublicDemo ? { iconColor: null, isLocked: 1 } : {})
 	});
-
 	return await getActivePages();
 }
