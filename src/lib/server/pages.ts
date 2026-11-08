@@ -588,7 +588,12 @@ export async function seedDemoWorkspace(): Promise<PageNode[]> {
 	if (isPublicDemo) {
 		const removeColors = (node: any) => {
 			if (node.marks) node.marks = node.marks.filter((mark: any) => mark.type !== 'textStyle' && mark.type !== 'highlight');
-			node.content?.forEach(removeColors);
+			if (node.content) {
+				node.content = node.content.filter((child: any) =>
+					!(child.type === 'paragraph' && child.content?.some((item: any) => item.text === 'Ctrl + K'))
+				);
+				node.content.forEach(removeColors);
+			}
 		};
 		removeColors(content1);
 	}
