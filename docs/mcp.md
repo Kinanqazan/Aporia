@@ -46,6 +46,8 @@ APORIA_MCP_TOKEN=replace-with-a-long-random-secret
 APORIA_MCP_ALLOWED_ORIGINS=http://aporia:3000,https://notes.example.com
 ```
 
+The repository's Compose file reads these values from the project `.env` file and passes them through its `environment` section. Alternatively, you can pass them using the service's `env_file`; in that case, remove the three `APORIA_MCP_*` entries from `environment`, since those entries override values from `env_file`, even when they are empty.
+
 Generate a key on the Docker host with `openssl rand -hex 32`. Keep it in the server's private environment file, not in Git, a shared Compose file, or a conversation. Use the exact origins clients will use, with no path or trailing slash: one for Hermes' Docker address and one for the desktop-facing address. If you do not use HTTPS, the desktop origin can be `http://192.168.1.50:3001`. Replace these examples with your real host and port. The Aporia password setup must already be complete. Public demo mode always disables MCP.
 
 Restart Aporia after changing the environment. Set `APORIA_MCP_ENABLED=false` to turn the endpoint off. Rotate the key by replacing it and restarting Aporia, then updating both clients. The endpoint returns 404 while disabled and rejects requests with an unlisted Host or browser Origin. It does not enable CORS or trust forwarded headers.

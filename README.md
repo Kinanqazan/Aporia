@@ -72,19 +72,12 @@ For a better phone experience, install the [Aporia Android APK](https://github.c
 
 ## 🚀 Self-Hosting
 
-These steps use a Linux server and Caddy running directly on that server. You need:
+You need a Linux server with:
 
 - [Docker Engine and Docker Compose](https://docs.docker.com/engine/install/) installed and running. Your account must be able to run `docker compose` (otherwise run the Docker commands below with `sudo`).
-- [Caddy installed as a system service](https://caddyserver.com/docs/install), with its configuration at `/etc/caddy/Caddyfile`.
-- A domain or subdomain whose DNS record points to the server. Ports 80 and 443 must be reachable from the internet for Caddy to obtain an HTTPS certificate. If a router or cloud firewall is in front of the server, allow or forward those ports too.
 - Port 3001 available on the server. The Compose file publishes it on all interfaces, so restrict external access to port 3001 using your provider's firewall or Docker-compatible firewall rules. Docker-published ports can bypass ordinary host firewall rules; see [Docker's firewall guidance](https://docs.docker.com/engine/network/packet-filtering-firewalls/).
 
-Check Docker before continuing:
-
-```sh
-docker compose version
-docker info
-```
+For remote access, use an HTTPS reverse proxy of your choice and an address that your devices can reach. The Android app requires HTTPS. The optional Caddy example below uses a public domain pointing to your server and requires ports 80 and 443 to be reachable from the internet.
 
 ### 1. Create the Compose file
 
@@ -113,6 +106,7 @@ services:
       BODY_SIZE_LIMIT: 60M
       DATABASE_URL: /app/data/app.db
       UPLOAD_DIR: /app/data/uploads
+      # Optional: only needed if you want to enable MCP.
       APORIA_MCP_ENABLED: ${APORIA_MCP_ENABLED:-false}
       APORIA_MCP_TOKEN: ${APORIA_MCP_TOKEN:-}
       APORIA_MCP_ALLOWED_ORIGINS: ${APORIA_MCP_ALLOWED_ORIGINS:-}
@@ -123,15 +117,16 @@ services:
 ### 2. Start Aporia
 
 ```sh
-docker compose pull
 docker compose up -d
 ```
 
-Check that Aporia is running with `docker compose ps`. If it fails to start, inspect `docker compose logs aporia`. Its database and uploaded files are stored in `config/aporia`; keep backups of your workspace.
+The database and uploaded files are stored in `config/aporia`; keep backups of your workspace. MCP is disabled by default; see [the MCP guide](docs/mcp.md) if you want to enable it.
 
 ### 3. Configure HTTPS
 
-Edit `/etc/caddy/Caddyfile` and add this site block. Replace `aporia.example.com` with your actual domain. Keep any existing sites in the file:
+Configure your preferred reverse proxy to serve HTTPS and forward requests to Aporia on port `3001`, preserving the original host header. The exact upstream address depends on where the proxy runs. For a proxy running directly on the same server, use `127.0.0.1:3001`. For a proxy in a container, use the host's reachable address or connect both containers to a shared Docker network and use `aporia:3000`.
+
+For example, if you use [Caddy](https://caddyserver.com/docs/install) as a system service on the same server, point your domain's DNS record to the server and allow ports 80 and 443 through your router and firewall. Edit `/etc/caddy/Caddyfile` and add this site block, replacing `aporia.example.com` with your domain. Keep any existing sites in the file:
 
 ```caddy
 aporia.example.com {
@@ -139,18 +134,16 @@ aporia.example.com {
 }
 ```
 
-Save the file, then validate it and reload Caddy:
+Save the file, then validate it and reload Caddy (adjust the path and service commands if your installation differs):
 
 ```sh
 sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 
-Open your domain using HTTPS and immediately create your username and password. Account setup closes after the first account is created. Enter the same HTTPS address in the Android app.
+Open your HTTPS address and immediately create your username and password. Account setup closes after the first account is created. Enter the same HTTPS address in the Android app.
 
-If HTTPS does not work, check your DNS record, ports 80 and 443, and Caddy logs with `sudo journalctl -u caddy -e`. The example assumes Caddy runs on the server itself. If your reverse proxy runs in a container, configure it to reach Aporia over a shared Docker network or through the host's address; `127.0.0.1` inside that container refers to the proxy container itself.
-
-To update Aporia later, run `docker compose pull` and `docker compose up -d` from the same directory. The publishing workflow builds images for Linux x86-64 and ARM64; ARM64 support is available after an image is published from the updated workflow.
+To update Aporia later, run `docker compose pull` and `docker compose up -d` from the same directory.
 
 ---
 
