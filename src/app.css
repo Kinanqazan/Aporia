@@ -953,7 +953,7 @@ textarea {
 	opacity: var(--sidebar-progress, 0);
 	transform: translateX(calc(var(--sidebar-progress, 0) * var(--mobile-sidebar-width)));
 	border-radius: 14px 0 0 14px;
-	transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1), transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+	transition: opacity 180ms cubic-bezier(0.22, 1, 0.36, 1), transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .sidebar-closed .mobile-overlay {
@@ -972,7 +972,7 @@ textarea {
 	z-index: 1;
 	margin-left: 0;
 	transform: translateX(calc((var(--sidebar-progress, 0) - 1) * 100%));
-	transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+	transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* Carry the sidebar surface beneath the page's rounded edge as both move. */
@@ -985,7 +985,7 @@ textarea {
 	width: 14px;
 	background: var(--sidebar-surface);
 	opacity: var(--sidebar-progress, 0);
-	transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1);
+	transition: opacity 180ms cubic-bezier(0.22, 1, 0.36, 1);
 	pointer-events: none;
 }
 
@@ -1045,7 +1045,7 @@ textarea {
 	flex: 0 0 100%;
 	transform: translateX(calc(var(--sidebar-progress, 0) * var(--mobile-sidebar-width)));
 	border-radius: 14px 0 0 14px;
-	transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+	transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {

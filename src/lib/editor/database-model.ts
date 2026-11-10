@@ -5,6 +5,7 @@ export interface DatabaseColumn {
 	name: string;
 	type: DatabaseColumnType;
 	width?: number;
+	statusColors?: Record<string, string>;
 }
 
 export type DatabaseCellValue = string | number | string[] | null | undefined;
@@ -96,6 +97,9 @@ export function normalizeDatabaseAttributes(input: Partial<DatabaseAttributes> |
 				type: (['text', 'number', 'date', 'status', 'multi-select'] as const).includes(column.type)
 					? column.type
 					: 'text',
+				...(column.statusColors && typeof column.statusColors === 'object' && !Array.isArray(column.statusColors)
+					? { statusColors: Object.fromEntries(Object.entries(column.statusColors).filter(([, color]) => typeof color === 'string')) as Record<string, string> }
+					: {}),
 				...(Number.isFinite(Number(column.width)) ? { width: Math.max(90, Number(column.width)) } : {})
 			}))
 		: [];
@@ -154,6 +158,12 @@ export function renameDatabaseOption(
 
 	return {
 		...database,
+		columns: database.columns.map((item) => {
+			if (item.id !== colId || !item.statusColors || !(optionToRename in item.statusColors)) return item;
+			const statusColors = { ...item.statusColors, [trimmedName]: item.statusColors[optionToRename] };
+			delete statusColors[optionToRename];
+			return { ...item, statusColors };
+		}),
 		options: {
 			...database.options,
 			[colId]: currentOptions.map((option) => option === optionToRename ? trimmedName : option)
@@ -258,7 +268,12 @@ export function applyDatabaseAction(input: DatabaseAttributes, action: DatabaseA
 					? { ...row, [action.colId]: value.filter(item => item !== action.option) }
 					: value === action.option ? { ...row, [action.colId]: '' } : row;
 			});
-			return { ...database, rows: nextRows, options: { ...options, [action.colId]: (options[action.colId] || []).filter(option => option !== action.option) } };
+			return { ...database, rows: nextRows, columns: columns.map(column => {
+				if (column.id !== action.colId || !column.statusColors) return column;
+				const statusColors = { ...column.statusColors };
+				delete statusColors[action.option];
+				return { ...column, statusColors };
+			}), options: { ...options, [action.colId]: (options[action.colId] || []).filter(option => option !== action.option) } };
 		}
 		case 'move-option': {
 			const current = options[action.colId] || [];

@@ -14,6 +14,18 @@ const database = () => normalizeDatabaseAttributes({
 	options: { status: ['Todo', 'Done'] }
 });
 
+test('status colors survive normalization and renaming and are removed with the option', () => {
+	const source = database();
+	source.columns[1].statusColors = { Todo: 'Red', Done: 'Green' };
+	const renamed = renameDatabaseOption(source, 'status', 'Todo', 'Later');
+	assert.ok(renamed);
+	assert.deepEqual(renamed.columns[1].statusColors, { Later: 'Red', Done: 'Green' });
+	assert.equal(renamed.rows[0].status, 'Later');
+	const removed = applyDatabaseAction(renamed, { type: 'remove-option', colId: 'status', option: 'Later' });
+	assert.deepEqual(removed.columns[1].statusColors, { Done: 'Green' });
+	assert.deepEqual(source.columns[1].statusColors, { Todo: 'Red', Done: 'Green' });
+});
+
 test('database row actions target only the requested row', () => {
 	const next = applyDatabaseAction(database(), { type: 'delete-row', rowId: 'row-1' });
 	assert.deepEqual(next.rows.map(row => row.id), ['row-2']);

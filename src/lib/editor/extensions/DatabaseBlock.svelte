@@ -2,7 +2,7 @@
 	import { 
 		Plus, Trash2, ArrowUp, ArrowDown, ArrowUpDown, ArrowLeft, ArrowRight,
 		Settings, Search, Calendar, Hash, Type, CheckSquare, 
-		ChevronDown, ChevronUp, PlusCircle, X, Copy, Filter, Rows3, Columns3
+		ChevronDown, ChevronUp, PlusCircle, X, Copy, Filter, Rows3, Columns3, GripVertical
 	} from 'lucide-svelte';
 	import { generateDatabaseId, renameDatabaseOption } from '$lib/editor/database-model';
 
@@ -34,6 +34,21 @@
 	
 	// Popovers & Resizing
 	let activeColumnMenu = $state<string | null>(null); // columnId
+	let showColumnTypes = $state(false);
+	let columnMenuPosition = $state({ left: 8, top: 8 });
+	function toggleColumnMenu(event: MouseEvent, colId: string) {
+		event.stopPropagation();
+		showColumnTypes = false;
+		if (activeColumnMenu === colId) { activeColumnMenu = null; return; }
+		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+		const width = Math.min(235, window.innerWidth - 16);
+		columnMenuPosition = {
+			left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+			top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 360))
+		};
+		activeColumnMenu = colId;
+		activeSelectDropdown = null;
+	}
 	let activeSelectDropdown = $state<{ rowId: string; colId: string } | null>(null);
 	let isResizing = $state(false);
 	let resizingColId = $state<string | null>(null);
@@ -197,6 +212,21 @@
 
 		return () => {
 			document.removeEventListener('click', handleDocumentClick);
+		};
+	});
+
+	$effect(() => {
+		if (!activeColumnMenu) return;
+		const closeOnScroll = (event: Event) => {
+			if (event.target instanceof Element && event.target.closest('.th-menu-popover')) return;
+			activeColumnMenu = null;
+		};
+		const closeOnResize = () => { activeColumnMenu = null; };
+		window.addEventListener('scroll', closeOnScroll, true);
+		window.addEventListener('resize', closeOnResize);
+		return () => {
+			window.removeEventListener('scroll', closeOnScroll, true);
+			window.removeEventListener('resize', closeOnResize);
 		};
 	});
 
@@ -552,17 +582,22 @@
 			return r;
 		});
 
-		updateAttributes({ 
-			options: updatedOptions,
-			rows: updatedRows
+		const updatedColumns = columns.map((column: any) => {
+			if (column.id !== colId || column.type !== 'status') return column;
+			const statusColors = currentStatusColors(column);
+			delete statusColors[optionToRemove];
+			return { ...column, statusColors };
 		});
+		updateAttributes({ options: updatedOptions, rows: updatedRows, columns: updatedColumns });
 	}
 
 	function renameOption(colId: string, optionToRename: string, nextName: string): boolean {
 		if (!editable) return false;
-		const updated = renameDatabaseOption(tiptapNode.node.attrs, colId, optionToRename, nextName);
+		const attrs = tiptapNode.node.attrs;
+		const updated = renameDatabaseOption({ ...attrs, columns: columns.map((column: any) => column.id === colId && column.type === 'status'
+			? { ...column, statusColors: currentStatusColors(column) } : column) }, colId, optionToRename, nextName);
 		if (!updated) return false;
-		updateAttributes({ options: updated.options, rows: updated.rows });
+		updateAttributes({ options: updated.options, rows: updated.rows, columns: updated.columns });
 		return true;
 	}
 
@@ -576,7 +611,63 @@
 		const next = [...current];
 		const [moved] = next.splice(index, 1);
 		next.splice(targetIndex, 0, moved);
-		updateAttributes({ options: { ...options, [colId]: next } });
+		updateAttributes({ options: { ...options, [colId]: next }, columns: columns.map((column: any) => column.id === colId && column.type === 'status'
+			? { ...column, statusColors: currentStatusColors(column) } : column) });
+	}
+
+	let draggedStatus = $state<{ colId: string; option: string; target: string } | null>(null);
+	let statusDragScroll: ReturnType<typeof setInterval> | undefined;
+	function stopStatusDragScroll() {
+		if (statusDragScroll) clearInterval(statusDragScroll);
+		statusDragScroll = undefined;
+	}
+	$effect(() => {
+		if (activeColumnMenu) return () => stopStatusDragScroll();
+	});
+	$effect(() => {
+		if (!draggedStatus) return;
+		const preventNativeDrag = (event: DragEvent) => {
+			event.preventDefault();
+			event.stopPropagation();
+		};
+		window.addEventListener('dragstart', preventNativeDrag, true);
+		return () => window.removeEventListener('dragstart', preventNativeDrag, true);
+	});
+	function startStatusDrag(event: PointerEvent, colId: string, option: string) {
+		if (!editable || event.button !== 0) return;
+		event.preventDefault();
+		event.stopPropagation();
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		draggedStatus = { colId, option, target: option };
+	}
+	function updateStatusDrag(event: PointerEvent) {
+		if (!draggedStatus) return;
+		const { clientX, clientY } = event;
+		const list = (event.currentTarget as HTMLElement).closest<HTMLElement>('.status-option-editor-list');
+		const updateTarget = () => {
+			const row = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('[data-status-option]');
+			if (draggedStatus && row?.dataset.statusColumn === draggedStatus.colId && row.dataset.statusOption) {
+				draggedStatus = { ...draggedStatus, target: row.dataset.statusOption };
+			}
+		};
+		updateTarget();
+		stopStatusDragScroll();
+		if (!list) return;
+		const bounds = list.getBoundingClientRect();
+		const direction = clientY < bounds.top + 20 ? -1 : clientY > bounds.bottom - 20 ? 1 : 0;
+		if (direction) statusDragScroll = setInterval(() => { list.scrollTop += direction * 8; updateTarget(); }, 50);
+	}
+	function finishStatusDrag(event: PointerEvent, cancel = false) {
+		stopStatusDragScroll();
+		if (!draggedStatus) return;
+		if (!cancel) {
+			const current = options[draggedStatus.colId] || [];
+			const from = current.indexOf(draggedStatus?.option);
+			const to = current.indexOf(draggedStatus.target);
+			if (from >= 0 && to >= 0 && from !== to) moveOption(draggedStatus.colId, draggedStatus.option, to - from);
+		}
+		draggedStatus = null;
+		if ((event.currentTarget as HTMLElement).hasPointerCapture(event.pointerId)) (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
 	}
 
 	// Sorting helpers
@@ -634,6 +725,31 @@
 		{ name: 'pink', bg: 'var(--bg-pink)', text: 'var(--color-pink)' },
 		{ name: 'red', bg: 'var(--bg-red)', text: 'var(--color-red)' }
 	];
+
+	const statusColors = [
+		{ name: 'Gray', bg: '#596574' }, { name: 'Blue', bg: '#245db5' },
+		{ name: 'Green', bg: '#237347' }, { name: 'Orange', bg: '#a84b0b' },
+		{ name: 'Purple', bg: '#7542a5' }, { name: 'Red', bg: '#b12f3c' },
+		{ name: 'Teal', bg: '#087276' }, { name: 'Pink', bg: '#a42f70' },
+		{ name: 'Brown', bg: '#80513c' }
+	];
+
+	function getStatusColor(col: any, option: string) {
+		const assigned = statusColors.find((color) => color.name === col.statusColors?.[option]);
+		const index = (options[col.id] || []).indexOf(option);
+		return assigned || statusColors[Math.max(0, index) % statusColors.length];
+	}
+
+	function currentStatusColors(col: any): Record<string, string> {
+		return Object.fromEntries((options[col.id] || []).map((option: string) => [option, getStatusColor(col, option).name]));
+	}
+
+	function setStatusColor(colId: string, option: string, color: string) {
+		if (!editable || !statusColors.some((item) => item.name === color)) return;
+		updateAttributes({ columns: columns.map((column: any) => column.id === colId
+			? { ...column, statusColors: { ...column.statusColors, [option]: color } }
+			: column) });
+	}
 
 	function getTagColor(option: string) {
 		let hash = 0;
@@ -824,7 +940,7 @@
 			</div>
 		{/if}
 
-		<div class="db-table-wrapper" class:has-open-popover={activeSelectDropdown !== null || activeColumnMenu !== null}>
+		<div class="db-table-wrapper" class:has-open-popover={activeSelectDropdown !== null || activeColumnMenu !== null} onscroll={() => { activeColumnMenu = null; }}>
 		<table class="db-table" class:has-summary={showSummary} bind:this={tableElement}>
 			<thead>
 				<tr>
@@ -852,7 +968,7 @@
 								</button>
 
 								{#if editable}
-									<button class="th-menu-trigger" onclick={(e) => { e.stopPropagation(); activeColumnMenu = activeColumnMenu === col.id ? null : col.id; activeSelectDropdown = null; }}>
+									<button class="th-menu-trigger" aria-label={`Settings for ${col.name}`} aria-expanded={activeColumnMenu === col.id} onclick={(e) => toggleColumnMenu(e, col.id)}>
 										<Settings size={12} />
 									</button>
 								{/if}
@@ -862,8 +978,8 @@
 							{#if activeColumnMenu === col.id}
 								<!-- svelte-ignore a11y_click_events_have_key_events -->
 								<!-- svelte-ignore a11y_no_static_element_interactions -->
-								<div class="th-menu-popover" class:open-left={colIdx >= columns.length - 1} onclick={(e) => e.stopPropagation()}>
-									<div class="popover-section">
+								<div class="th-menu-popover" class:choosing-type={showColumnTypes} style:left={`${columnMenuPosition.left}px`} style:top={`${columnMenuPosition.top}px`} style:max-height={`calc(100vh - ${columnMenuPosition.top + 8}px)`} onclick={(e) => { e.stopPropagation(); if (!(e.target as Element).closest('.column-type-control')) showColumnTypes = false; }}>
+									<div class="column-settings-fields"><div class="popover-section">
 										<label for="col-name-input-{col.id}">Column Name</label>
 										<input 
 											id="col-name-input-{col.id}"
@@ -875,24 +991,21 @@
 										/>
 									</div>
 
-									<div class="popover-section">
-										<label for="col-type-select-{col.id}">Column Type</label>
-										<div class="select-wrapper">
-											<select 
-												id="col-type-select-{col.id}"
-												value={col.type} 
-												onchange={(e) => updateColumnType(col.id, e.currentTarget.value)}
-												onkeydown={(e) => e.stopPropagation()}
-											>
-												<option value="text">Text</option>
-												<option value="number">Number</option>
-												<option value="date">Date</option>
-												<option value="status">Status (Single-Select)</option>
-												<option value="multi-select">Multi-Select</option>
-											</select>
-											<span class="select-chevron"><ChevronDown size={12} /></span>
-									</div>
-									</div>
+									<div class="column-type-control">
+										<button type="button" class="column-type-trigger" aria-label="Column type" aria-expanded={showColumnTypes} title="Change column type" onclick={() => showColumnTypes = !showColumnTypes} onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Escape') showColumnTypes = false; }}>
+											{#if col.type === 'text'}<Type size={15} />{/if}
+											{#if col.type === 'number'}<Hash size={15} />{/if}
+											{#if col.type === 'date'}<Calendar size={15} />{/if}
+											{#if col.type === 'status' || col.type === 'multi-select'}<CheckSquare size={15} />{/if}
+										</button>
+										{#if showColumnTypes}
+											<div class="column-type-menu" role="group" aria-label="Choose column type">
+												{#each [{ value: 'text', label: 'Text' }, { value: 'number', label: 'Number' }, { value: 'date', label: 'Date' }, { value: 'status', label: 'Status' }, { value: 'multi-select', label: 'Multi-select' }] as type}
+													<button type="button" class:current={col.type === type.value} aria-pressed={col.type === type.value} onclick={() => { showColumnTypes = false; if (col.type !== type.value) updateColumnType(col.id, type.value); }} onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Escape') { const trigger = e.currentTarget.closest('.column-type-control')?.querySelector<HTMLButtonElement>('.column-type-trigger'); showColumnTypes = false; trigger?.focus(); } }}>{type.label}{#if col.type === type.value}<span aria-hidden="true">✓</span>{/if}</button>
+												{/each}
+											</div>
+										{/if}
+									</div></div>
 
 									{#if col.type === 'status'}
 										<div class="popover-section status-options-section">
@@ -900,27 +1013,22 @@
 											{#if (options[col.id] || []).length > 0}
 												<div class="status-option-editor-list">
 													{#each options[col.id] || [] as option, optIdx (option)}
-														<div class="status-option-editor-row">
-															<div class="option-reorder-btns">
-																<button
-																	type="button"
-																	class="option-move-btn"
-																	disabled={optIdx === 0}
-																	onclick={(e) => { e.stopPropagation(); moveOption(col.id, option, -1); }}
-																	title="Move up"
-																>
-																	<ChevronUp size={11} />
-																</button>
-																<button
-																	type="button"
-																	class="option-move-btn"
-																	disabled={optIdx === (options[col.id] || []).length - 1}
-																	onclick={(e) => { e.stopPropagation(); moveOption(col.id, option, 1); }}
-																	title="Move down"
-																>
-																	<ChevronDown size={11} />
-																</button>
-															</div>
+																			<div class="status-option-editor-row" data-status-column={col.id} data-status-option={option} class:drop-before={draggedStatus?.target === option && optIdx < (options[col.id] || []).indexOf(draggedStatus?.option)} class:drop-after={draggedStatus?.target === option && optIdx > (options[col.id] || []).indexOf(draggedStatus?.option)} class:dragging={draggedStatus?.option === option}>
+																				<button type="button" class="status-drag-handle" aria-label={`Reorder ${option}; use arrow keys or drag`} title="Drag to reorder; use arrow keys on keyboard"
+																					onpointerdown={(e) => startStatusDrag(e, col.id, option)} onmousedown={(e) => e.preventDefault()} onpointermove={updateStatusDrag} onpointerup={finishStatusDrag} onpointercancel={(e) => finishStatusDrag(e, true)}
+																					onkeydown={(e) => { e.stopPropagation(); if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); moveOption(col.id, option, e.key === 'ArrowUp' ? -1 : 1); } }}>
+																					<GripVertical size={15} />
+																				</button>
+															<select
+																class="status-color-select"
+																aria-label={`Color for status ${option}`}
+																value={getStatusColor(col, option).name}
+																style:background-color={getStatusColor(col, option).bg}
+																onchange={(e) => setStatusColor(col.id, option, e.currentTarget.value)}
+																onkeydown={(e) => e.stopPropagation()}
+															>
+																{#each statusColors as color}<option value={color.name}>{color.name}</option>{/each}
+															</select>
 															<input
 																type="text"
 																value={option}
@@ -975,7 +1083,6 @@
 											title={colIdx === 0 ? 'Already first' : 'Move column left'}
 										>
 											<ArrowLeft size={13} />
-											<span>Move left</span>
 										</button>
 										<button
 											type="button"
@@ -985,10 +1092,7 @@
 											title={colIdx === columns.length - 1 ? 'Already last' : 'Move column right'}
 										>
 											<ArrowRight size={13} />
-											<span>Move right</span>
 										</button>
-									</div>
-
 									<button
 										type="button"
 										class="column-delete-btn"
@@ -997,8 +1101,8 @@
 										title={columns.length <= 1 ? 'A table must have at least one column' : 'Delete column'}
 									>
 										<Trash2 size={13} />
-										<span>Delete column</span>
 									</button>
+									</div>
 
 								</div>
 							{/if}
@@ -1068,8 +1172,8 @@
 										disabled={!editable}
 									>
 										{#if val}
-											{@const style = getTagColor(val)}
-											<span class="tag-pill" style="background-color: {style.bg}; color: {style.text}; border-color: {style.text};">
+											{@const style = getStatusColor(col, val)}
+											<span class="tag-pill" style="background-color: {style.bg}; color: white; border-color: {style.bg};">
 												{val}
 											</span>
 										{:else}
@@ -1116,7 +1220,7 @@
 										<div class="options-list">
 											{#each options[col.id] || [] as option, optIdx (option)}
 												{@const isSel = isOptionSelected(row, col.id, option, isMulti)}
-												{@const style = getTagColor(option)}
+												{@const style = isMulti ? getTagColor(option) : { ...getStatusColor(col, option), text: 'white' }}
 												<div 
 													class="option-item" 
 													onclick={() => toggleOptionSelection(row, col.id, option, isMulti)}
@@ -1927,31 +2031,52 @@
 
 	/* Popover menus */
 	.th-menu-popover {
-		position: absolute;
-		top: calc(100% + 4px);
-		left: 8px;
+		position: fixed;
 		z-index: 1000;
 		background-color: var(--bg-canvas);
 		border: 1px solid var(--border-color);
 		border-radius: 8px;
 		box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.15);
 		padding: 12px;
-		width: 200px;
+		width: min(235px, calc(100vw - 16px));
+		max-height: calc(100vh - 16px);
+		overflow-y: auto;
+		box-sizing: border-box;
+		text-align: left;
 		display: flex;
 		flex-direction: column;
 		gap: 10px;
 	}
-
-	.db-th.last-col .th-menu-popover {
-		left: auto;
-		right: 8px;
-	}
+	.th-menu-popover.choosing-type { min-height: min(240px, calc(100vh - 16px)); }
 
 	.popover-section {
 		display: flex;
 		flex-direction: column;
 		gap: 4px;
 	}
+	.column-settings-fields { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: end; gap: 8px; }
+	.column-settings-fields .popover-section { min-width: 0; }
+	.column-settings-fields input { width: 100%; min-width: 0; box-sizing: border-box; }
+	.column-type-control {
+		position: relative;
+	}
+	.column-type-trigger {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 30px;
+		height: 30px;
+		color: var(--text-muted);
+		border: 1px solid var(--border-color);
+		border-radius: 4px;
+		box-sizing: border-box;
+	}
+	.column-type-trigger:hover, .column-type-trigger[aria-expanded='true'] { color: var(--text-main); background: var(--hover-icon); }
+	.column-type-trigger:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+	.column-type-menu { position: absolute; top: calc(100% + 5px); right: 0; z-index: 2; width: 145px; padding: 4px; background: var(--bg-canvas); border: 1px solid var(--border-color); border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25); }
+	.column-type-menu button { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 7px 8px; border-radius: 4px; color: var(--text-main); font-size: 12px; text-align: left; }
+	.column-type-menu button:hover, .column-type-menu button:focus-visible { background: var(--hover-icon); outline: none; }
+	.column-type-menu button.current { color: var(--accent-color); }
 
 	.popover-section label,
 	.popover-section-label {
@@ -1984,17 +2109,38 @@
 	}
 
 	.status-option-editor-row {
+		position: relative;
 		display: flex;
 		align-items: center;
-		gap: 4px;
+		gap: 6px;
+		border-radius: 5px;
 	}
-
-	.option-reorder-btns {
+	.status-option-editor-row:hover, .status-option-editor-row:focus-within { background: var(--hover-icon); }
+	.status-option-editor-row.dragging { opacity: 0.45; }
+	.status-option-editor-row.drop-before::after,
+	.status-option-editor-row.drop-after::after {
+		content: '';
+		position: absolute;
+		left: 0;
+		right: 0;
+		height: 2px;
+		background: var(--accent-color);
+		pointer-events: none;
+	}
+	.status-option-editor-row.drop-before::after { top: -3px; }
+	.status-option-editor-row.drop-after::after { bottom: -3px; }
+	.status-drag-handle {
 		display: inline-flex;
-		flex-direction: column;
-		gap: 1px;
-		flex-shrink: 0;
+		align-items: center;
+		justify-content: center;
+		padding: 5px 2px;
+		color: var(--text-muted);
+		cursor: grab;
+		touch-action: none;
+		border-radius: 4px;
 	}
+	.status-drag-handle:active { cursor: grabbing; }
+	.status-drag-handle:focus-visible { outline: 2px solid var(--accent-color); }
 
 	.option-move-btn {
 		display: inline-flex;
@@ -2021,9 +2167,25 @@
 		cursor: not-allowed;
 	}
 
+	.status-color-select {
+		width: 22px;
+		height: 22px;
+		flex: 0 0 22px;
+		border: 1px solid var(--border-color);
+		border-radius: 5px;
+		color: transparent;
+		cursor: pointer;
+		padding: 0;
+	}
+	.status-color-select option { color: var(--text-main); background: var(--bg-canvas); }
+	.status-color-select:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+
 	.status-option-editor-row input {
 		min-width: 0;
 		flex: 1;
+		border-color: transparent;
+		background: transparent;
+		padding: 5px 3px;
 	}
 
 	.status-option-editor-row .option-delete-btn {
@@ -2060,7 +2222,8 @@
 	.column-move-actions {
 		display: flex;
 		gap: 6px;
-		padding-top: 2px;
+		padding-top: 8px;
+		border-top: 1px solid var(--border-color);
 	}
 
 	.column-move-btn {
@@ -2068,9 +2231,8 @@
 		align-items: center;
 		justify-content: center;
 		gap: 4px;
-		flex: 1;
-		padding: 6px 5px;
-		border: 1px solid var(--border-color);
+		padding: 5px;
+		border: 1px solid transparent;
 		border-radius: 4px;
 		color: var(--text-muted);
 		font-size: 11px;
@@ -2090,12 +2252,10 @@
 	.column-delete-btn {
 		display: inline-flex;
 		align-items: center;
-		justify-content: flex-start;
-		gap: 6px;
-		width: 100%;
-		margin-top: 2px;
-		padding: 8px 0 0;
-		border-top: 1px solid var(--border-color);
+		justify-content: center;
+		margin-left: auto;
+		padding: 5px;
+		border-radius: 4px;
 		color: var(--error-color);
 		font-size: 12px;
 		text-align: left;
