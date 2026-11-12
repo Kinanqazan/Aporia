@@ -23,13 +23,13 @@
 	/* Light Mode (Notion Aesthetic) */
 	--bg-canvas: #ffffff;
 	--bg-sidebar: #ffffff;
-	--sidebar-surface: #f2f3f2;
+	--sidebar-surface: #e6e7e5;
 	--text-main: #37352f;
 	--text-muted: #7c7b77;
 	--border-color: #b3b3b3;
-	--hover-sidebar: #efeee9;
+	--hover-sidebar: #dcddd9;
 	--hover-icon: #efefe8;
-	--active-sidebar: #e8e8e3;
+	--active-sidebar: #d2d3cf;
 	--accent-color: #2383e2;
 	--selection-bg: rgba(35, 131, 226, 0.15);
 	--error-color: #eb5757;
@@ -65,7 +65,7 @@
 	/* Dark Mode (Notion Aesthetic) */
 	--bg-canvas: #151515;
 	--bg-sidebar: #202020;
-	--sidebar-surface: #1b1d1f;
+	--sidebar-surface: #101214;
 	--text-main: #e3e3e3;
 	--text-muted: #8f8f8f;
 	--border-color: #2d2d2d;
