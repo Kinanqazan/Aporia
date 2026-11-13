@@ -50,6 +50,7 @@
 	import { createAutosaveController } from '$lib/editor/autosave-controller.js';
 	import { createSearchHighlightPlugin, searchHighlightKey } from '$lib/editor/search-highlight.js';
 	import { startUploadActivity, type UploadActivity } from '$lib/editor/upload-activity';
+	import { createLinkPasteHandlers } from '$lib/editor/link-paste';
 	import {
 		restorePersistedDetailsOpenState,
 		synchronizeDetailsElement,
@@ -1026,19 +1027,6 @@
 		if (match) openLinkBookmarkPicker(undefined, match);
 	}
 
-	function pastedLinkTitle(clipboard: DataTransfer, url: string) {
-		const html = clipboard.getData('text/html');
-		if (html) {
-			const doc = new DOMParser().parseFromString(html, 'text/html');
-			for (const anchor of Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]'))) {
-				if (normalizeLinkBookmarkUrl(anchor.href) !== url) continue;
-				const title = anchor.textContent?.trim();
-				if (title) return title.slice(0, 160);
-			}
-		}
-		return linkBookmarkHost(url);
-	}
-
 	function imageFileFrom(files: FileList | null | undefined): File | null {
 		if (!files) return null;
 		return Array.from(files).find((file) => file.type.startsWith('image/')) ?? null;
@@ -1571,6 +1559,7 @@
 	});
 
 	function createEditor() {
+		const linkPaste = createLinkPasteHandlers();
 		// BubbleMenu v3 uses Floating UI. Its default absolute positioning is relative
 		// to the editor container and can lag behind a nested scrolling canvas, which
 		// makes the first selection appear away from the selected text.
@@ -1764,7 +1753,8 @@
 					attributes: {
 						class: 'tiptap-content-canvas'
 					},
-					handlePaste: (view, event) => {
+					transformPasted: linkPaste.transformPasted,
+					handlePaste: (view, event, slice) => {
 						if (isLocked) return false;
 						const file = imageFileFrom(event.clipboardData?.files);
 						if (file) {
@@ -1773,18 +1763,7 @@
 							return true;
 						}
 
-						const clipboard = event.clipboardData;
-						const pastedText = clipboard?.getData('text/plain').trim() || '';
-						if (!/^https?:\/\/\S+$/i.test(pastedText)) return false;
-						const url = normalizeLinkBookmarkUrl(pastedText);
-						if (!url) return false;
-						event.preventDefault();
-						const title = pastedLinkTitle(clipboard!, url);
-						const transaction = view.state.tr.replaceSelectionWith(
-							view.state.schema.nodes.linkBookmark.create({ url, title })
-						).scrollIntoView();
-						view.dispatch(transaction);
-						return true;
+						return linkPaste.handlePaste(view, event, slice);
 					},
 					handleDOMEvents: {
 						click: (view, event) => {

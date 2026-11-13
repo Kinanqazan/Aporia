@@ -63,9 +63,9 @@
 
 :root.dark {
 	/* Dark Mode (Notion Aesthetic) */
-	--bg-canvas: #151515;
+	--bg-canvas: #121212;
 	--bg-sidebar: #202020;
-	--sidebar-surface: #101214;
+	--sidebar-surface: #101010;
 	--text-main: #e3e3e3;
 	--text-muted: #8f8f8f;
 	--border-color: #2d2d2d;
@@ -1981,32 +1981,17 @@ textarea {
 	opacity: 0 !important;
 }
 
-.ProseMirror .editor-link-bookmark {
-	display: flex;
-	width: fit-content;
-	max-width: min(100%, 520px);
-	flex-direction: column;
-	gap: 5px;
-	margin: 8px 0;
-	padding: 12px 14px;
-	border: 1px solid var(--border-color);
-	border-radius: 9px;
-	background: var(--bg-sidebar);
-	color: var(--text-main);
-	text-decoration: none;
-	transition: border-color var(--transition-speed), background-color var(--transition-speed);
-}
-
-.ProseMirror .editor-link-bookmark:hover {
-	border-color: var(--accent-color);
-	background: var(--hover-sidebar);
-}
-
-.ProseMirror .editor-link-bookmark-title {
-	font-size: 14px;
-	font-weight: 600;
-	line-height: 1.4;
+.ProseMirror a.editor-link,
+.ProseMirror a.editor-link-bookmark {
+	color: var(--color-blue);
+	text-decoration: underline;
+	text-underline-offset: 2px;
 	overflow-wrap: anywhere;
+	cursor: pointer;
+}
+
+.ProseMirror .editor-link-bookmark {
+	display: block;
 }
 
 .ProseMirror .editor-link-bookmark-invalid {
