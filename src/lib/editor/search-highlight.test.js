@@ -14,9 +14,13 @@ test('a locked-page match is decorated without changing the document or selectio
 	state = state.apply(state.tr.setMeta(searchHighlightKey, { from: 3, to: 11 }));
 	assert.equal(state.doc, doc);
 	assert.ok(state.selection.eq(selection));
-	const decorations = plugin.props.decorations(state).find();
+	const decorationSet = plugin.getState(state);
+	assert.ok(decorationSet);
+	const decorations = decorationSet.find();
 	assert.equal(decorations.length, 1);
 	assert.equal(decorations[0].from, 3);
 	assert.equal(decorations[0].to, 11);
+	// ProseMirror stores inline decoration attributes on an internal field.
+	// @ts-expect-error The field is not exposed in its public types.
 	assert.equal(decorations[0].type.attrs.class, 'search-result-highlight');
 });

@@ -65,7 +65,7 @@
 	/* Dark Mode (Notion Aesthetic) */
 	--bg-canvas: #121212;
 	--bg-sidebar: #202020;
-	--sidebar-surface: #101010;
+	--sidebar-surface: #101214;
 	--text-main: #e3e3e3;
 	--text-muted: #8f8f8f;
 	--border-color: #2d2d2d;
@@ -214,6 +214,12 @@ textarea {
 	flex-shrink: 0;
 	position: relative;
 	font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+@media (min-width: 768px) {
+	:root.dark .app-container:not(.mobile) .sidebar {
+		box-shadow: inset -1px 0 var(--border-color);
+	}
 }
 
 .sidebar-closed .sidebar {
@@ -440,11 +446,6 @@ textarea {
 	position: relative;
 }
 
-:where(.app-container:not(.mobile)) .page-item-row:hover {
-	background-color: var(--hover-sidebar);
-	border-radius: 9px;
-}
-
 .page-item-row.active {
 	font-weight: 500;
 	font-size: 14px;
@@ -587,22 +588,17 @@ textarea {
 	padding: 2px 14px;
 	border-radius: 0;
 	color: var(--text-main);
-	transition: background var(--transition-speed);
 	position: relative;
-}
-
-:where(.app-container:not(.mobile)) .page-item-row:hover {
-	background-color: var(--hover-sidebar);
+	isolation: isolate;
 }
 
 .page-item-row.active {
 	/* Keep the tap area generous while painting a slimmer, edge-to-edge band. */
 	background: transparent;
-	isolation: isolate;
 	font-weight: 500;
 }
 
-.page-item-row.active::before {
+.page-item-row::before {
 	content: '';
 	position: absolute;
 	z-index: -1;
@@ -611,8 +607,17 @@ textarea {
 	right: 8px;
 	bottom: 2px;
 	border-radius: 9px;
-	background: var(--active-sidebar);
+	background: transparent;
 	pointer-events: none;
+	transition: background-color var(--transition-speed);
+}
+
+:where(.app-container:not(.mobile)) .page-item-row:not(.active):not(.sidebar-title):hover::before {
+	background: color-mix(in srgb, var(--sidebar-surface), var(--hover-sidebar) 70%);
+}
+
+.page-item-row.active:not(.sidebar-title)::before {
+	background: color-mix(in srgb, var(--sidebar-surface), var(--active-sidebar) 80%);
 }
 
 .page-item-row.active .page-title {

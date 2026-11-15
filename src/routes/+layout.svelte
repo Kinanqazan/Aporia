@@ -27,7 +27,8 @@
 		LogOut,
 		Maximize2,
 		Archive,
-		Type
+		Type,
+		FileText
 	} from 'lucide-svelte';
 	import type { PageNode } from '$lib/server/pages';
 	import { parseExpandedSidebarState, serializeExpandedSidebarState } from '$lib/sidebar-state.js';
@@ -332,6 +333,7 @@
 	
 	// Track expanded nodes in the page tree sidebar
 	let expandedNodes = $state(initialExpandedNodes());
+	let sidebarFolderPageIds = $derived(new Set<string>(data.sidebarFolderPageIds ?? []));
 	const expandedNodesStorageKey = 'aporia-expanded-sidebar-pages';
 	let expandedNodesSaveQueue = Promise.resolve();
 	let expandedNodesRevision = initialExpandedNodesRevision();
@@ -396,7 +398,8 @@
 
 	function openMobilePageMenu(id: string, row: HTMLElement) {
 		const nav = row.closest('.sidebar-nav');
-		isPageMenuAbove = !!nav && nav.getBoundingClientRect().bottom - row.getBoundingClientRect().bottom < 156;
+		const menuHeight = sidebarFolderPageIds.has(id) ? 240 : 195;
+		isPageMenuAbove = !!nav && nav.getBoundingClientRect().bottom - row.getBoundingClientRect().bottom < menuHeight;
 		openMenuPageId = id;
 	}
 
@@ -1240,12 +1243,12 @@
 							aria-selected={shareTargetPageId === option.page.id}
 							class="share-target-option"
 							class:selected={shareTargetPageId === option.page.id}
-							style={`padding-left:${10 + Math.min(option.depth, 5) * 16}px`}
+							style={`padding-left:${14 + Math.min(option.depth, 5) * 16}px`}
 							disabled={isSavingSharedItem || isUnlockingSharePage}
 							aria-label={`${option.page.title}${option.page.isLocked ? ', locked' : ''}`}
 							onclick={() => { shareTargetPageId = option.page.id; shareTargetError = ''; }}
 						>
-							<PageIcon icon={option.page.icon} color={option.page.iconColor} size={16} />
+							<PageIcon icon={option.page.icon} color={option.page.iconColor} size={20} />
 							<span class="share-target-option-title">{option.page.title}</span>
 							{#if option.page.isLocked}<Lock size={14} aria-hidden="true" />{/if}
 							{#if shareTargetPageId === option.page.id}<span aria-hidden="true">✓</span>{/if}
@@ -1620,6 +1623,7 @@
 			aria-selected={currentPageId === node.id}
 			tabindex="-1"
 			class:active={currentPageId === node.id}
+			class:sidebar-title={sidebarFolderPageIds.has(node.id)}
 			style:--page-highlight-indent="{depth * 4}px"
 			class:dragging={draggedPageId === node.id}
 			class:drop-before={dropTarget?.id === node.id && dropTarget?.placement === 'before'}
@@ -1633,6 +1637,7 @@
 			ondragend={clearDragState}
 		>
 			<!-- Overlapping Emoji / Chevron symbol slot -->
+			{#if !sidebarFolderPageIds.has(node.id) || editingPageId === node.id}
 			<div class="page-symbol-slot" class:has-children={node.children && node.children.length > 0}>
 				{#if node.children && node.children.length > 0}
 					<span class="page-emoji">
@@ -1644,6 +1649,7 @@
 					</span>
 				{/if}
 			</div>
+			{/if}
 
 			{#if editingPageId === node.id}
 				<!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -1675,6 +1681,14 @@
 						use:focusOnMount
 					/>
 				</form>
+			{:else if sidebarFolderPageIds.has(node.id)}
+				<button type="button" class="page-item-link sidebar-folder-toggle"
+					aria-expanded={expandedNodes.has(node.id)}
+					aria-describedby={isMobile ? 'phone-page-options-hint' : undefined}
+					onclick={(event) => toggleNodeExpand(node.id, event)}>
+					<span class="page-title">{node.title}</span>
+					<span class="folder-chevron">{#if expandedNodes.has(node.id)}<ChevronDown size={16} />{:else}<ChevronRight size={16} />{/if}</span>
+				</button>
 			{:else}
 				<!-- Clickable link containing text title -->
 				<a href="/{node.id}" class="page-item-link" aria-describedby={isMobile ? 'phone-page-options-hint' : undefined} onclick={(event) => {
@@ -1703,8 +1717,26 @@
 						event.preventDefault();
 						event.stopPropagation();
 						openMenuPageId = null;
-						event.currentTarget.closest('.page-item-row')?.querySelector<HTMLAnchorElement>('.page-item-link')?.focus();
+						event.currentTarget.closest('.page-item-row')?.querySelector<HTMLElement>('.page-item-link')?.focus();
 					}}>
+						{#if sidebarFolderPageIds.has(node.id)}
+							<a href="/{node.id}" class="dropdown-action-btn" onclick={() => { openMenuPageId = null; if (isMobile) isSidebarOpen = false; isSettingsOpen = false; isTrashOpen = false; }}>
+								<FileText size={isMobile ? 18 : 14} /> <span>Open page</span>
+							</a>
+						{/if}
+						<form method="POST" action="/?/sidebarFolder" use:enhance={() => {
+							return async ({ result, update }) => {
+								if (result.type === 'success') openMenuPageId = null;
+								await update();
+							};
+						}}>
+							<input type="hidden" name="id" value={node.id} />
+							<input type="hidden" name="folder" value={sidebarFolderPageIds.has(node.id) ? '0' : '1'} />
+							<button type="submit" class="dropdown-action-btn">
+								{#if sidebarFolderPageIds.has(node.id)}<FileText size={isMobile ? 18 : 14} />{:else}<Type size={isMobile ? 18 : 14} />{/if}
+								<span>{sidebarFolderPageIds.has(node.id) ? 'Convert to page' : 'Convert to title'}</span>
+							</button>
+						</form>
 						<form method="POST" action="/?/create" use:enhance={sidebarCreateNavigation.enhance}>
 							<input type="hidden" name="parentId" value={node.id} />
 							<input type="hidden" name="title" value="Untitled" />
@@ -1728,7 +1760,7 @@
 				{/if}
 			</div>
 
-			{#if node.children && node.children.length > 0}
+			{#if !sidebarFolderPageIds.has(node.id) && node.children && node.children.length > 0}
 				<button
 					type="button"
 					class="page-row-disclosure"
@@ -1802,12 +1834,13 @@
 	:global(.mobile) .page-actions-gutter {
 		opacity: 1;
 		position: absolute;
-		right: 4px;
-		top: 100%;
+		left: 24px;
+		right: auto;
+		top: calc(100% - 4px);
 	}
 
 	:global(.mobile) .page-actions-gutter.menu-above {
-		top: 0;
+		top: 4px;
 	}
 
 	:global(.mobile) .page-item-row {
@@ -1822,7 +1855,7 @@
 		user-select: none;
 	}
 
-	:global(.mobile) .page-item-row:has(.menu-open) {
+	.page-item-row:has(.menu-open) {
 		z-index: 3;
 	}
 
@@ -1881,6 +1914,27 @@
 		border-radius: 5px;
 	}
 
+	.sidebar-folder-toggle {
+		border: 0;
+		background: transparent;
+		text-align: left;
+		color: var(--text-muted);
+		padding-left: 4px;
+		gap: 2px;
+	}
+	.folder-chevron {
+		width: 16px;
+		display: flex;
+		flex-shrink: 0;
+		justify-content: center;
+		align-items: center;
+		align-self: center;
+		opacity: 0;
+		transition: opacity var(--transition-speed);
+	}
+	.sidebar-folder-toggle:hover .folder-chevron,
+	.sidebar-folder-toggle:focus-visible .folder-chevron { opacity: 1; }
+
 	/* Page Options Dropdown */
 	.page-options-dropdown {
 		position: absolute;
@@ -1895,7 +1949,7 @@
 		gap: 2px;
 		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 		z-index: 50;
-		min-width: 140px;
+		min-width: 170px;
 	}
 	
 	.dropdown-action-btn {
@@ -1908,9 +1962,11 @@
 		background: transparent;
 		color: var(--text-main);
 		font-size: 13px;
+		white-space: nowrap;
 		border-radius: 4px;
 		cursor: pointer;
 		text-align: left;
+		text-decoration: none;
 		transition: background var(--transition-speed), color var(--transition-speed);
 	}
 	
@@ -1924,7 +1980,8 @@
 	}
 
 	:global(.mobile) .page-options-dropdown {
-		right: 0;
+		left: 0;
+		right: auto;
 		min-width: 190px;
 		padding: 6px;
 		gap: 3px;
@@ -2197,8 +2254,8 @@
 	}
 
 	.share-link-dialog {
-		width: min(480px, 100%);
-		max-height: min(720px, 90dvh);
+		width: min(520px, 100%);
+		max-height: min(760px, calc(100dvh - 40px));
 		display: flex;
 		flex-direction: column;
 		color: var(--text-main);
@@ -2237,30 +2294,30 @@
 	}
 
 	.share-target-list {
-		max-height: min(310px, 38dvh);
-		min-height: 70px;
-		overflow: auto;
-		margin-top: 8px;
-		padding: 3px;
-		border: 1px solid var(--border-color);
-		border-radius: 8px;
+		flex: 0 1 auto;
+		max-height: min(440px, 52dvh);
+		min-height: 0;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		margin-top: 4px;
+		padding: 2px;
 	}
 
 	.share-target-option {
 		width: 100%;
-		min-height: 40px;
+		min-height: 52px;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 10px;
-		padding: 8px 10px 8px 10px;
+		gap: 12px;
+		padding: 10px 14px;
 		border: 0;
-		border-radius: 6px;
+		border-radius: 8px;
 		background: transparent;
 		color: var(--text-main);
 		text-align: left;
 		font: inherit;
-		font-size: 13px;
+		font-size: 16px;
 		cursor: pointer;
 	}
 
@@ -2289,18 +2346,19 @@
 
 	.share-link-actions {
 		display: flex;
+		flex-shrink: 0;
 		justify-content: flex-end;
 		gap: 8px;
 		margin-top: 18px;
 	}
 
 	.share-link-actions button {
-		min-height: 38px;
-		padding: 0 13px;
+		min-height: 44px;
+		padding: 0 16px;
 		border: 1px solid var(--border-color);
 		border-radius: 7px;
 		font: inherit;
-		font-size: 13px;
+		font-size: 14px;
 		font-weight: 600;
 		cursor: pointer;
 	}

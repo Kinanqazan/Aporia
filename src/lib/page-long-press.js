@@ -39,7 +39,7 @@ export function pageLongPress(node, options) {
 		contextMenuAfterHold = false;
 		if (!options.enabled || !event.isPrimary || event.button !== 0) return;
 		const target = event.target;
-		if (target instanceof Element && target.closest('button, input, form, .page-options-dropdown')) return;
+		if (target instanceof Element && target.closest('button:not(.sidebar-folder-toggle), input, form, .page-options-dropdown')) return;
 		pointerId = event.pointerId;
 		startX = event.clientX;
 		startY = event.clientY;

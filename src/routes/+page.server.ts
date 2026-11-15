@@ -2,6 +2,7 @@ import { redirect, fail } from '@sveltejs/kit';
 import type { PageServerLoad, Actions } from './$types';
 import { getActivePages, seedDemoWorkspace, createPage, deletePermanently, emptyTrash } from '$lib/server/pages';
 import { updatePageAtVersion } from '$lib/server/pages';
+import { sqlite } from '$lib/server/database';
 import { moveMcpPage, restoreMcpPage, trashMcpPage } from '$lib/server/mcp/page-operations';
 
 function mutationFailure(error: any) {
@@ -24,6 +25,17 @@ export const load: PageServerLoad = async () => {
 };
 
 export const actions: Actions = {
+	sidebarFolder: async ({ request }) => {
+		const data = await request.formData();
+		const id = data.get('id');
+		const folder = data.get('folder');
+		if (typeof id !== 'string' || !id || (folder !== '0' && folder !== '1')) return fail(400, { message: 'Invalid sidebar folder setting.' });
+		if (!sqlite.prepare('SELECT id FROM pages WHERE id = ? AND is_in_trash = 0').get(id)) return fail(404, { message: 'Page not found.' });
+		const key = `aporia-sidebar-folder:${id}`;
+		if (folder === '1') sqlite.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, '1');
+		else sqlite.prepare('DELETE FROM settings WHERE key = ?').run(key);
+		return { success: true };
+	},
 	create: async ({ request }) => {
 		const data = await request.formData();
 		const parentIdStr = data.get('parentId') as string | null;

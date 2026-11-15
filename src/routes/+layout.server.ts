@@ -18,7 +18,13 @@ export const load: LayoutServerLoad = async ({ cookies }) => {
 	const activePageIds = new Set(activePages.map((page) => page.id));
 	
 	const editorTextSizes: Record<string, number> = {};
+	const sidebarFolderPageIds: string[] = [];
 	try {
+		const folders = sqlite.prepare("SELECT key FROM settings WHERE key LIKE 'aporia-sidebar-folder:%' AND value = '1'").all() as Array<{ key: string }>;
+		for (const folder of folders) {
+			const id = folder.key.slice('aporia-sidebar-folder:'.length);
+			if (activePageIds.has(id)) sidebarFolderPageIds.push(id);
+		}
 		const expandedSidebarRow = sqlite
 			.prepare('SELECT value FROM settings WHERE key = ?')
 			.get('aporia-expanded-sidebar-pages') as { value: string } | undefined;
@@ -62,6 +68,7 @@ export const load: LayoutServerLoad = async ({ cookies }) => {
 		expandedSidebarPageIds,
 		expandedSidebarStateUpdatedAt,
 		hasExpandedSidebarState,
-		editorTextSizes
+		editorTextSizes,
+		sidebarFolderPageIds
 	};
 };
