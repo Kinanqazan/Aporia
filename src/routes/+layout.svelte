@@ -1234,7 +1234,6 @@
 					/>
 				{/if}
 
-				<p class="share-link-label">Choose a destination page</p>
 				<div class="share-target-list" role="listbox" aria-label="Aporia pages">
 					{#each sharePageOptions as option (option.page.id)}
 						<button
@@ -2261,8 +2260,13 @@
 		color: var(--text-main);
 	}
 
+	.share-link-dialog .notion-import-modal-header > div {
+		min-width: 0;
+		width: 100%;
+	}
+
 	.share-link-url {
-		max-width: 360px;
+		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -2299,9 +2303,12 @@
 		min-height: 0;
 		overflow-y: auto;
 		overscroll-behavior: contain;
-		margin-top: 4px;
+		margin-top: 16px;
 		padding: 2px;
+		scrollbar-width: none;
 	}
+
+	.share-target-list::-webkit-scrollbar { display: none; }
 
 	.share-target-option {
 		width: 100%;

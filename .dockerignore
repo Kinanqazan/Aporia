@@ -5,6 +5,8 @@ build
 coverage
 data
 tmp
+android
+scratch
 
 .git
 .github
