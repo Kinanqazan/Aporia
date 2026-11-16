@@ -1702,7 +1702,7 @@
 					aria-expanded={expandedNodes.has(node.id)}
 					aria-describedby={isMobile ? 'phone-page-options-hint' : undefined}
 					onclick={(event) => toggleNodeExpand(node.id, event)}>
-					<span class="page-title" style:color={data.sidebarTitleColors?.[node.id] ? `color-mix(in srgb, ${data.sidebarTitleColors[node.id]} 65%, var(--text-muted))` : undefined}>{node.title}</span>
+					<span class="page-title">{node.title}</span>
 					<span class="folder-chevron">{#if expandedNodes.has(node.id)}<ChevronDown size={16} />{:else}<ChevronRight size={16} />{/if}</span>
 				</button>
 			{:else}
@@ -1915,7 +1915,7 @@
 	.page-item-row.drop-after::after {
 		content: '';
 		position: absolute;
-		left: 4px;
+		left: 6px;
 		right: 4px;
 		height: 2px;
 		background: var(--accent-color);
@@ -1963,7 +1963,7 @@
 		background: transparent;
 		text-align: left;
 		color: var(--text-muted);
-		padding-left: 28px;
+		padding-left: 24px;
 		gap: 2px;
 	}
 	.sidebar-folder-toggle .page-title {
@@ -1976,12 +1976,11 @@
 		left: 4px;
 		width: 8px;
 		height: 8px;
-		box-sizing: border-box;
-		border: 1.5px solid var(--title-dot-color, var(--text-muted));
+		background: var(--title-dot-color, var(--text-muted));
 		border-radius: 50%;
 		pointer-events: none;
 	}
-	:global(.mobile) .sidebar-folder-toggle { padding-left: 29px; }
+	:global(.mobile) .sidebar-folder-toggle { padding-left: 25px; }
 	.folder-chevron {
 		width: 16px;
 		display: flex;
