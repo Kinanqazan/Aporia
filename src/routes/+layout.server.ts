@@ -21,7 +21,13 @@ export const load: LayoutServerLoad = async ({ cookies }) => {
 	const editorTextSizes: Record<string, number> = {};
 	const sidebarFolderPageIds: string[] = [];
 	const sidebarTitleColors: Record<string, string> = {};
+	let defaultPageId = '';
+	let startupMode: 'default' | 'last' = 'default';
 	try {
+		const startupSetting = sqlite.prepare('SELECT value FROM settings WHERE key = ?').get('aporia-startup-mode') as { value: string } | undefined;
+		if (startupSetting?.value === 'last') startupMode = 'last';
+		const defaultPage = sqlite.prepare('SELECT value FROM settings WHERE key = ?').get('aporia-default-page') as { value: string } | undefined;
+		if (defaultPage && activePageIds.has(defaultPage.value)) defaultPageId = defaultPage.value;
 		const colors = sqlite.prepare("SELECT key, value FROM settings WHERE key LIKE 'aporia-sidebar-title-color:%'").all() as Array<{ key: string; value: string }>;
 		for (const setting of colors) {
 			const id = setting.key.slice('aporia-sidebar-title-color:'.length);
@@ -78,6 +84,8 @@ export const load: LayoutServerLoad = async ({ cookies }) => {
 		hasExpandedSidebarState,
 		editorTextSizes,
 		sidebarFolderPageIds,
-		sidebarTitleColors
+		sidebarTitleColors,
+		defaultPageId,
+		startupMode
 	};
 };

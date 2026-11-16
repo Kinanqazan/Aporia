@@ -11,14 +11,19 @@ function mutationFailure(error: any) {
 	return fail(status, { message: error?.message || 'Page operation failed.' });
 }
 
-export const load: PageServerLoad = async () => {
+export const load: PageServerLoad = async ({ cookies }) => {
 	let active = await getActivePages();
 	if (active.length === 0) {
 		active = await seedDemoWorkspace();
 	}
 	if (active.length > 0) {
-		// Automatically redirect to the first active document (Getting Started)
-		throw redirect(307, `/${active[0].id}`);
+		const setting = sqlite.prepare('SELECT value FROM settings WHERE key = ?').get('aporia-default-page') as { value: string } | undefined;
+		const mode = sqlite.prepare('SELECT value FROM settings WHERE key = ?').get('aporia-startup-mode') as { value: string } | undefined;
+		const lastPageId = mode?.value === 'last' ? cookies.get('aporia-last-opened-page') : undefined;
+		const page = active.find((candidate) => candidate.id === lastPageId)
+			?? active.find((candidate) => candidate.id === setting?.value)
+			?? active[0];
+		throw redirect(307, `/${page.id}`);
 	}
 	return {
 		isEmptyWorkspace: true
@@ -26,6 +31,25 @@ export const load: PageServerLoad = async () => {
 };
 
 export const actions: Actions = {
+	startupPage: async ({ request }) => {
+		const value = (await request.formData()).get('startupPage');
+		if (typeof value !== 'string' || (value !== 'first' && value !== 'last' && !value.startsWith('page:'))) {
+			return fail(400, { message: 'Invalid startup page.' });
+		}
+		const pageId = value.startsWith('page:') ? value.slice(5) : '';
+		if (value.startsWith('page:') && (!pageId || !sqlite.prepare('SELECT id FROM pages WHERE id = ? AND is_in_trash = 0').get(pageId))) {
+			return fail(404, { message: 'That page is no longer available.' });
+		}
+		sqlite.transaction(() => {
+			if (value === 'last') sqlite.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('aporia-startup-mode', 'last');
+			else {
+				sqlite.prepare('DELETE FROM settings WHERE key = ?').run('aporia-startup-mode');
+				if (pageId) sqlite.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('aporia-default-page', pageId);
+				else sqlite.prepare('DELETE FROM settings WHERE key = ?').run('aporia-default-page');
+			}
+		})();
+		return { success: true };
+	},
 	sidebarTitleColor: async ({ request }) => {
 		const data = await request.formData();
 		const id = data.get('id');

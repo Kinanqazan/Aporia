@@ -57,6 +57,17 @@
 	let isNativeAndroidApp = $state(false);
 	let isTrashOpen = $state(false);
 	let isSettingsOpen = $state(false);
+	function savedStartupPage() {
+		return data.startupMode === 'last' ? 'last' : data.defaultPageId ? `page:${data.defaultPageId}` : 'first';
+	}
+	let startupPageSelection = $state(savedStartupPage());
+	let isSavingStartupPage = $state(false);
+	let startupPageError = $state('');
+	let isStartupPageMenuOpen = $state(false);
+	let startupPageMenuEl = $state<HTMLDetailsElement | null>(null);
+	$effect(() => {
+		if (!isSavingStartupPage) startupPageSelection = savedStartupPage();
+	});
 	let isEditorTextSizeOpen = $state(false);
 	let isCleanupInProgress = $state(false);
 	let pendingTrashAction = $state<'empty' | 'uploads' | null>(null);
@@ -428,6 +439,11 @@
 	// Active page tracking from route params
 	let currentPageId = $derived($page.params.id || null);
 	let currentPage = $derived(data.activePages?.find((page) => page.id === currentPageId));
+	$effect(() => {
+		if (currentPageId && currentPage) {
+			document.cookie = `aporia-last-opened-page=${encodeURIComponent(currentPageId)}; path=/; max-age=31536000; SameSite=Lax`;
+		}
+	});
 	let isCurrentPageFullWidth = $state(false);
 	let canvasEl = $state<HTMLDivElement | null>(null);
 	let isFullWidthRequestInFlight = $state(false);
@@ -575,6 +591,9 @@
 			}
 			if (isEditorTextSizeOpen && editorTextSizeMenuEl && !editorTextSizeMenuEl.contains(e.target as Node)) {
 				isEditorTextSizeOpen = false;
+			}
+			if (isStartupPageMenuOpen && startupPageMenuEl && !startupPageMenuEl.contains(e.target as Node)) {
+				isStartupPageMenuOpen = false;
 			}
 			if (openMenuPageId) {
 				openMenuPageId = null;
@@ -1501,6 +1520,44 @@
 					</button>
 				</div>
 
+				<div class="settings-section">
+					<span class="settings-section-title">Startup</span>
+					<form method="POST" action="/?/startupPage" class="default-page-setting" use:enhance={() => {
+						isSavingStartupPage = true;
+						isStartupPageMenuOpen = false;
+						startupPageError = '';
+						return async ({ result, update }) => {
+							await update();
+							if (result.type !== 'success') startupPageError = 'Could not save the startup page. Please try again.';
+							isSavingStartupPage = false;
+						};
+					}}>
+						<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+						<details class="startup-page-select" bind:this={startupPageMenuEl} bind:open={isStartupPageMenuOpen} onkeydown={(event) => {
+							if (event.key === 'Escape' && isStartupPageMenuOpen) {
+								event.preventDefault();
+								isStartupPageMenuOpen = false;
+								event.currentTarget.querySelector('summary')?.focus();
+							}
+						}}>
+							<summary aria-label="Startup page" aria-disabled={isSavingStartupPage} onclick={(event) => { if (isSavingStartupPage) event.preventDefault(); }}>
+								<span>{startupPageSelection === 'first' ? 'First page' : startupPageSelection === 'last' ? 'Last opened page' : sharePageOptions.find((option) => `page:${option.page.id}` === startupPageSelection)?.page.title ?? 'First page'}</span>
+								<ChevronDown size={16} aria-hidden="true" />
+							</summary>
+							<div class="startup-page-options" aria-label="Startup page options">
+								<button type="submit" name="startupPage" value="first" aria-label="First page" aria-pressed={startupPageSelection === 'first'} disabled={isSavingStartupPage}>First page</button>
+								<button type="submit" name="startupPage" value="last" aria-label="Last opened page" aria-pressed={startupPageSelection === 'last'} disabled={isSavingStartupPage}>Last opened page</button>
+								<hr />
+								{#each sharePageOptions as option (option.page.id)}
+									<button type="submit" name="startupPage" value={`page:${option.page.id}`} aria-label={option.page.title} aria-pressed={startupPageSelection === `page:${option.page.id}`}
+										style:padding-left={`${10 + Math.min(option.depth, 5) * 12}px`} disabled={isSavingStartupPage}>{option.page.title}</button>
+								{/each}
+							</div>
+						</details>
+						{#if startupPageError}<span class="default-page-error" role="alert">{startupPageError}</span>{/if}
+					</form>
+				</div>
+
 				{#if isNativeAndroidApp}
 					<div class="settings-section">
 						<span class="settings-section-title">App</span>
@@ -2157,6 +2214,47 @@
 	}
 
 	.settings-appearance { padding-top: 0; }
+
+	.default-page-setting { padding: 4px 9px; }
+	.startup-page-select { position: relative; width: min(100%, 220px); }
+	.startup-page-select summary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		padding: 9px 10px;
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+		background: var(--bg-canvas);
+		color: var(--text-main);
+		font-size: 14px;
+		cursor: pointer;
+		list-style: none;
+	}
+	.startup-page-select summary::-webkit-details-marker { display: none; }
+	.startup-page-select summary:focus-visible, .startup-page-options button:focus-visible { outline: 2px solid var(--text-muted); outline-offset: -2px; }
+	.startup-page-select summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.startup-page-select summary :global(svg) { flex-shrink: 0; color: var(--text-muted); }
+	.startup-page-options {
+		position: absolute;
+		z-index: 50;
+		top: calc(100% + 4px);
+		left: 0;
+		right: 0;
+		max-height: min(320px, 50vh);
+		overflow-y: auto;
+		scrollbar-width: none;
+		padding: 4px;
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+		background: var(--bg-canvas);
+		box-shadow: 0 6px 18px rgb(0 0 0 / 15%);
+	}
+	.startup-page-options::-webkit-scrollbar { display: none; }
+	.startup-page-options button { display: block; width: 100%; padding: 8px 10px; border-radius: 5px; color: var(--text-main); font-size: 14px; text-align: left; }
+	.startup-page-options button:hover, .startup-page-options button[aria-pressed='true'] { background: var(--hover-sidebar); }
+	.startup-page-options hr { border: 0; border-top: 1px solid var(--border-color); margin: 8px 4px; }
+	.default-page-error { color: var(--error-color); font-size: 13px; }
 
 	.settings-section-title {
 		display: block;
