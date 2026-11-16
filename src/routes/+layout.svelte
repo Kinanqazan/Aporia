@@ -28,13 +28,17 @@
 		Maximize2,
 		Archive,
 		Type,
-		FileText
+		FileText,
+		BookOpen,
+		Palette,
+		ArrowLeft
 	} from 'lucide-svelte';
 	import type { PageNode } from '$lib/server/pages';
 	import { parseExpandedSidebarState, serializeExpandedSidebarState } from '$lib/sidebar-state.js';
 	import { sidebarGesture } from '$lib/sidebar-gesture.js';
 	import { createSearchController } from '$lib/search-controller.js';
 	import { pageLongPress } from '$lib/page-long-press.js';
+	import { ICON_COLORS } from '$lib/icon-colors';
 	import { createSidebarCreateNavigation } from '$lib/sidebar-create-navigation.js';
 
 	// SvelteKit Props
@@ -371,7 +375,12 @@
 	let dropTarget = $state<{ id: string; placement: 'before' | 'inside' | 'after' } | null>(null);
 	// Dropdown menu state
 	let openMenuPageId = $state<string | null>(null);
+	let colorPickerPageId = $state<string | null>(null);
+	$effect(() => {
+		if (colorPickerPageId !== openMenuPageId) colorPickerPageId = null;
+	});
 	let isPageMenuAbove = $state(false);
+	let pageMenuMaxHeight = $state(0);
 	let pendingPageDelete = $state<{ id: string; title: string; version: string } | null>(null);
 	let pageDeleteCancelButton = $state<HTMLButtonElement | null>(null);
 
@@ -398,8 +407,15 @@
 
 	function openMobilePageMenu(id: string, row: HTMLElement) {
 		const nav = row.closest('.sidebar-nav');
-		const menuHeight = sidebarFolderPageIds.has(id) ? 240 : 195;
-		isPageMenuAbove = !!nav && nav.getBoundingClientRect().bottom - row.getBoundingClientRect().bottom < menuHeight;
+		const menuHeight = sidebarFolderPageIds.has(id) ? 280 : 195;
+		if (nav) {
+			const navRect = nav.getBoundingClientRect();
+			const rowRect = row.getBoundingClientRect();
+			const above = rowRect.top - navRect.top;
+			const below = navRect.bottom - rowRect.bottom;
+			isPageMenuAbove = below < menuHeight && above > below;
+			pageMenuMaxHeight = Math.max(0, (isPageMenuAbove ? above : below) + 4);
+		}
 		openMenuPageId = id;
 	}
 
@@ -1682,10 +1698,11 @@
 				</form>
 			{:else if sidebarFolderPageIds.has(node.id)}
 				<button type="button" class="page-item-link sidebar-folder-toggle"
+					style:--title-dot-color={data.sidebarTitleColors?.[node.id] ? `color-mix(in srgb, ${data.sidebarTitleColors[node.id]} 65%, var(--text-muted))` : undefined}
 					aria-expanded={expandedNodes.has(node.id)}
 					aria-describedby={isMobile ? 'phone-page-options-hint' : undefined}
 					onclick={(event) => toggleNodeExpand(node.id, event)}>
-					<span class="page-title">{node.title}</span>
+					<span class="page-title" style:color={data.sidebarTitleColors?.[node.id] ? `color-mix(in srgb, ${data.sidebarTitleColors[node.id]} 65%, var(--text-muted))` : undefined}>{node.title}</span>
 					<span class="folder-chevron">{#if expandedNodes.has(node.id)}<ChevronDown size={16} />{:else}<ChevronRight size={16} />{/if}</span>
 				</button>
 			{:else}
@@ -1711,18 +1728,44 @@
 				{#if openMenuPageId === node.id}
 					<!-- svelte-ignore a11y_click_events_have_key_events -->
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<div class="page-options-dropdown" onclick={(e) => e.stopPropagation()} onkeydown={(event) => {
+					<div class="page-options-dropdown" style:max-height={isMobile ? `${pageMenuMaxHeight}px` : undefined} onclick={(e) => e.stopPropagation()} onkeydown={(event) => {
 						if (event.key !== 'Escape') return;
 						event.preventDefault();
 						event.stopPropagation();
+						if (colorPickerPageId === node.id) { colorPickerPageId = null; return; }
 						openMenuPageId = null;
 						event.currentTarget.closest('.page-item-row')?.querySelector<HTMLElement>('.page-item-link')?.focus();
 					}}>
-						{#if sidebarFolderPageIds.has(node.id)}
-							<a href="/{node.id}" class="dropdown-action-btn" onclick={() => { openMenuPageId = null; if (isMobile) isSidebarOpen = false; isSettingsOpen = false; isTrashOpen = false; }}>
-								<FileText size={isMobile ? 18 : 14} /> <span>Open page</span>
-							</a>
-						{/if}
+						{#if colorPickerPageId === node.id}
+							<button type="button" class="dropdown-action-btn" onclick={() => { colorPickerPageId = null; }}>
+								<ArrowLeft size={isMobile ? 18 : 14} /> <span>Title color</span>
+							</button>
+							<form method="POST" action="/?/sidebarTitleColor" class="title-color-picker" use:enhance={() => {
+								return async ({ result, update }) => {
+									if (result.type === 'success') openMenuPageId = null;
+									await update();
+								};
+							}}>
+								<input type="hidden" name="id" value={node.id} />
+								<div class="title-color-options" role="group" aria-label="Title color">
+									{#each ICON_COLORS as color}
+										<button type="submit" name="color" value={color.value ?? 'default'}
+											class="title-color-option" title={color.label} aria-label={color.label}
+											aria-pressed={(data.sidebarTitleColors?.[node.id] ?? null) === color.value}>
+												<span style:background={color.value ? `color-mix(in srgb, ${color.value} 65%, var(--text-muted))` : 'var(--text-muted)'}></span>
+										</button>
+									{/each}
+								</div>
+							</form>
+						{:else}
+							{#if sidebarFolderPageIds.has(node.id)}
+								<a href="/{node.id}" class="dropdown-action-btn" onclick={() => { openMenuPageId = null; if (isMobile) isSidebarOpen = false; isSettingsOpen = false; isTrashOpen = false; }}>
+									<BookOpen size={isMobile ? 18 : 14} /> <span>Open page</span>
+								</a>
+								<button type="button" class="dropdown-action-btn" aria-expanded="false" onclick={() => { colorPickerPageId = node.id; }}>
+									<Palette size={isMobile ? 18 : 14} /> <span>Title color</span>
+								</button>
+							{/if}
 						<form method="POST" action="/?/sidebarFolder" use:enhance={() => {
 							return async ({ result, update }) => {
 								if (result.type === 'success') openMenuPageId = null;
@@ -1755,6 +1798,7 @@
 						>
 							<Trash size={isMobile ? 18 : 14} /> <span>Delete</span>
 						</button>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -1914,13 +1958,30 @@
 	}
 
 	.sidebar-folder-toggle {
+		position: relative;
 		border: 0;
 		background: transparent;
 		text-align: left;
 		color: var(--text-muted);
-		padding-left: 4px;
+		padding-left: 28px;
 		gap: 2px;
 	}
+	.sidebar-folder-toggle .page-title {
+		font-size: 0.9em;
+		font-weight: 500;
+	}
+	.sidebar-folder-toggle::before {
+		content: '';
+		position: absolute;
+		left: 4px;
+		width: 8px;
+		height: 8px;
+		box-sizing: border-box;
+		border: 1.5px solid var(--title-dot-color, var(--text-muted));
+		border-radius: 50%;
+		pointer-events: none;
+	}
+	:global(.mobile) .sidebar-folder-toggle { padding-left: 29px; }
 	.folder-chevron {
 		width: 16px;
 		display: flex;
@@ -1935,6 +1996,14 @@
 	.sidebar-folder-toggle:focus-visible .folder-chevron { opacity: 1; }
 
 	/* Page Options Dropdown */
+	.title-color-picker { padding: 4px 8px; }
+	.title-color-options { display: grid; grid-template-columns: repeat(5, 28px); gap: 2px; }
+	.title-color-option { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 5px; }
+	.title-color-option:hover, .title-color-option:focus-visible, .title-color-option[aria-pressed='true'] { background: var(--hover-sidebar); }
+	.title-color-option span { width: 16px; height: 16px; border-radius: 50%; }
+	:global(.mobile) .title-color-options { grid-template-columns: repeat(5, 32px); }
+	:global(.mobile) .title-color-option { width: 32px; height: 32px; }
+
 	.page-options-dropdown {
 		position: absolute;
 		right: 28px;
@@ -1981,6 +2050,7 @@
 	:global(.mobile) .page-options-dropdown {
 		left: 0;
 		right: auto;
+		overflow-y: auto;
 		min-width: 190px;
 		padding: 6px;
 		gap: 3px;

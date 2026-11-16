@@ -3,6 +3,7 @@ import type { PageServerLoad, Actions } from './$types';
 import { getActivePages, seedDemoWorkspace, createPage, deletePermanently, emptyTrash } from '$lib/server/pages';
 import { updatePageAtVersion } from '$lib/server/pages';
 import { sqlite } from '$lib/server/database';
+import { normalizeIconColor } from '$lib/icon-colors';
 import { moveMcpPage, restoreMcpPage, trashMcpPage } from '$lib/server/mcp/page-operations';
 
 function mutationFailure(error: any) {
@@ -25,6 +26,22 @@ export const load: PageServerLoad = async () => {
 };
 
 export const actions: Actions = {
+	sidebarTitleColor: async ({ request }) => {
+		const data = await request.formData();
+		const id = data.get('id');
+		const value = data.get('color');
+		if (typeof id !== 'string' || !id || typeof value !== 'string' || (value !== 'default' && !normalizeIconColor(value))) {
+			return fail(400, { message: 'Invalid title color.' });
+		}
+		if (!sqlite.prepare('SELECT id FROM pages WHERE id = ? AND is_in_trash = 0').get(id) ||
+			!sqlite.prepare("SELECT key FROM settings WHERE key = ? AND value = '1'").get(`aporia-sidebar-folder:${id}`)) {
+			return fail(404, { message: 'Title not found.' });
+		}
+		const key = `aporia-sidebar-title-color:${id}`;
+		if (value === 'default') sqlite.prepare('DELETE FROM settings WHERE key = ?').run(key);
+		else sqlite.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, normalizeIconColor(value));
+		return { success: true };
+	},
 	sidebarFolder: async ({ request }) => {
 		const data = await request.formData();
 		const id = data.get('id');

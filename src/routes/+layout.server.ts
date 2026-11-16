@@ -4,6 +4,7 @@ import { sqlite } from '$lib/server/database';
 import { parseExpandedSidebarState } from '$lib/sidebar-state.js';
 import { pageVersion } from '$lib/server/mcp/versions';
 import { getUsername, hasValidSession, SESSION_COOKIE_NAME } from '$lib/server/auth';
+import { normalizeIconColor } from '$lib/icon-colors';
 
 export const load: LayoutServerLoad = async ({ cookies }) => {
 	const activePages = await getActivePages();
@@ -19,7 +20,14 @@ export const load: LayoutServerLoad = async ({ cookies }) => {
 	
 	const editorTextSizes: Record<string, number> = {};
 	const sidebarFolderPageIds: string[] = [];
+	const sidebarTitleColors: Record<string, string> = {};
 	try {
+		const colors = sqlite.prepare("SELECT key, value FROM settings WHERE key LIKE 'aporia-sidebar-title-color:%'").all() as Array<{ key: string; value: string }>;
+		for (const setting of colors) {
+			const id = setting.key.slice('aporia-sidebar-title-color:'.length);
+			const color = normalizeIconColor(setting.value);
+			if (activePageIds.has(id) && color) sidebarTitleColors[id] = color;
+		}
 		const folders = sqlite.prepare("SELECT key FROM settings WHERE key LIKE 'aporia-sidebar-folder:%' AND value = '1'").all() as Array<{ key: string }>;
 		for (const folder of folders) {
 			const id = folder.key.slice('aporia-sidebar-folder:'.length);
@@ -69,6 +77,7 @@ export const load: LayoutServerLoad = async ({ cookies }) => {
 		expandedSidebarStateUpdatedAt,
 		hasExpandedSidebarState,
 		editorTextSizes,
-		sidebarFolderPageIds
+		sidebarFolderPageIds,
+		sidebarTitleColors
 	};
 };
