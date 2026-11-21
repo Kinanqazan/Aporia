@@ -23,13 +23,13 @@
 	/* Light Mode (Notion Aesthetic) */
 	--bg-canvas: #ffffff;
 	--bg-sidebar: #ffffff;
-	--sidebar-surface: #e6e7e5;
+	--sidebar-surface: #faf9f5;
 	--text-main: #37352f;
 	--text-muted: #7c7b77;
 	--border-color: #b3b3b3;
-	--hover-sidebar: #dcddd9;
+	--hover-sidebar: #eeebe3;
 	--hover-icon: #efefe8;
-	--active-sidebar: #d2d3cf;
+	--active-sidebar: #e5e1d7;
 	--accent-color: #2383e2;
 	--selection-bg: rgba(35, 131, 226, 0.15);
 	--error-color: #eb5757;
@@ -217,6 +217,10 @@ textarea {
 }
 
 @media (min-width: 768px) {
+	.app-container:not(.mobile) .sidebar {
+		box-shadow: inset -1px 0 color-mix(in srgb, var(--border-color) 35%, var(--sidebar-surface));
+	}
+
 	:root.dark .app-container:not(.mobile) .sidebar {
 		box-shadow: inset -1px 0 var(--border-color);
 	}
