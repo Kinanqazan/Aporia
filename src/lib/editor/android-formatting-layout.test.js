@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { positionAndroidFormattingPopover } from './android-formatting-layout.ts';
+import { getVisibleSelectionAnchor, positionAndroidFormattingPopover } from './android-formatting-layout.ts';
+
+test('a long selection anchors to the last visible line rather than the whole page', () => {
+	const anchor = getVisibleSelectionAnchor([
+		{ left: 20, top: 10, right: 250, bottom: 30 },
+		{ left: 20, top: 440, right: 220, bottom: 460 },
+		{ left: 20, top: 700, right: 220, bottom: 720 }
+	], { left: 0, top: 0, width: 360, height: 600 });
+	assert.deepEqual(anchor, { left: 20, top: 440, right: 220, bottom: 460 });
+});
 
 test('popover stays below a selected line when that avoids covering content above it', () => {
 	const position = positionAndroidFormattingPopover(

@@ -54,6 +54,7 @@
 	import { createAutosaveController } from '$lib/editor/autosave-controller.js';
 	import { createSearchHighlightPlugin, searchHighlightKey } from '$lib/editor/search-highlight.js';
 	import { blockMenuHighlightKey, createBlockMenuHighlight } from '$lib/editor/block-menu-highlight';
+	import { findActiveBlock } from '$lib/editor/active-block';
 	import { startUploadActivity, type UploadActivity } from '$lib/editor/upload-activity';
 	import { createLinkPasteHandlers } from '$lib/editor/link-paste';
 	import {
@@ -1310,6 +1311,7 @@
 
 	// Floating block gutter states
 	let activeBlockNode = $state<HTMLElement | null>(null);
+	let activeBlockPosition: { pos: number; type: string } | null = null;
 	let isGutterVisible = $state(false);
 	let gutterTop = $state(0);
 	let gutterLeft = $state(0);
@@ -1436,6 +1438,7 @@
 			gutterHideTimeout = null;
 			isGutterVisible = false;
 			activeBlockNode = null;
+			activeBlockPosition = null;
 		}, 180);
 	}
 	
@@ -1854,6 +1857,10 @@
 			},
 			onSelectionUpdate: handleEditorSelectionUpdate,
 			onTransaction: ({ transaction }) => {
+				if (activeBlockPosition && transaction.docChanged) {
+					const mapped = transaction.mapping.mapResult(activeBlockPosition.pos, 1);
+					activeBlockPosition = mapped.deleted ? null : { ...activeBlockPosition, pos: mapped.pos };
+				}
 				androidFormattingSelectionTracker.map(transaction);
 				syncNativeFormattingSelection();
 			},
@@ -2261,6 +2268,10 @@
 
 		if (block && block instanceof HTMLElement) {
 			cancelGutterHide();
+			if (activeBlockNode !== block) {
+				const found = findActiveBlock(editor.state.doc, editor.view, block);
+				activeBlockPosition = found ? { pos: found.pos, type: found.node.type.name } : null;
+			}
 			activeBlockNode = block;
 			const headerAnchor = block.matches('[data-type="details"]')
 				? block.querySelector<HTMLElement>('summary')
@@ -2559,36 +2570,7 @@
 
 	function getActiveBlock(): { pos: number; node: NonNullable<ReturnType<Editor['state']['doc']['nodeAt']>> } | null {
 		if (!editor || !activeBlockNode) return null;
-		let exactMatch: { pos: number; node: NonNullable<ReturnType<Editor['state']['doc']['nodeAt']>> } | null = null;
-		editor.state.doc.descendants((node, pos) => {
-			if (!exactMatch && editor?.view.nodeDOM(pos) === activeBlockNode) {
-				exactMatch = { pos, node };
-				return false;
-			}
-			return true;
-		});
-		if (exactMatch) return exactMatch;
-
-		const domPosition = editor.view.posAtDOM(activeBlockNode, 0);
-		const candidatePositions = new Set<number>([domPosition, domPosition - 1]);
-		const resolvedPosition = editor.state.doc.resolve(domPosition);
-
-		// `posAtDOM` points inside node views such as Details. Add every enclosing
-		// node boundary, then match it back to the exact DOM element that the user
-		// hovered. This is safe for top-level blocks, columns, and toggle children.
-		for (let depth = resolvedPosition.depth; depth > 0; depth -= 1) {
-			candidatePositions.add(resolvedPosition.before(depth));
-		}
-
-		for (const pos of candidatePositions) {
-			if (pos < 0) continue;
-			const node = editor.state.doc.nodeAt(pos);
-			if (node && editor.view.nodeDOM(pos) === activeBlockNode) {
-				return { pos, node };
-			}
-		}
-
-		return null;
+		return findActiveBlock(editor.state.doc, editor.view, activeBlockNode, activeBlockPosition);
 	}
 
 	function selectActiveBlockContent(type: BlockActionType): boolean {

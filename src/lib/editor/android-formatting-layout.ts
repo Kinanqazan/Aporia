@@ -2,6 +2,12 @@ type Bounds = { left: number; top: number; right: number; bottom: number };
 type Size = { width: number; height: number };
 type Viewport = { left: number; top: number; width: number; height: number };
 
+export function getVisibleSelectionAnchor(rects: Bounds[], viewport: Viewport): Bounds | null {
+	const visible = rects.filter((rect) => rect.bottom > viewport.top && rect.top < viewport.top + viewport.height);
+	if (!visible.length) return null;
+	return visible[visible.length - 1];
+}
+
 function clamp(value: number, minimum: number, maximum: number) {
 	return Math.max(minimum, Math.min(value, maximum));
 }

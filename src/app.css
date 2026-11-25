@@ -1887,6 +1887,15 @@ textarea {
 	margin: 10px 0;
 }
 
+/* Bring lists inside toggles closer to the toggle arrow. */
+.ProseMirror [data-type='detailsContent'] > .task-list-wrapper {
+	margin-left: -16px;
+}
+
+.mobile .ProseMirror [data-type='detailsContent'] > .task-list-wrapper {
+	margin-left: -6px;
+}
+
 .task-list-header {
 	order: 1;
 	zoom: var(--editor-font-scale, 1);

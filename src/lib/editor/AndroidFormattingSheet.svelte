@@ -3,7 +3,7 @@
 	import type { Editor } from '@tiptap/core';
 	import type { Mark } from '@tiptap/pm/model';
 	import { ArrowLeft, Bold, Bookmark, Code, Feather, Italic, Link, Palette, Quote, Strikethrough, X } from 'lucide-svelte';
-	import { positionAndroidFormattingPopover } from './android-formatting-layout';
+	import { getVisibleSelectionAnchor, positionAndroidFormattingPopover } from './android-formatting-layout';
 	import type { createAndroidFormattingSelection } from './android-formatting-selection';
 	import { convertSelectedParagraphs, type SelectionBlockType } from './selection-block-conversion';
 
@@ -21,6 +21,7 @@
 	let linkUrl = $state('');
 	let picker = $state(false);
 	let position = $state({ left: 8, top: 8 });
+	let positioned = $state(false);
 	const selected = $derived.by(() => { revision; return session.getSelection(editor.state); });
 
 	function active(mark: string) {
@@ -48,15 +49,14 @@
 			domRange.setStart(from.node, from.offset);
 			domRange.setEnd(to.node, to.offset);
 			const viewport = window.visualViewport;
-			const visibleTop = viewport?.offsetTop ?? 0;
-			const visibleBottom = visibleTop + (viewport?.height ?? window.innerHeight);
-			const visibleRects = Array.from(domRange.getClientRects()).filter((item) => item.bottom > visibleTop && item.top < visibleBottom);
-			if (visibleRects.length) {
-				const left = Math.min(...visibleRects.map((item) => item.left));
-				const top = Math.min(...visibleRects.map((item) => item.top));
-				const right = Math.max(...visibleRects.map((item) => item.right));
-				const bottom = Math.max(...visibleRects.map((item) => item.bottom));
-				rect = new DOMRect(left, top, right - left, bottom - top);
+			const anchor = getVisibleSelectionAnchor(Array.from(domRange.getClientRects()), {
+				left: viewport?.offsetLeft ?? 0,
+				top: viewport?.offsetTop ?? 0,
+				width: viewport?.width ?? window.innerWidth,
+				height: viewport?.height ?? window.innerHeight
+			});
+			if (anchor) {
+				rect = new DOMRect(anchor.left, anchor.top, anchor.right - anchor.left, anchor.bottom - anchor.top);
 			} else {
 				const candidate = domRange.getBoundingClientRect();
 				if (candidate.width || candidate.height) rect = candidate;
@@ -71,7 +71,10 @@
 				rect = null;
 			}
 		}
-		if (!rect) return;
+		if (!rect) {
+			positioned = true;
+			return;
+		}
 
 		const viewport = window.visualViewport;
 		const viewportLeft = viewport?.offsetLeft ?? 0;
@@ -84,6 +87,7 @@
 			{ width: box.width || Math.min(320, viewportWidth - 16), height: box.height || 128 },
 			{ left: viewportLeft, top: viewportTop, width: viewportWidth, height: viewportHeight }
 		);
+		positioned = true;
 	}
 
 	let positionFrame = 0;
@@ -145,7 +149,7 @@
 	});
 </script>
 
-<dialog bind:this={dialog} class="format-popover" style:left={`${position.left}px`} style:top={`${position.top}px`} aria-label="Format selected text" onclose={onclose}>
+<dialog bind:this={dialog} class="format-popover" style:left={`${position.left}px`} style:top={`${position.top}px`} style:visibility={positioned ? 'visible' : 'hidden'} aria-label="Format selected text">
 	{#if !selected}
 		<p class="removed">The selected text was removed.</p>
 	{:else if picker}

@@ -2,6 +2,7 @@
 /// <reference lib="webworker" />
 
 import { build, files, version } from '$service-worker';
+import { fetchOrNetworkError } from './lib/service-worker-network';
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -39,28 +40,27 @@ self.addEventListener('fetch', (event) => {
 
 	async function respond() {
 		const url = new URL(event.request.url);
-		const cache = await caches.open(CACHE);
-
 		// Cache-first for build assets and files in static folder
 		if (ASSETS.includes(url.pathname)) {
+			const cache = await caches.open(CACHE);
 			const cachedResponse = await cache.match(url.pathname);
 			if (cachedResponse) return cachedResponse;
 			try {
 				const response = await fetch(event.request);
 				if (response.status === 200) {
-					cache.put(url.pathname, response.clone());
+					void cache.put(url.pathname, response.clone()).catch(() => {});
 				}
 				return response;
 			} catch (err) {
 				const cachedResponse = await cache.match(url.pathname);
 				if (cachedResponse) return cachedResponse;
-				throw err;
+				return Response.error();
 			}
 		}
 
 		// Never cache navigation, authentication, or API responses. These are
 		// session-dependent and a cached login page can look like a logout.
-		return fetch(event.request);
+		return fetchOrNetworkError(event.request);
 	}
 
 	event.respondWith(respond());

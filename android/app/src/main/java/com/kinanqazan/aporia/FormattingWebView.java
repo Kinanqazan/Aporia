@@ -17,15 +17,23 @@ final class FormattingWebView extends WebView {
 	private boolean panelOpen;
 	private ActionMode selectionMode;
 	private boolean openingPanel;
-	private final Runnable openSelectionPanel = () -> {
-		ActionMode mode = selectionMode;
-		if (mode == null || !selectionAvailable || panelOpen || openingPanel) return;
-		openingPanel = true;
+	private boolean autoOpenedForMode;
+
+	private void hideSelectionKeyboard() {
 		InputMethodManager input = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
 		if (input != null) input.hideSoftInputFromWindow(getWindowToken(), 0);
+	}
+
+	private final Runnable openSelectionPanel = () -> {
+		ActionMode mode = selectionMode;
+		if (mode == null || !selectionAvailable || panelOpen || openingPanel || autoOpenedForMode) return;
+		openingPanel = true;
+		autoOpenedForMode = true;
+		hideSelectionKeyboard();
 		evaluateJavascript("window.__APORIA_FORMATTING__?.open() === true", result -> {
 			openingPanel = false;
 			if ("true".equals(result) && selectionMode == mode) mode.finish();
+			else if (!"true".equals(result) && selectionMode == mode) autoOpenedForMode = false;
 		});
 	};
 
@@ -75,6 +83,7 @@ final class FormattingWebView extends WebView {
 			public boolean onCreateActionMode(ActionMode mode, Menu menu) {
 				if (!callback.onCreateActionMode(mode, menu)) return false;
 				selectionMode = mode;
+				autoOpenedForMode = false;
 				updateFormatItem(menu);
 				scheduleSelectionPanel();
 				return true;
@@ -125,6 +134,7 @@ final class FormattingWebView extends WebView {
 			post(() -> {
 				if (selectionAvailable == available) return;
 				selectionAvailable = available;
+				if (available) hideSelectionKeyboard();
 				scheduleSelectionPanel();
 				if (selectionMode != null) selectionMode.invalidate();
 			});
