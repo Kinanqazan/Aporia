@@ -12,6 +12,8 @@
 	import { ColumnLayout } from '$lib/editor/extensions/ColumnLayout';
 	import { Column } from '$lib/editor/extensions/Column';
 	import { Poetry } from '$lib/editor/extensions/Poetry';
+	import { unwrapPoetryBlock } from '$lib/editor/poetry-conversion';
+	import { convertBlockWrapper, convertSelectedParagraphs } from '$lib/editor/selection-block-conversion';
 	import { Commands } from '$lib/editor/extensions/Commands';
 	import { createTodoPageGuard, todoPageListCount } from '$lib/editor/todo-page-guard';
 	import { DetailsClipboard } from '$lib/editor/extensions/DetailsClipboard';
@@ -38,7 +40,7 @@
 	import { 
 		CloudLightning, Plus, GripVertical, Trash2, Copy,
 		Heading1, Heading2, Heading3, Type, Quote, Code, 
-		List, ListOrdered, Bold, Italic, Link as LinkIcon, Bookmark, Palette,
+		List, ListOrdered, Bold, Italic, Link as LinkIcon, Bookmark, Palette, Feather,
 		CheckSquare, Minus, Table as TableIcon, ChevronRight, Lock, Unlock,
 		ChevronDown, ChevronsDownUp, ChevronsUpDown, Database, Image as ImageIcon, Paperclip, X, ZoomIn, ZoomOut, RotateCcw, Undo2
 	} from 'lucide-svelte';
@@ -51,6 +53,7 @@
 	import { constrainImageSizeToWidth } from '$lib/editor/image-resize';
 	import { createAutosaveController } from '$lib/editor/autosave-controller.js';
 	import { createSearchHighlightPlugin, searchHighlightKey } from '$lib/editor/search-highlight.js';
+	import { blockMenuHighlightKey, createBlockMenuHighlight } from '$lib/editor/block-menu-highlight';
 	import { startUploadActivity, type UploadActivity } from '$lib/editor/upload-activity';
 	import { createLinkPasteHandlers } from '$lib/editor/link-paste';
 	import {
@@ -689,6 +692,17 @@
 							const decorations: Decoration[] = [];
 
 							state.doc.descendants((node, position) => {
+								if (node.type.name === 'poetry' && containsArabic(node.textContent)) {
+									let verseLine = 0;
+									node.forEach((line, offset) => {
+										const empty = !line.textContent.trim();
+										const className = empty ? 'poetry-stanza-break' :
+											verseLine++ % 2 === 0 ? 'poetry-verse-first' : 'poetry-verse-second';
+										if (empty) verseLine = 0;
+										const from = position + 1 + offset;
+										decorations.push(Decoration.node(from, from + line.nodeSize, { class: className }));
+									});
+								}
 								if (node.isTextblock && containsArabic(node.textContent)) {
 									decorations.push(
 										Decoration.node(position, position + node.nodeSize, {
@@ -1163,7 +1177,7 @@
 		{
 			title: 'Divider',
 			description: 'Visually divide sections with a line.',
-			searchTerms: ['divider', 'hr', 'horizontal', 'line'],
+			searchTerms: ['divider', 'hr', 'horizontal', 'line', 'separator', 'separation'],
 			icon: Minus,
 			action: (editor: Editor, range: any) => {
 				editor.chain().focus().deleteRange(range).setHorizontalRule().run();
@@ -1341,7 +1355,7 @@
 		{ label: 'Poetry', type: 'poetry', searchTerms: ['poetry', 'poem', 'verse'] },
 		{ label: 'Code Block', type: 'codeBlock', searchTerms: ['code block', 'code'] },
 		{ label: 'To-do List', type: 'todoList', searchTerms: ['to-do list', 'todo', 'task list'] },
-		{ label: 'Divider', type: 'divider', searchTerms: ['divider', 'horizontal rule'] },
+		{ label: 'Divider', type: 'divider', searchTerms: ['divider', 'horizontal rule', 'line', 'separator', 'separation'] },
 		{ label: 'Table', type: 'table', searchTerms: ['table'] },
 		{ label: 'Database Table', type: 'database', searchTerms: ['database table', 'database'] }
 	];
@@ -1355,6 +1369,17 @@
 		}
 
 		requestAnimationFrame(() => blockTypeSearchInput?.focus());
+	});
+
+	$effect(() => {
+		const currentEditor = editor;
+		const target = activeBlockNode;
+		const open = isActionMenuOpen;
+		if (!currentEditor || currentEditor.isDestroyed) return;
+		const block = open && target ? getActiveBlock() : null;
+		currentEditor.view.dispatch(currentEditor.state.tr
+			.setMeta(blockMenuHighlightKey, block?.pos ?? null)
+			.setMeta('addToHistory', false));
 	});
 
 	function normalizeBlockTypeSearch(value: string) {
@@ -1595,6 +1620,7 @@
 			editable: !data.pageRecord.isLocked,
 			extensions: [
 				Extension.create({ name: 'searchResultHighlight', addProseMirrorPlugins: () => [createSearchHighlightPlugin()] }),
+				Extension.create({ name: 'blockMenuHighlight', addProseMirrorPlugins: () => [createBlockMenuHighlight()] }),
 				Extension.create({ name: 'todoPageGuard', addProseMirrorPlugins: () => [createTodoPageGuard()] }),
 				StarterKit.configure({
 					link: false,
@@ -1852,7 +1878,7 @@
 	$effect(() => {
 		const shouldBeEditable = !isLocked && !isLockRequestInFlight;
 		if (editor && editor.isEditable !== shouldBeEditable) {
-			editor.setEditable(shouldBeEditable);
+			editor.setEditable(shouldBeEditable, false);
 			if (!shouldBeEditable) {
 				editor.commands.blur();
 				if (typeof window !== 'undefined') {
@@ -2205,7 +2231,9 @@
 		// the direct child under the pointer so its dots can turn it into a quote,
 		// list, or another supported block type.
 		const nestedBlockAtPointer = blocksAtY.find(node => {
-			const rect = node.getBoundingClientRect();
+			const rect = node.matches('[data-type="poetry"]')
+				? node.parentElement!.getBoundingClientRect()
+				: node.getBoundingClientRect();
 			return node.parentElement?.matches('[data-type="detailsContent"]') &&
 				e.clientX >= rect.left && e.clientX <= rect.right;
 		});
@@ -2219,9 +2247,12 @@
 					: node.matches('.task-list-wrapper')
 					? node.querySelector<HTMLElement>('.task-list-header')
 					: node;
+				const left = node.matches('[data-type="poetry"]') && node.parentElement
+					? node.parentElement.getBoundingClientRect().left
+					: (anchor ?? node).getBoundingClientRect().left;
 				return {
 					node,
-					distance: Math.abs(e.clientX - ((anchor ?? node).getBoundingClientRect().left - 28))
+					distance: Math.abs(e.clientX - (left - 28))
 				};
 			})
 			.filter(({ distance }) => distance <= GUTTER_HIT_SLOP)
@@ -2240,7 +2271,10 @@
 			
 			// Position drag handle beside toggle summary or task list panel header
 			gutterTop = handleAnchorRect.top - editorRect.top + (handleAnchorRect.height / 2) - 12;
-			gutterLeft = handleAnchorRect.left - editorRect.left - 28;
+			const handleLeft = block.matches('[data-type="poetry"]') && block.parentElement
+				? block.parentElement.getBoundingClientRect().left
+				: handleAnchorRect.left;
+			gutterLeft = handleLeft - editorRect.left - 28;
 			isGutterVisible = true;
 		} else {
 			scheduleGutterHide();
@@ -2557,10 +2591,13 @@
 		return null;
 	}
 
-	function selectActiveBlockContent(): boolean {
+	function selectActiveBlockContent(type: BlockActionType): boolean {
 		if (!editor) return false;
 		const activeBlock = getActiveBlock();
 		if (!activeBlock) return false;
+		if (activeBlock.node.type.name === 'poetry' && type !== 'poetry') {
+			return unwrapPoetryBlock(editor, activeBlock.pos);
+		}
 
 		// Find the first editable text position inside the exact node selected by
 		// its gutter. This works for nested quotes, lists, and toggle children.
@@ -2578,6 +2615,13 @@
 		editor.commands.focus();
 
 		const activeBlock = getActiveBlock();
+		if (activeBlock && (type === 'poetry' || type === 'blockquote') &&
+			(activeBlock.node.type.name === 'poetry' || activeBlock.node.type.name === 'blockquote')) {
+			convertBlockWrapper(editor, activeBlock.pos, type);
+			isActionMenuOpen = false;
+			isGutterVisible = false;
+			return;
+		}
 
 		if (type === 'toggleHeading' && level) {
 			turnActiveBlockIntoToggleHeading(level as 1 | 2 | 3);
@@ -2620,7 +2664,7 @@
 					})
 					.run();
 			}
-		} else if (!selectActiveBlockContent()) {
+		} else if (!selectActiveBlockContent(type)) {
 			return;
 		} else if (type === 'paragraph') {
 			// "Text paragraph" means removing a quote wrapper, not merely changing
@@ -2639,15 +2683,9 @@
 		} else if (type === 'orderedList') {
 			editor.commands.toggleOrderedList();
 		} else if (type === 'blockquote') {
-			editor.commands.toggleBlockquote();
+			convertSelectedParagraphs(editor, 'blockquote', editor.state.selection);
 		} else if (type === 'poetry') {
-			if (activeBlock?.node.type.name === 'blockquote') {
-				const from = Selection.findFrom(editor.state.doc.resolve(activeBlock.pos), 1, true);
-				const to = Selection.findFrom(editor.state.doc.resolve(activeBlock.pos + activeBlock.node.nodeSize), -1, true);
-				if (from && to) editor.commands.setTextSelection({ from: from.from, to: to.to });
-				editor.commands.lift('blockquote');
-			}
-			editor.commands.wrapIn('poetry');
+			convertSelectedParagraphs(editor, 'poetry', editor.state.selection);
 		} else if (type === 'codeBlock') {
 			editor.commands.toggleCodeBlock();
 		} else if (type === 'todoList') {
@@ -2961,7 +2999,8 @@
 </script>
 
 {#if androidFormattingSession && editor && !isLocked}
-	<AndroidFormattingSheet {editor} session={androidFormattingSession} {colors} {highlights} onclose={closeAndroidFormatting} />
+	<AndroidFormattingSheet {editor} session={androidFormattingSession} {colors} {highlights} onclose={closeAndroidFormatting}
+		onbookmark={() => { closeAndroidFormatting(); openLinkBookmarkPicker(); }} />
 {/if}
 
 <svelte:head>
@@ -3424,75 +3463,42 @@
 
 		<div bind:this={bubbleMenuElement} class="editor-bubble-menu" class:locked={isLocked}>
 			{#if editor}
-				<button 
+				<button
 					type="button"
-					class="bubble-btn" 
-					class:active={editor!.isActive('bold')} 
+					class="bubble-btn"
+					class:active={editor!.isActive('bold')}
 					onmousedown={(e) => e.preventDefault()}
 					onclick={() => editor!.chain().focus().toggleBold().run()}
 					title="Bold"
 				>
 					<Bold size={14} />
 				</button>
-				<button 
+				<button
 					type="button"
-					class="bubble-btn" 
-					class:active={editor!.isActive('italic')} 
+					class="bubble-btn"
+					class:active={editor!.isActive('italic')}
 					onmousedown={(e) => e.preventDefault()}
 					onclick={() => editor!.chain().focus().toggleItalic().run()}
 					title="Italic"
 				>
 					<Italic size={14} />
 				</button>
-				<button 
+				<button
 					type="button"
-					class="bubble-btn" 
-					class:active={editor!.isActive('strike')} 
+					class="bubble-btn"
+					class:active={editor!.isActive('strike')}
 					onmousedown={(e) => e.preventDefault()}
 					onclick={() => editor!.chain().focus().toggleStrike().run()}
 					title="Strikethrough"
 				>
 					<span style="text-decoration: line-through; font-weight: bold; font-size: 11px; line-height: 1;">S</span>
 				</button>
-				<button 
-					type="button"
-					class="bubble-btn" 
-					class:active={editor!.isActive('code')} 
-					onmousedown={(e) => e.preventDefault()}
-					onclick={() => editor!.chain().focus().toggleCode().run()}
-					title="Inline Code"
-				>
-					<Code size={14} />
-				</button>
-				<button 
-					type="button"
-					class="bubble-btn" 
-					class:active={editor.isActive('link')} 
-					onmousedown={(e) => e.preventDefault()}
-					onclick={setLink}
-					title="Link"
-				>
-					<LinkIcon size={14} />
-				</button>
-				<button
-					type="button"
-					class="bubble-btn"
-					onmousedown={(e) => e.preventDefault()}
-					onclick={() => openLinkBookmarkPicker()}
-					title="Insert link bookmark"
-					aria-label="Insert link bookmark"
-				>
-					<Bookmark size={14} />
-				</button>
-
-				<div class="bubble-divider"></div>
-
 				<!-- Color & Highlight Picker -->
 				{#if !isLocked}
 					<div style="position: relative; display: inline-block;">
-						<button 
+						<button
 							type="button"
-							class="bubble-btn bubble-color-btn" 
+							class="bubble-btn bubble-color-btn"
 							onmousedown={(e) => e.preventDefault()}
 							onclick={() => isColorMenuOpen = !isColorMenuOpen}
 							title="Text Color & Highlights"
@@ -3505,9 +3511,9 @@
 							<div class="color-picker-dropdown" onmousedown={(e) => e.preventDefault()}>
 								<div class="color-dropdown-section">Text Color</div>
 								{#each colors as color}
-									<button 
+									<button
 										type="button"
-										class="color-dropdown-item" 
+										class="color-dropdown-item"
 										onmousedown={(e) => e.preventDefault()}
 										onclick={() => {
 											if (color.value === 'var(--text-main)') {
@@ -3524,9 +3530,9 @@
 
 								<div class="color-dropdown-section">Highlight</div>
 								{#each highlights as hl}
-									<button 
+									<button
 										type="button"
-										class="color-dropdown-item" 
+										class="color-dropdown-item"
 										onmousedown={(e) => e.preventDefault()}
 										onclick={() => {
 											if (hl.value === 'transparent') {
@@ -3544,6 +3550,49 @@
 						{/if}
 					</div>
 				{/if}
+				<div class="bubble-divider"></div>
+				<button
+					type="button"
+					class="bubble-btn"
+					class:active={editor!.isActive('code')}
+					onmousedown={(e) => e.preventDefault()}
+					onclick={() => editor!.chain().focus().toggleCode().run()}
+					title="Inline Code"
+				>
+					<Code size={14} />
+				</button>
+				<button
+					type="button"
+					class="bubble-btn"
+					class:active={editor.isActive('link')}
+					onmousedown={(e) => e.preventDefault()}
+					onclick={setLink}
+					title="Link"
+				>
+					<LinkIcon size={14} />
+				</button>
+				<button
+					type="button"
+					class="bubble-btn"
+					onmousedown={(e) => e.preventDefault()}
+					onclick={() => openLinkBookmarkPicker()}
+					title="Insert link bookmark"
+					aria-label="Insert link bookmark"
+				>
+					<Bookmark size={14} />
+				</button>
+				<button type="button" class="bubble-btn" title="Turn selected paragraphs into a quote" aria-label="Turn selected paragraphs into a quote"
+					onmousedown={(e) => e.preventDefault()}
+					onclick={() => { if (editor) convertSelectedParagraphs(editor, 'blockquote', editor.state.selection); }}>
+					<Quote size={14} />
+				</button>
+				<button type="button" class="bubble-btn" title="Turn selected paragraphs into poetry" aria-label="Turn selected paragraphs into poetry"
+					onmousedown={(e) => e.preventDefault()}
+					onclick={() => { if (editor) convertSelectedParagraphs(editor, 'poetry', editor.state.selection); }}>
+					<Feather size={14} />
+				</button>
+
+
 			{/if}
 		</div>
 
@@ -4864,6 +4913,8 @@
 	/* Bubble Menu styling */
 	.editor-bubble-menu {
 		display: flex;
+		flex-wrap: wrap;
+		max-width: calc(100vw - 16px);
 		align-items: center;
 		background-color: var(--bg-sidebar);
 		border: 1px solid var(--border-color);
@@ -4899,6 +4950,7 @@
 		background-color: var(--hover-sidebar);
 		color: var(--text-main);
 	}
+
 
 	.bubble-btn.active {
 		background-color: var(--active-sidebar);

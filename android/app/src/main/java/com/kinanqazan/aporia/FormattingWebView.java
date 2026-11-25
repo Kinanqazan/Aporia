@@ -6,6 +6,7 @@ import android.view.ActionMode;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
@@ -15,6 +16,23 @@ final class FormattingWebView extends WebView {
 	private boolean selectionAvailable;
 	private boolean panelOpen;
 	private ActionMode selectionMode;
+	private boolean openingPanel;
+	private final Runnable openSelectionPanel = () -> {
+		ActionMode mode = selectionMode;
+		if (mode == null || !selectionAvailable || panelOpen || openingPanel) return;
+		openingPanel = true;
+		InputMethodManager input = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+		if (input != null) input.hideSoftInputFromWindow(getWindowToken(), 0);
+		evaluateJavascript("window.__APORIA_FORMATTING__?.open() === true", result -> {
+			openingPanel = false;
+			if ("true".equals(result) && selectionMode == mode) mode.finish();
+		});
+	};
+
+	private void scheduleSelectionPanel() {
+		removeCallbacks(openSelectionPanel);
+		if (selectionAvailable && !panelOpen) postDelayed(openSelectionPanel, 500);
+	}
 
 	FormattingWebView(Context context) {
 		super(context);
@@ -28,6 +46,7 @@ final class FormattingWebView extends WebView {
 	}
 
 	void resetFormattingState() {
+		removeCallbacks(openSelectionPanel);
 		selectionAvailable = false;
 		panelOpen = false;
 		if (selectionMode != null) selectionMode.finish();
@@ -57,6 +76,7 @@ final class FormattingWebView extends WebView {
 				if (!callback.onCreateActionMode(mode, menu)) return false;
 				selectionMode = mode;
 				updateFormatItem(menu);
+				scheduleSelectionPanel();
 				return true;
 			}
 
@@ -83,6 +103,7 @@ final class FormattingWebView extends WebView {
 
 			@Override
 			public void onDestroyActionMode(ActionMode mode) {
+				removeCallbacks(openSelectionPanel);
 				if (selectionMode == mode) selectionMode = null;
 				callback.onDestroyActionMode(mode);
 			}
@@ -104,6 +125,7 @@ final class FormattingWebView extends WebView {
 			post(() -> {
 				if (selectionAvailable == available) return;
 				selectionAvailable = available;
+				scheduleSelectionPanel();
 				if (selectionMode != null) selectionMode.invalidate();
 			});
 		}
@@ -112,6 +134,7 @@ final class FormattingWebView extends WebView {
 		public void setPanelOpen(boolean open) {
 			post(() -> {
 				panelOpen = open;
+				if (open) removeCallbacks(openSelectionPanel);
 				if (selectionMode != null) selectionMode.invalidate();
 			});
 		}

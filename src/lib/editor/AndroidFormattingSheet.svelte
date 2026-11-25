@@ -2,22 +2,24 @@
 	import { onMount } from 'svelte';
 	import type { Editor } from '@tiptap/core';
 	import type { Mark } from '@tiptap/pm/model';
-	import { ALargeSmall, ArrowLeft, Bold, Code, Highlighter, Italic, Link, Strikethrough, X } from 'lucide-svelte';
+	import { ArrowLeft, Bold, Bookmark, Code, Feather, Italic, Link, Palette, Quote, Strikethrough, X } from 'lucide-svelte';
 	import { positionAndroidFormattingPopover } from './android-formatting-layout';
 	import type { createAndroidFormattingSelection } from './android-formatting-selection';
+	import { convertSelectedParagraphs, type SelectionBlockType } from './selection-block-conversion';
 
-	let { editor, session, colors, highlights, onclose } = $props<{
+	let { editor, session, colors, highlights, onclose, onbookmark } = $props<{
 		editor: Editor;
 		session: ReturnType<typeof createAndroidFormattingSelection>;
 		colors: { name: string; value: string }[];
 		highlights: { name: string; value: string }[];
 		onclose: () => void;
+		onbookmark: () => void;
 	}>();
 	let dialog: HTMLDialogElement;
 	let revision = $state(0);
 	let showLink = $state(false);
 	let linkUrl = $state('');
-	let picker = $state<'text' | 'highlight' | null>(null);
+	let picker = $state(false);
 	let position = $state({ left: 8, top: 8 });
 	const selected = $derived.by(() => { revision; return session.getSelection(editor.state); });
 
@@ -93,13 +95,18 @@
 	function applyTextColor(value: string) {
 		if (value === 'var(--text-main)') chain()?.unsetColor().run();
 		else chain()?.setColor(value).run();
-		picker = null;
+		picker = false;
 	}
 
 	function applyHighlight(value: string) {
 		if (value === 'transparent') chain()?.unsetHighlight().run();
 		else chain()?.setHighlight({ color: value }).run();
-		picker = null;
+		picker = false;
+	}
+
+	function convertSelection(type: SelectionBlockType) {
+		const range = session.getSelection(editor.state);
+		if (range && convertSelectedParagraphs(editor, type, range)) onclose();
 	}
 
 	onMount(() => {
@@ -143,24 +150,25 @@
 		<p class="removed">The selected text was removed.</p>
 	{:else if picker}
 		<header>
-			<button type="button" class="back" aria-label="Back to formatting" onclick={() => { picker = null; schedulePosition(); }}><ArrowLeft size={18} /></button>
-			<span>{picker === 'text' ? 'Text color' : 'Highlight'}</span>
+			<button type="button" class="back" aria-label="Back to formatting" onclick={() => { picker = false; schedulePosition(); }}><ArrowLeft size={18} /></button>
+			<span>Text color &amp; highlight</span>
 			<button type="button" class="close" aria-label="Close formatting" onclick={onclose}><X size={18} /></button>
 		</header>
-		<div class="swatches" role="group" aria-label={picker === 'text' ? 'Text color choices' : 'Highlight choices'}>
-			{#if picker === 'text'}
+		<div class="picker-label">Text color</div>
+		<div class="swatches" role="group" aria-label="Text color choices">
 				{#each colors as color}
 					<button type="button" class="swatch" aria-label={color.name + ' text'} title={color.name} onclick={() => applyTextColor(color.value)}>
 						<span style:color={color.value}>A</span>
 					</button>
 				{/each}
-			{:else}
+		</div>
+		<div class="picker-label">Highlight</div>
+		<div class="swatches" role="group" aria-label="Highlight choices">
 				{#each highlights as highlight}
 					<button type="button" class="swatch" aria-label={highlight.name} title={highlight.name} onclick={() => applyHighlight(highlight.value)}>
 						<span class="highlight" style:background-color={highlight.value}>A</span>
 					</button>
 				{/each}
-			{/if}
 		</div>
 	{:else}
 		<header class="main-header">
@@ -171,6 +179,9 @@
 			<button type="button" aria-label="Bold" aria-pressed={active('bold')} disabled={!selected} onclick={() => chain()?.toggleBold().run()}><Bold size={19} /></button>
 			<button type="button" aria-label="Italic" aria-pressed={active('italic')} disabled={!selected} onclick={() => chain()?.toggleItalic().run()}><Italic size={19} /></button>
 			<button type="button" aria-label="Strikethrough" aria-pressed={active('strike')} disabled={!selected} onclick={() => chain()?.toggleStrike().run()}><Strikethrough size={19} /></button>
+			<button type="button" aria-label="Text color and highlight" disabled={!selected} onclick={() => { picker = true; schedulePosition(); }}><Palette size={19} /></button>
+		</div>
+		<div class="format-actions block-actions" role="group" aria-label="Links and blocks">
 			<button type="button" aria-label="Inline code" aria-pressed={active('code')} disabled={!selected} onclick={() => chain()?.toggleCode().run()}><Code size={19} /></button>
 			<button type="button" aria-label="Link" disabled={!selected} onclick={() => {
 				const range = session.getSelection(editor.state);
@@ -178,6 +189,9 @@
 				showLink = !showLink;
 				schedulePosition();
 			}}><Link size={19} /></button>
+			<button type="button" aria-label="Insert link bookmark" disabled={!selected} onclick={onbookmark}><Bookmark size={19} /></button>
+			<button type="button" aria-label="Turn selected paragraphs into a quote" disabled={!selected} onclick={() => convertSelection('blockquote')}><Quote size={19} /></button>
+			<button type="button" aria-label="Turn selected paragraphs into poetry" disabled={!selected} onclick={() => convertSelection('poetry')}><Feather size={19} /></button>
 		</div>
 		{#if showLink}
 			<form class="link-form" onsubmit={(event) => {
@@ -193,10 +207,6 @@
 				<button type="button" disabled={!selected} onclick={() => { chain()?.unsetLink().run(); showLink = false; schedulePosition(); }}>Remove</button>
 			</form>
 		{/if}
-		<div class="palette-actions" aria-label="Color options">
-			<button type="button" disabled={!selected} onclick={() => { picker = 'text'; schedulePosition(); }}><ALargeSmall size={18} /><span>Text color</span></button>
-			<button type="button" disabled={!selected} onclick={() => { picker = 'highlight'; schedulePosition(); }}><Highlighter size={18} /><span>Highlight</span></button>
-		</div>
 	{/if}
 </dialog>
 
@@ -229,9 +239,8 @@
 	button.close, button.back { min-width: 32px; min-height: 30px; width: 32px; height: 30px; }
 	.format-actions { display: flex; gap: 2px; justify-content: space-between; }
 	.format-actions button { flex: 1 1 42px; }
-	.palette-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px; }
-	.palette-actions button { padding: 0 9px; min-width: 0; font-size: 12px; white-space: nowrap; background: color-mix(in srgb, var(--active-sidebar) 52%, transparent); }
-	.palette-actions button:hover { color: var(--accent-color); }
+	.block-actions { border-top: 1px solid var(--border-color); margin-top: 3px; padding-top: 3px; }
+	.picker-label { padding: 5px 4px 2px; font-size: 12px; color: var(--text-muted); }
 	.swatches { display: grid; grid-template-columns: repeat(5, 42px); gap: 2px; }
 	.swatch { width: 42px; height: 42px; min-width: 42px; min-height: 42px; }
 	.swatch span { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 5px; font-size: 18px; font-weight: 700; }

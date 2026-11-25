@@ -1326,6 +1326,13 @@ textarea {
 	padding-bottom: 120px;
 }
 
+.ProseMirror .block-menu-target {
+	background-color: color-mix(in srgb, var(--accent-color) 12%, transparent);
+	outline: 2px solid color-mix(in srgb, var(--accent-color) 38%, transparent);
+	outline-offset: 3px;
+	border-radius: 3px;
+}
+
 /* Base text elements */
 .ProseMirror p {
 	margin-bottom: 0.6em;
@@ -1485,7 +1492,14 @@ textarea {
 	margin-bottom: 0.2em;
 }
 
-/* Quote Blocks */
+/* Divider blocks */
+.ProseMirror hr {
+	border: 0;
+	border-top: 1px solid var(--border-color);
+	margin: 1.5em 0;
+}
+
+/* Poetry blocks */
 .ProseMirror [data-type='poetry'] {
 	margin: 1em 0;
 	font-family: 'Amiri Arabic', var(--font-sans);
@@ -1505,6 +1519,50 @@ textarea {
 
 .ProseMirror [data-type='poetry'] > p.arabic-text-block:nth-child(even) + p.arabic-text-block {
 	margin-top: 0.7em;
+}
+
+/* On desktop, place Arabic verse halves side by side in reading order. */
+.app-container:not(.mobile) .ProseMirror [data-type='poetry']:has(> p.arabic-text-block) {
+	display: grid;
+	grid-template-columns: minmax(0, max-content) minmax(0, max-content);
+	width: max-content;
+	max-width: 100%;
+	margin-left: auto;
+	margin-right: 0;
+	column-gap: 2em;
+	row-gap: 0.7em;
+	direction: rtl;
+	align-items: start;
+}
+
+.app-container:not(.mobile) .ProseMirror [data-type='poetry']:has(> p.arabic-text-block) > p {
+	margin-top: 0;
+	padding: 0;
+	text-indent: 0;
+}
+
+.app-container:not(.mobile) .ProseMirror [data-type='poetry'] > p.poetry-verse-first {
+	grid-column: 1;
+	text-align: right;
+}
+
+.app-container:not(.mobile) .ProseMirror [data-type='poetry'] > p.poetry-verse-second {
+	grid-column: 2;
+	position: relative;
+	text-align: center;
+}
+
+.app-container:not(.mobile) .ProseMirror [data-type='poetry'] > p.poetry-verse-second::before {
+	content: '✳';
+	position: absolute;
+	right: -1em;
+	transform: translateX(50%) scale(0.65);
+	color: var(--text-muted);
+	text-indent: 0;
+}
+
+.app-container:not(.mobile) .ProseMirror [data-type='poetry'] > p.poetry-stanza-break {
+	grid-column: 1 / -1;
 }
 
 .ProseMirror blockquote {
