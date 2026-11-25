@@ -17,6 +17,7 @@ import { ColumnLayout } from '../../editor/extensions/ColumnLayout.ts';
 import { Column } from '../../editor/extensions/Column.ts';
 import { LinkBookmark } from '../../editor/extensions/LinkBookmark.ts';
 import { FileAttachment } from '../../editor/extensions/FileAttachment.ts';
+import { Poetry } from '../../editor/extensions/Poetry.ts';
 
 const ToggleHeading = Details.extend({
 	addAttributes() {
@@ -61,8 +62,8 @@ const ImageBlock = Image.extend({
 const schema = getSchema([
 	StarterKit.configure({ link: false, heading: { levels: [1, 2, 3] } }),
 	ImageBlock.configure({ inline: false, allowBase64: false }), ToggleHeading.configure({ persist: true }), DetailsSummary, DetailsContent,
-	Link, TaskList, OrderedTaskItem.configure({ nested: true }), Table, TableRow, TableHeader, TableCell,
-	TextStyle, Color, Highlight.configure({ multicolor: true }), ColumnLayout, Column, DatabaseBlock, LinkBookmark, FileAttachment
+	Link, TaskList.extend({ addAttributes() { return { ...this.parent?.(), pageControls: { default: false } }; } }), OrderedTaskItem.configure({ nested: true }), Table, TableRow, TableHeader, TableCell,
+	TextStyle, Color, Highlight.configure({ multicolor: true }), ColumnLayout, Column, DatabaseBlock, LinkBookmark, FileAttachment, Poetry
 ]);
 
 const MAX_DOCUMENT_BYTES = 2_000_000;

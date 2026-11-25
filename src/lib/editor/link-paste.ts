@@ -20,6 +20,19 @@ export function createLinkPasteHandlers(): Required<Pick<EditorProps, 'transform
 			return slice;
 		},
 		handlePaste: (view, event, slice) => {
+			const { $from } = view.state.selection;
+			const inPoetry = Array.from({ length: $from.depth + 1 }, (_, depth) => $from.node(depth))
+				.some((node) => node.type.name === 'poetry');
+			const text = event.clipboardData?.getData('text/plain');
+			if (inPoetry && text && /[\r\n]/.test(text)) {
+				const paragraphs = text.split(/\r\n|\r|\n/).map((line) =>
+					view.state.schema.nodes.paragraph.create(null, line ? view.state.schema.text(line) : null)
+				);
+				event.preventDefault();
+				view.dispatch(view.state.tr.replaceSelection(new Slice(Fragment.fromArray(paragraphs), 1, 1))
+					.setMeta('paste', true).setMeta('preventAutolink', true).scrollIntoView());
+				return true;
+			}
 			if (!plainTextSlices.has(slice) || !slice.size) return false;
 			plainTextSlices.delete(slice);
 			event.preventDefault();

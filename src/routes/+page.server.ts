@@ -80,14 +80,16 @@ export const actions: Actions = {
 	create: async ({ request }) => {
 		const data = await request.formData();
 		const parentIdStr = data.get('parentId') as string | null;
-		const title = (data.get('title') as string) || 'Untitled';
+		const isTodoPage = data.get('pageType') === 'todo';
+		const title = (data.get('title') as string) || (isTodoPage ? 'To-do List' : 'Untitled');
 		const icon = data.get('icon') as string | null;
 		const iconColor = data.get('iconColor') as string | null;
 		const parentId = parentIdStr && parentIdStr !== 'null' ? parentIdStr : null;
 
 		let page;
 		try {
-			page = await createPage(parentId, title, icon, iconColor);
+			const content = isTodoPage ? JSON.stringify({ type: 'doc', content: [{ type: 'taskList', attrs: { pageControls: true }, content: [{ type: 'taskItem', attrs: { checked: false }, content: [{ type: 'paragraph' }] }] }] }) : undefined;
+			page = await createPage(parentId, title, icon || (isTodoPage ? 'lucide:check-square' : null), iconColor, content);
 		} catch (err: any) {
 			return fail(500, { message: err.message });
 		}

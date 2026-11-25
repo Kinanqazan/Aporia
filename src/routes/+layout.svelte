@@ -31,7 +31,8 @@
 		FileText,
 		BookOpen,
 		Palette,
-		ArrowLeft
+		ArrowLeft,
+		CheckSquare
 	} from 'lucide-svelte';
 	import type { PageNode } from '$lib/server/pages';
 	import { parseExpandedSidebarState, serializeExpandedSidebarState } from '$lib/sidebar-state.js';
@@ -69,6 +70,8 @@
 		if (!isSavingStartupPage) startupPageSelection = savedStartupPage();
 	});
 	let isEditorTextSizeOpen = $state(false);
+	let isCreatePageMenuOpen = $state(false);
+	let createPageMenuEl = $state<HTMLDivElement | null>(null);
 	let isCleanupInProgress = $state(false);
 	let pendingTrashAction = $state<'empty' | 'uploads' | null>(null);
 	let trashConfirmCancelButton = $state<HTMLButtonElement | null>(null);
@@ -433,7 +436,7 @@
 	const sidebarCreateNavigation = createSidebarCreateNavigation({
 		isMobile: () => isMobile,
 		setSidebarOpen: (open) => { isSidebarOpen = open; },
-		onStart: () => { openMenuPageId = null; }
+		onStart: () => { openMenuPageId = null; isCreatePageMenuOpen = false; }
 	});
 
 	// Active page tracking from route params
@@ -591,6 +594,9 @@
 			}
 			if (isEditorTextSizeOpen && editorTextSizeMenuEl && !editorTextSizeMenuEl.contains(e.target as Node)) {
 				isEditorTextSizeOpen = false;
+			}
+			if (isCreatePageMenuOpen && createPageMenuEl && !createPageMenuEl.contains(e.target as Node)) {
+				isCreatePageMenuOpen = false;
 			}
 			if (isStartupPageMenuOpen && startupPageMenuEl && !startupPageMenuEl.contains(e.target as Node)) {
 				isStartupPageMenuOpen = false;
@@ -1219,13 +1225,23 @@
 						</button>
 					{/if}
 				</div>
-				<form method="POST" action="/?/create" use:enhance={sidebarCreateNavigation.enhance} class="sidebar-create-page-form">
-					<input type="hidden" name="parentId" value="null" />
-					<input type="hidden" name="title" value="Untitled" />
-					<button type="submit" class="footer-icon-btn" title="Create new page" aria-label="Create new page">
+				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+				<div class="sidebar-create-page-menu" role="group" aria-label="Page creation" bind:this={createPageMenuEl} onkeydown={(event) => { if (event.key === 'Escape' && isCreatePageMenuOpen) { isCreatePageMenuOpen = false; (createPageMenuEl?.querySelector('.footer-icon-btn') as HTMLButtonElement | null)?.focus(); } }}>
+					<button type="button" class="footer-icon-btn" title="Create new page" aria-label="Create new page" aria-expanded={isCreatePageMenuOpen} onclick={() => { isCreatePageMenuOpen = !isCreatePageMenuOpen; }}>
 						<Plus size={18} />
 					</button>
-				</form>
+					{#if isCreatePageMenuOpen}
+						<div class="create-page-popover" role="group" aria-label="Create a page">
+							<form method="POST" action="/?/create" use:enhance={sidebarCreateNavigation.enhance}>
+								<button type="submit" class="create-page-option"><FileText size={16} /> <span>Page</span></button>
+							</form>
+							<form method="POST" action="/?/create" use:enhance={sidebarCreateNavigation.enhance}>
+								<input type="hidden" name="pageType" value="todo" />
+								<button type="submit" class="create-page-option"><CheckSquare size={16} /> <span>To-do page</span></button>
+							</form>
+						</div>
+					{/if}
+				</div>
 			</div>
 		</div>
 
@@ -1755,7 +1771,7 @@
 				</form>
 			{:else if sidebarFolderPageIds.has(node.id)}
 				<button type="button" class="page-item-link sidebar-folder-toggle"
-					style:--title-dot-color={data.sidebarTitleColors?.[node.id] ? `color-mix(in srgb, ${data.sidebarTitleColors[node.id]} 65%, var(--text-muted))` : undefined}
+					style:--title-color={data.sidebarTitleColors?.[node.id] ? `color-mix(in srgb, ${data.sidebarTitleColors[node.id]} 65%, var(--text-muted))` : undefined}
 					aria-expanded={expandedNodes.has(node.id)}
 					aria-describedby={isMobile ? 'phone-page-options-hint' : undefined}
 					onclick={(event) => toggleNodeExpand(node.id, event)}>
@@ -2019,25 +2035,15 @@
 		border: 0;
 		background: transparent;
 		text-align: left;
-		color: var(--text-muted);
-		padding-left: 24px;
+		color: var(--title-color, var(--text-muted));
+		padding-left: 2px;
 		gap: 2px;
 	}
-	.sidebar-folder-toggle .page-title {
+	:global(.page-item-row.sidebar-title) .sidebar-folder-toggle .page-title {
+		color: var(--title-color, var(--text-muted));
 		font-size: 0.9em;
 		font-weight: 500;
 	}
-	.sidebar-folder-toggle::before {
-		content: '';
-		position: absolute;
-		left: 4px;
-		width: 8px;
-		height: 8px;
-		background: var(--title-dot-color, var(--text-muted));
-		border-radius: 50%;
-		pointer-events: none;
-	}
-	:global(.mobile) .sidebar-folder-toggle { padding-left: 25px; }
 	.folder-chevron {
 		width: 16px;
 		display: flex;
@@ -2926,6 +2932,11 @@
 		border-radius: 2px;
 	}
 
+	.sidebar-create-page-menu { position: relative; }
+	.create-page-popover { position: absolute; right: 0; bottom: calc(100% + 6px); width: 160px; padding: 6px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-sidebar); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15); z-index: 25; }
+	.create-page-option { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text-main); cursor: pointer; text-align: left; }
+	.create-page-option:hover, .create-page-option:focus-visible { background: var(--bg-gray); }
+
 	.footer-row {
 		display: grid;
 		grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -2982,7 +2993,7 @@
 		background: var(--sidebar-surface);
 		color: var(--text-muted);
 	}
-	.footer-row .sidebar-create-page-form,
+	.footer-row .sidebar-create-page-menu,
 	.footer-row .editor-text-size-menu { width: 100%; min-width: 0; }
 	.footer-row .footer-icon-btn { width: 100%; max-width: 36px; margin-inline: auto; }
 	:global(.mobile) .footer-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }

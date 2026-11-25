@@ -589,6 +589,16 @@ export const EnhancedTaskItem = TaskItem.extend({
  * 2. Single-line header featuring circular progress percentage, compact search, filter tabs, and + Add Item button.
  */
 export const EnhancedTaskList = TaskList.extend({
+	addAttributes() {
+		return {
+			...this.parent?.(),
+			pageControls: {
+				default: false,
+				parseHTML: (element: HTMLElement) => element.getAttribute('data-page-controls') === 'true',
+				renderHTML: (attributes: { pageControls: boolean }) => attributes.pageControls ? { 'data-page-controls': 'true' } : {}
+			}
+		};
+	},
 	addProseMirrorPlugins() {
 		return [
 			...(this.parent?.() || []),
@@ -621,7 +631,7 @@ export const EnhancedTaskList = TaskList.extend({
 					const toReorder: Array<{ pos: number; node: ProseMirrorNode; sorted: ProseMirrorNode[] }> = [];
 
 					tr.doc.descendants((node: ProseMirrorNode, pos: number) => {
-						if (node.type.name === 'taskList' && node.childCount > 1) {
+						if (node.type.name === 'taskList' && node.attrs.pageControls && node.childCount > 1) {
 							const children: ProseMirrorNode[] = [];
 							node.forEach((child: ProseMirrorNode) => children.push(child));
 
@@ -661,6 +671,7 @@ export const EnhancedTaskList = TaskList.extend({
 
 			const header = document.createElement('div');
 			header.className = 'task-list-header';
+			if (!node.attrs.pageControls) header.classList.add('is-hidden');
 			header.contentEditable = 'false';
 
 			// Append header FIRST so it comes at the top of the block
@@ -731,12 +742,32 @@ export const EnhancedTaskList = TaskList.extend({
 			// Single Line Component 1: Compact Search Input
 			const searchWrapper = document.createElement('div');
 			searchWrapper.className = 'task-list-search-wrapper';
-			searchWrapper.innerHTML = `<svg class="task-list-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`;
+			const searchButton = document.createElement('button');
+			searchButton.type = 'button';
+			searchButton.className = 'task-list-search-button';
+			searchButton.setAttribute('aria-label', 'Search tasks');
+			searchButton.setAttribute('aria-expanded', 'false');
+			searchButton.innerHTML = `<svg class="task-list-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`;
 
 			const searchInput = document.createElement('input');
 			searchInput.type = 'text';
 			searchInput.className = 'task-list-search-input';
 			searchInput.placeholder = 'Search...';
+			searchInput.setAttribute('aria-label', 'Search tasks');
+			searchInput.hidden = true;
+			searchButton.addEventListener('click', (e) => {
+				e.stopPropagation();
+				searchWrapper.classList.add('expanded');
+				searchButton.setAttribute('aria-expanded', 'true');
+				searchInput.hidden = false;
+				searchInput.focus();
+			});
+			searchInput.addEventListener('blur', () => {
+				if (searchInput.value) return;
+				searchWrapper.classList.remove('expanded');
+				searchButton.setAttribute('aria-expanded', 'false');
+				searchInput.hidden = true;
+			});
 
 			const stopIsolation = (e: Event) => {
 				e.stopPropagation();
@@ -748,7 +779,7 @@ export const EnhancedTaskList = TaskList.extend({
 			searchInput.addEventListener('keydown', stopIsolation);
 			searchInput.addEventListener('keyup', stopIsolation);
 
-			searchWrapper.appendChild(searchInput);
+			searchWrapper.append(searchButton, searchInput);
 
 			// Cycle through all, incomplete, and completed items with one control.
 			const filterButton = document.createElement('button');
@@ -808,7 +839,7 @@ export const EnhancedTaskList = TaskList.extend({
 
 				// Hide header if nested inside another task list
 				const isNested = dom.parentElement && dom.parentElement.closest('ul[data-type="taskList"]');
-				if (isNested) {
+				if (isNested || !node.attrs.pageControls) {
 					header.classList.add('is-hidden');
 				} else {
 					header.classList.remove('is-hidden');

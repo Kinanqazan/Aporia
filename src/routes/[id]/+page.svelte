@@ -11,7 +11,9 @@
 	import StarterKit from '@tiptap/starter-kit';
 	import { ColumnLayout } from '$lib/editor/extensions/ColumnLayout';
 	import { Column } from '$lib/editor/extensions/Column';
+	import { Poetry } from '$lib/editor/extensions/Poetry';
 	import { Commands } from '$lib/editor/extensions/Commands';
+	import { createTodoPageGuard, todoPageListCount } from '$lib/editor/todo-page-guard';
 	import { DetailsClipboard } from '$lib/editor/extensions/DetailsClipboard';
 	import { PreserveDetailsLevel } from '$lib/editor/extensions/PreserveDetailsLevel';
 	import { DatabaseBlock } from '$lib/editor/extensions/DatabaseBlockExtension.svelte';
@@ -1132,6 +1134,15 @@
 			}
 		},
 		{
+			title: 'Poetry',
+			description: 'Write poetry with preserved lines and stanzas.',
+			searchTerms: ['poetry', 'poem', 'verse'],
+			icon: Type,
+			action: (editor: Editor, range: any) => {
+				editor.chain().focus().deleteRange(range).wrapIn('poetry').run();
+			}
+		},
+		{
 			title: 'Code Block',
 			description: 'Write code snippets.',
 			searchTerms: ['code', 'block', 'pre'],
@@ -1298,6 +1309,7 @@
 		| 'heading'
 		| 'toggleHeading'
 		| 'blockquote'
+		| 'poetry'
 		| 'codeBlock'
 		| 'todoList'
 		| 'bulletList'
@@ -1326,6 +1338,7 @@
 		{ label: 'Bullet List', type: 'bulletList', searchTerms: ['bullet list', 'bullets'] },
 		{ label: 'Numbered List', type: 'orderedList', searchTerms: ['numbered list', 'ordered list', 'numbered', 'ordered'] },
 		{ label: 'Quote Block', type: 'blockquote', searchTerms: ['quote block', 'quote', 'blockquote'] },
+		{ label: 'Poetry', type: 'poetry', searchTerms: ['poetry', 'poem', 'verse'] },
 		{ label: 'Code Block', type: 'codeBlock', searchTerms: ['code block', 'code'] },
 		{ label: 'To-do List', type: 'todoList', searchTerms: ['to-do list', 'todo', 'task list'] },
 		{ label: 'Divider', type: 'divider', searchTerms: ['divider', 'horizontal rule'] },
@@ -1582,6 +1595,7 @@
 			editable: !data.pageRecord.isLocked,
 			extensions: [
 				Extension.create({ name: 'searchResultHighlight', addProseMirrorPlugins: () => [createSearchHighlightPlugin()] }),
+				Extension.create({ name: 'todoPageGuard', addProseMirrorPlugins: () => [createTodoPageGuard()] }),
 				StarterKit.configure({
 					link: false,
 					dropcursor: false,
@@ -1589,6 +1603,7 @@
 						levels: [1, 2, 3]
 					}
 				}),
+				Poetry,
 				ImageBlock.configure({
 					inline: false,
 					allowBase64: false,
@@ -1693,6 +1708,7 @@
 				Commands.configure({
 					suggestion: {
 						char: '/',
+						allow: ({ state }) => todoPageListCount(state.doc) === 0,
 						render: () => {
 							return {
 								onStart: (props) => {
@@ -2609,7 +2625,9 @@
 		} else if (type === 'paragraph') {
 			// "Text paragraph" means removing a quote wrapper, not merely changing
 			// its already-paragraph child into another paragraph.
-			if (editor.isActive('blockquote')) {
+			if (editor.isActive('poetry')) {
+				editor.commands.lift('poetry');
+			} else if (editor.isActive('blockquote')) {
 				editor.commands.toggleBlockquote();
 			} else {
 				editor.commands.setParagraph();
@@ -2622,6 +2640,14 @@
 			editor.commands.toggleOrderedList();
 		} else if (type === 'blockquote') {
 			editor.commands.toggleBlockquote();
+		} else if (type === 'poetry') {
+			if (activeBlock?.node.type.name === 'blockquote') {
+				const from = Selection.findFrom(editor.state.doc.resolve(activeBlock.pos), 1, true);
+				const to = Selection.findFrom(editor.state.doc.resolve(activeBlock.pos + activeBlock.node.nodeSize), -1, true);
+				if (from && to) editor.commands.setTextSelection({ from: from.from, to: to.to });
+				editor.commands.lift('blockquote');
+			}
+			editor.commands.wrapIn('poetry');
 		} else if (type === 'codeBlock') {
 			editor.commands.toggleCodeBlock();
 		} else if (type === 'todoList') {
@@ -3248,6 +3274,10 @@
 						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('blockquote')} hidden={!isBlockTypeSearchMatch('blockquote')} onclick={() => convertActiveBlockTo('blockquote')}>
 							<Quote size={13} class="menu-icon" />
 							<span>Quote Block</span>
+						</button>
+						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('poetry')} hidden={!isBlockTypeSearchMatch('poetry')} onclick={() => convertActiveBlockTo('poetry')}>
+							<Type size={13} class="menu-icon" />
+							<span>Poetry</span>
 						</button>
 						<button class="menu-item-action" class:search-match={isFirstBlockTypeSearchMatch('codeBlock')} hidden={!isBlockTypeSearchMatch('codeBlock')} onclick={() => convertActiveBlockTo('codeBlock')}>
 							<Code size={13} class="menu-icon" />

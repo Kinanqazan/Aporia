@@ -73,7 +73,8 @@ export async function createPage(
 	parentId: string | null = null,
 	title: string = 'Untitled',
 	emoji: string | null = null,
-	iconColor: string | null = null
+	iconColor: string | null = null,
+	contentJson: string = '{"type":"doc","content":[]}'
 ): Promise<PageNode> {
 	const now = new Date().toISOString();
 	
@@ -102,8 +103,8 @@ export async function createPage(
 		iconColor: normalizeIconColor(iconColor),
 		createdAt: now,
 		updatedAt: now,
-		contentJson: '{"type":"doc","content":[]}',
-		contentText: '',
+		contentJson,
+		contentText: extractTextFromJson(contentJson),
 		schemaVersion: 1,
 		revision: 1,
 		isInTrash: 0

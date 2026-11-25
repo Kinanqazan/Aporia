@@ -55,6 +55,9 @@ function convertNode(node: any, indentLevel = 0): string {
 			return convertListItem(node, indentLevel, `- ${checked}`);
 		}
 
+		case 'poetry':
+			return (node.content || []).map((child: any) => convertNode(child, indentLevel)).join('  \n');
+
 		case 'blockquote':
 			if (Array.isArray(node.content)) {
 				const contentMd = node.content.map((child: any) => convertNode(child, indentLevel)).join('\n\n');
@@ -188,6 +191,7 @@ function convertListItem(itemNode: any, indentLevel: number, prefix: string): st
 function convertInline(content: any[] | undefined): string {
 	if (!Array.isArray(content)) return '';
 	return content.map((node: any) => {
+		if (node.type === 'hardBreak') return '  \n';
 		if (node.type !== 'text') return '';
 		let text = node.text || '';
 		
