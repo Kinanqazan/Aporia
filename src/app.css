@@ -1221,6 +1221,7 @@ textarea {
 
 .mobile .canvas-wrapper {
 	padding-top: calc(84px + env(safe-area-inset-top));
+	padding-bottom: calc(64px + env(safe-area-inset-bottom));
 	padding-left: max(24px, env(safe-area-inset-left));
 	padding-right: max(24px, env(safe-area-inset-right));
 }
@@ -1377,10 +1378,11 @@ textarea {
 
 .ProseMirror [data-type='details']>button {
 	position: absolute;
-	top: 6px;
+	top: calc((1.6em - 20px) / 2);
 	left: -2px;
 	width: 20px;
 	height: 20px;
+	font-size: inherit;
 	border: 0;
 	border-radius: 3px;
 	background: transparent;
@@ -1394,17 +1396,15 @@ textarea {
 .ProseMirror [data-type='details']>button::before {
 	content: '';
 	display: block;
-	width: 0;
-	height: 0;
-	border-top: 7px solid transparent;
-	border-bottom: 7px solid transparent;
-	border-left: 9px solid var(--text-muted);
+	width: 12px;
+	height: 16px;
+	background-color: var(--text-muted);
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 16'%3E%3Cpath d='M2 2 L10 8 L2 14 Z' fill='white' stroke='white' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
 .mobile .ProseMirror [data-type='details']>button::before {
-	border-top-width: 8px;
-	border-bottom-width: 8px;
-	border-left-width: 10px;
+	width: 13px;
+	height: 18px;
 }
 
 .ProseMirror [data-type='details'].is-open>button {
@@ -1424,6 +1424,21 @@ textarea {
 	color: var(--text-main);
 	margin: 0;
 	padding-left: 24px;
+}
+
+.ProseMirror [data-type='details']:has(> div > summary.arabic-text-block)>button {
+	left: auto;
+	right: -2px;
+	transform: rotate(180deg);
+}
+
+.ProseMirror [data-type='details'].is-open:has(> div > summary.arabic-text-block)>button {
+	transform: rotate(90deg);
+}
+
+.ProseMirror [data-type='details'] summary.arabic-text-block {
+	padding-left: 0;
+	padding-right: 24px;
 }
 
 .ProseMirror [data-type='details'] summary::-webkit-details-marker {
@@ -1462,7 +1477,7 @@ textarea {
 
 .ProseMirror [data-type='detailsContent'] {
 	margin-left: 24px;
-	padding-top: 0.55em;
+	padding-top: 1em;
 }
 
 /* Keep a small inset on phones and preserve the hierarchy of nested toggles. */
@@ -1474,11 +1489,20 @@ textarea {
 	margin-top: 0;
 }
 
+.ProseMirror [data-type='detailsContent'] > [data-type='poetry']:first-child {
+	margin-top: 0.25em;
+}
+
 /* Keep a quote's rule close to the heading, while its text aligns with the
    other indented toggle content. */
 .ProseMirror [data-type='detailsContent']>blockquote {
 	margin-left: 0;
 	padding-left: 14px;
+}
+
+.ProseMirror [data-type='details']:has(> div > summary.arabic-text-block) > div > [data-type='detailsContent'] > blockquote.arabic-quote {
+	margin-right: 6.5px;
+	padding-left: 0;
 }
 
 /* Lists */
