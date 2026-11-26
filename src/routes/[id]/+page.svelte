@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { onMount, onDestroy, getContext } from 'svelte';
+	import { onMount, onDestroy, getContext, untrack } from 'svelte';
 	import { Editor, Extension, ResizableNodeView, mergeAttributes } from '@tiptap/core';
 	import type { JSONContent, ResizableNodeViewDirection } from '@tiptap/core';
 	import { Selection, Plugin, TextSelection, type Transaction } from '@tiptap/pm/state';
@@ -1383,9 +1383,11 @@
 		const open = isActionMenuOpen;
 		if (!currentEditor || currentEditor.isDestroyed) return;
 		const block = open && target ? getActiveBlock() : null;
-		currentEditor.view.dispatch(currentEditor.state.tr
+		// Transaction listeners read and update their own UI state. Those reads
+		// must not become dependencies of this block-highlight effect.
+		untrack(() => currentEditor.view.dispatch(currentEditor.state.tr
 			.setMeta(blockMenuHighlightKey, block?.pos ?? null)
-			.setMeta('addToHistory', false));
+			.setMeta('addToHistory', false)));
 	});
 
 	function normalizeBlockTypeSearch(value: string) {

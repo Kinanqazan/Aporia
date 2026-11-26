@@ -48,7 +48,7 @@
 	}
 
 	function placePopover() {
-		if (!dialog?.open) return;
+		if (!dialog?.open || !session || !editor || editor.isDestroyed) return;
 		const range = session.getSelection(editor.state);
 		if (!range) {
 			positioned = true;
