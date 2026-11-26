@@ -11,6 +11,13 @@ test('a long selection anchors to the last visible line rather than the whole pa
 	assert.deepEqual(anchor, { left: 20, top: 440, right: 220, bottom: 460 });
 });
 
+test('a backwards selection anchors near its active end', () => {
+	const first = { left: 20, top: 100, right: 200, bottom: 120 };
+	const last = { left: 20, top: 440, right: 220, bottom: 460 };
+	assert.deepEqual(getVisibleSelectionAnchor([first, last],
+		{ left: 0, top: 0, width: 390, height: 640 }, { x: 20, y: 110 }), first);
+});
+
 test('popover stays below a selected line when that avoids covering content above it', () => {
 	const position = positionAndroidFormattingPopover(
 		{ left: 56, top: 400, right: 304, bottom: 440 },

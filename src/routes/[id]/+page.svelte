@@ -218,7 +218,11 @@
 	const androidFormattingSelectionTracker = createAndroidFormattingSelectionTracker();
 	let nativeEditorSelectionActive = false;
 	type FormattingWindow = Window & {
-		AporiaFormatting?: { setSelectionAvailable: (available: boolean) => void; setPanelOpen: (open: boolean) => void };
+		AporiaFormatting?: {
+			setSelectionAvailable: (available: boolean) => void;
+			setPanelOpen: (open: boolean) => void;
+			setPanelVisible?: (visible: boolean) => void;
+		};
 		__APORIA_FORMATTING__?: { open: () => boolean; close: () => void };
 	};
 
@@ -2981,7 +2985,8 @@
 </script>
 
 {#if androidFormattingSession && editor && !isLocked}
-	<AndroidFormattingSheet {editor} session={androidFormattingSession} {colors} {highlights} onclose={closeAndroidFormatting}
+	<AndroidFormattingSheet {editor} session={androidFormattingSession} {colors} {highlights}
+		onvisible={() => (window as FormattingWindow).AporiaFormatting?.setPanelVisible?.(true)} onclose={closeAndroidFormatting}
 		onbookmark={() => { closeAndroidFormatting(); openLinkBookmarkPicker(); }} />
 {/if}
 

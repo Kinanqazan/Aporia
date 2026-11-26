@@ -7,11 +7,12 @@
 	import type { createAndroidFormattingSelection } from './android-formatting-selection';
 	import { convertSelectedParagraphs, type SelectionBlockType } from './selection-block-conversion';
 
-	let { editor, session, colors, highlights, onclose, onbookmark } = $props<{
+	let { editor, session, colors, highlights, onvisible, onclose, onbookmark } = $props<{
 		editor: Editor;
 		session: ReturnType<typeof createAndroidFormattingSelection>;
 		colors: { name: string; value: string }[];
 		highlights: { name: string; value: string }[];
+		onvisible: () => void;
 		onclose: () => void;
 		onbookmark: () => void;
 	}>();
@@ -22,7 +23,17 @@
 	let picker = $state(false);
 	let position = $state({ left: 8, top: 8 });
 	let positioned = $state(false);
+	let visibilityReported = false;
 	const selected = $derived.by(() => { revision; return session.getSelection(editor.state); });
+
+	function reportVisible() {
+		if (visibilityReported || !dialog?.open) return;
+		requestAnimationFrame(() => {
+			if (visibilityReported || !dialog?.open || getComputedStyle(dialog).visibility !== 'visible' || !dialog.getBoundingClientRect().width) return;
+			visibilityReported = true;
+			onvisible();
+		});
+	}
 
 	function active(mark: string) {
 		revision;
@@ -39,7 +50,11 @@
 	function placePopover() {
 		if (!dialog?.open) return;
 		const range = session.getSelection(editor.state);
-		if (!range) return;
+		if (!range) {
+			positioned = true;
+			reportVisible();
+			return;
+		}
 
 		let rect: DOMRect | null = null;
 		try {
@@ -49,12 +64,13 @@
 			domRange.setStart(from.node, from.offset);
 			domRange.setEnd(to.node, to.offset);
 			const viewport = window.visualViewport;
+			const focus = editor.view.coordsAtPos(range.head);
 			const anchor = getVisibleSelectionAnchor(Array.from(domRange.getClientRects()), {
 				left: viewport?.offsetLeft ?? 0,
 				top: viewport?.offsetTop ?? 0,
 				width: viewport?.width ?? window.innerWidth,
 				height: viewport?.height ?? window.innerHeight
-			});
+			}, { x: focus.left, y: (focus.top + focus.bottom) / 2 });
 			if (anchor) {
 				rect = new DOMRect(anchor.left, anchor.top, anchor.right - anchor.left, anchor.bottom - anchor.top);
 			} else {
@@ -73,6 +89,7 @@
 		}
 		if (!rect) {
 			positioned = true;
+			reportVisible();
 			return;
 		}
 
@@ -88,6 +105,7 @@
 			{ left: viewportLeft, top: viewportTop, width: viewportWidth, height: viewportHeight }
 		);
 		positioned = true;
+		reportVisible();
 	}
 
 	let positionFrame = 0;
