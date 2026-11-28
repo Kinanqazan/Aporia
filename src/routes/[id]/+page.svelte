@@ -2407,23 +2407,6 @@
 	// BLOCK MANIPULATION ACTIONS
 	// ==========================================================================
 
-	// Get index of the hovered block in the editor doc (supports nested column blocks)
-	function getActiveBlockIndex(): number {
-		if (!editor || !activeBlockNode) return -1;
-		
-		const nodes = Array.from(editorElement?.querySelector('.ProseMirror')?.children || []);
-		// First check top-level
-		const topIndex = nodes.indexOf(activeBlockNode);
-		if (topIndex !== -1) return topIndex;
-		// If not found top-level, find the parent column-layout
-		const columnEl = activeBlockNode.closest('.column');
-		const layoutEl = columnEl?.closest('.column-layout');
-		if (layoutEl) {
-			return nodes.indexOf(layoutEl);
-		}
-		return -1;
-	}
-
 	function getBlockPathForElement(block: HTMLElement): BlockPath | null {
 		if (!editor) return null;
 		let position: number | null = null;
@@ -2500,40 +2483,10 @@
 
 	function deleteActiveBlock() {
 		if (!editor || !activeBlockNode) return;
-		const index = getActiveBlockIndex();
-		if (index === -1) return;
-
-		// Select the block node in Tiptap transaction and delete it
+		const activeBlock = getActiveBlock();
+		if (!activeBlock) return;
+		editor.commands.deleteRange({ from: activeBlock.pos, to: activeBlock.pos + activeBlock.node.nodeSize });
 		editor.commands.focus();
-		
-		// Calculate position bounds
-		let currentPos = -1;
-		let nodeSize = 0;
-		editor.state.doc.descendants((node, pos) => {
-			if (node.isBlock && node.type.name !== 'doc' && currentPos === -1) {
-					const domNode = editor!.view.nodeDOM(pos);
-				if (domNode === activeBlockNode) {
-					currentPos = pos;
-					nodeSize = node.nodeSize;
-				}
-			}
-			return true;
-		});
-
-		if (currentPos !== -1) {
-			editor.commands.deleteRange({ from: currentPos, to: currentPos + nodeSize });
-		} else {
-			const pos = editor.view.posAtDOM(activeBlockNode, 0);
-			const resolvedPos = editor.state.doc.resolve(pos);
-			const node = resolvedPos.nodeAfter || resolvedPos.nodeBefore;
-			if (node) {
-				editor.commands.deleteRange({ from: pos, to: pos + node.nodeSize });
-			} else {
-				editor.commands.setTextSelection(pos);
-				editor.commands.selectNodeBackward();
-				editor.commands.deleteSelection();
-			}
-		}
 
 		isActionMenuOpen = false;
 		isGutterVisible = false;
