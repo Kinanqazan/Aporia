@@ -2287,7 +2287,11 @@
 				};
 			})
 			.filter(({ distance }) => distance <= GUTTER_HIT_SLOP)
-			.sort((a, b) => a.distance - b.distance)[0]?.node;
+			// A toggle and its Arabic child can share an anchor. Keep the child
+			// active while crossing the gap to its handle.
+			.sort((a, b) => Math.abs(a.distance - b.distance) < 1
+				? Number(b.node === activeBlockNode) - Number(a.node === activeBlockNode)
+				: a.distance - b.distance)[0]?.node;
 		const block = nestedBlockAtPointer ?? blockAtGutter ?? blockAtPointer ?? blocksAtY[0];
 
 		if (block && block instanceof HTMLElement) {
