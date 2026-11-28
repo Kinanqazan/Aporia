@@ -73,6 +73,19 @@ export function createAutosaveController({
 		payload = { ...payload, expectedVersion: versionsByPage.get(payload.pageId) ?? payload.expectedVersion };
 		const pendingForPage = pendingSaves.get(payload.pageId);
 		if (pendingForPage?.contentJson === payload.contentJson) return;
+		// A rapid reversal can return to the state already saved (or currently
+		// being saved). Discard the superseded pending snapshot in that case.
+		const baseline = activePayload?.pageId === payload.pageId
+			? activePayload.contentJson
+			: lastSavedByPage.get(payload.pageId);
+		if (baseline === payload.contentJson) {
+			pendingSaves.delete(payload.pageId);
+			if (pendingSaves.size === 0) {
+				clearDebounce();
+				if (!activePayload && !drainPromise) scheduleIdle();
+			}
+			return;
+		}
 		if (
 			!pendingForPage &&
 			activePayload?.pageId === payload.pageId &&

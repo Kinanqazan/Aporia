@@ -440,7 +440,7 @@ export const EnhancedTaskItem = TaskItem.extend({
 					dom.classList.add('task-item-dragging');
 
 					if (targetLi && targetLi !== dom) {
-						const targetPos = editor.view.posAtDOM(targetLi, 0);
+						const targetPos = editor.view.posAtDOM(targetLi, 0) - 1;
 						if (!taskItemsShareParentList(editor.state.doc, touchStartPos, targetPos)) return;
 						const rect = targetLi.getBoundingClientRect();
 						const isTopHalf = touch.clientY < rect.top + rect.height / 2;
@@ -461,7 +461,7 @@ export const EnhancedTaskItem = TaskItem.extend({
 					touchStartPos = null;
 
 					const touch = endEv.changedTouches[0];
-					if (!touch || sourcePos === null || !editor || !editor.isEditable) {
+					if (endEv.type === 'touchcancel' || !touch || sourcePos === null || !editor || !editor.isEditable) {
 						clearAllTaskDropIndicators();
 						return;
 					}
@@ -475,7 +475,7 @@ export const EnhancedTaskItem = TaskItem.extend({
 					}
 
 					try {
-						const targetPos = editor.view.posAtDOM(targetLi, 0);
+						const targetPos = editor.view.posAtDOM(targetLi, 0) - 1;
 						if (typeof targetPos !== 'number' || targetPos === sourcePos) {
 							clearAllTaskDropIndicators();
 							return;

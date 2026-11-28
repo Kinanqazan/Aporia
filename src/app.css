@@ -1323,8 +1323,8 @@ textarea {
 	line-height: 1.6;
 }
 
-.ProseMirror[contenteditable='true'] {
-	padding-bottom: 120px;
+.ProseMirror {
+	padding-bottom: 180px;
 }
 
 .ProseMirror .block-menu-target {
@@ -1452,7 +1452,7 @@ textarea {
 }
 
 .ProseMirror [data-type='details'][data-heading-level='1']>button {
-	top: calc((2.43em - 20px) / 2 + 3.5px);
+	top: calc((2.43em - 20px) / 2);
 }
 
 .ProseMirror [data-type='details'][data-heading-level='2'] summary {
@@ -1462,7 +1462,7 @@ textarea {
 }
 
 .ProseMirror [data-type='details'][data-heading-level='2']>button {
-	top: calc((1.96em - 20px) / 2 + 2.5px);
+	top: calc((1.96em - 20px) / 2);
 }
 
 .ProseMirror [data-type='details'][data-heading-level='3'] summary {
@@ -1472,7 +1472,7 @@ textarea {
 }
 
 .ProseMirror [data-type='details'][data-heading-level='3']>button {
-	top: calc((1.8em - 20px) / 2 + 2px);
+	top: calc((1.8em - 20px) / 2);
 }
 
 .ProseMirror [data-type='detailsContent'] {
@@ -1498,6 +1498,10 @@ textarea {
 .ProseMirror [data-type='detailsContent']>blockquote {
 	margin-left: 0;
 	padding-left: 14px;
+}
+
+.app-container:not(.mobile) .ProseMirror [data-type='detailsContent'] > blockquote:not(.arabic-quote) {
+	margin-left: -17.5px;
 }
 
 .ProseMirror [data-type='details']:has(> div > summary.arabic-text-block) > div > [data-type='detailsContent'] > blockquote.arabic-quote {
@@ -1776,6 +1780,8 @@ textarea {
 }
 
 .task-item-drag-handle {
+	position: absolute;
+	left: -24px;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -1786,7 +1792,7 @@ textarea {
 	touch-action: none;
 	-webkit-user-drag: element;
 	flex-shrink: 0;
-	width: 18px;
+	width: 24px;
 	height: 18px;
 	margin-top: 0.3em;
 	transition: color 0.15s ease;
@@ -1803,12 +1809,26 @@ textarea {
 
 /* Always show drag handle in phone mode and on touch screens */
 .mobile .task-item-drag-handle {
+	left: auto;
+	right: 0;
+	width: 28px;
 	opacity: 0.65 !important;
+}
+
+.mobile .ProseMirror ul[data-type="taskList"] li {
+	padding-right: 34px;
 }
 
 @media (max-width: 768px) {
 	.task-item-drag-handle {
+		left: auto;
+		right: 0;
+		width: 28px;
 		opacity: 0.65 !important;
+	}
+
+	.ProseMirror ul[data-type="taskList"] li {
+		padding-right: 34px;
 	}
 }
 

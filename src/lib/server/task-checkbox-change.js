@@ -1,8 +1,8 @@
 /**
  * Returns true only when two Tiptap documents differ by task-item checked
- * attributes and/or the resulting task-item order inside task lists.
+ * attributes, toggle open states, and/or the resulting task-item order inside task lists.
  *
- * Locked pages use this guard to permit checkbox interactions without opening
+ * Locked pages use this guard to permit checkbox and toggle interactions without opening
  * the rest of the document to edits. Task lists are allowed to reorder because
  * the editor moves completed items to the bottom after a checkbox changes.
  *
@@ -63,6 +63,20 @@ export function isTaskCheckboxOnlyChange(previous, next) {
 			}
 
 			return leftKeys.every((key) => {
+				if (key === 'attrs' && leftRecord.type === 'details' && rightRecord.type === 'details') {
+					const leftAttrs = leftRecord.attrs;
+					const rightAttrs = rightRecord.attrs;
+					if (!leftAttrs || !rightAttrs || typeof leftAttrs !== 'object' || typeof rightAttrs !== 'object') return false;
+					const keys = new Set([...Object.keys(leftAttrs), ...Object.keys(rightAttrs)]);
+					return [...keys].every((attr) => {
+						if (attr === 'open') {
+							if (typeof rightAttrs.open !== 'boolean') return false;
+							if (Boolean(leftAttrs.open) !== rightAttrs.open) checkboxChanged = true;
+							return true;
+						}
+						return compare(leftAttrs[attr], rightAttrs[attr], options);
+					});
+				}
 				if (key === 'attrs' && leftRecord.type === 'taskItem' && rightRecord.type === 'taskItem') {
 					const leftAttrs = leftRecord.attrs;
 					const rightAttrs = rightRecord.attrs;

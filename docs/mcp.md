@@ -9,7 +9,7 @@ The server exposes eleven tools. Existing-page changes require `expectedVersion`
 | `list_pages` | List active or trashed pages, optionally by parent, with pagination and current versions |
 | `search_pages` | Search active page titles and text |
 | `read_page` | Read complete TipTap content, Markdown, metadata, and lock/layout state |
-| `create_page` | Create a page with optional content, parent, icon, icon color, full-width layout, and lock |
+| `create_page` | Create a page with optional content, parent, icon, icon color, full-width layout, and lock; set `isTodoPage: true` for a dedicated to-do page |
 | `update_page` | Change title, icon, icon color, layout, and/or replace the document; omitted fields stay unchanged |
 | `append_page_content` | Add top-level TipTap blocks while preserving existing content and formatting |
 | `set_page_lock` | Lock or unlock a page explicitly |
@@ -31,6 +31,10 @@ For an authorized edit to a locked page, Hermes should read it, call `set_page_l
 ```
 
 The server validates the combined document and its asset references before saving. Retrying with the old version reports a conflict instead of appending twice. After an uncertain response, read the page and check whether the addition committed before trying again.
+
+Poetry uses `{"type":"poetry","content":[{"type":"paragraph","content":[{"type":"text","text":"A line"}]}]}`; each paragraph is a line. A divider is `{"type":"horizontalRule"}`. Both can be supplied to `create_page`, `update_page`, or `append_page_content` on ordinary pages.
+
+A dedicated to-do page is a document with one top-level `taskList` whose `attrs.pageControls` is `true`. Set `isTodoPage: true` on `create_page` to create one with an empty task, or supply a document containing that list. Use `read_page` and `update_page` to add, edit, reorder, or check its `taskItem` children, retaining the list and its attributes. Dedicated to-do pages do not allow adding other kinds of blocks. Ordinary checklist blocks are independent and do not have the page controls.
 
 Icons accept emoji or names such as `lucide:book-open`; `null` resets the icon to its default appearance. `iconColor` accepts `null` for default or one of `#e86666`, `#f97316`, `#eab308`, `#22c55e`, `#3b82f6`, `#8b5cf6`, `#ec4899`, `#64748b`. Content updates can edit all supported editor blocks, including tasks and database blocks. Uploading new files, importing workspaces, backups, browser preferences, and permanent deletion remain browser operations.
 

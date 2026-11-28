@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateEditorDocument } from './document.ts';
+import { validateEditorDocument, validateTodoPageChange } from './document.ts';
 
 test('accepts rich editor structures without converting them', () => {
 	const document = { type: 'doc', content: [
@@ -20,6 +20,16 @@ test('accepts rich editor structures without converting them', () => {
 		] }
 	] };
 	assert.equal(validateEditorDocument(document), null);
+});
+
+test('supports poetry, dividers, and dedicated to-do page rules', () => {
+	const rich = { type: 'doc', content: [{ type: 'poetry', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'A line' }] }] }, { type: 'horizontalRule' }] };
+	assert.equal(validateEditorDocument(rich), null);
+	const todo = { type: 'doc', content: [{ type: 'taskList', attrs: { pageControls: true }, content: [{ type: 'taskItem', attrs: { checked: false }, content: [{ type: 'paragraph' }] }] }] };
+	assert.equal(validateEditorDocument(todo), null);
+	assert.equal(validateTodoPageChange(null, todo), null);
+	assert.equal(validateTodoPageChange(todo, { type: 'doc', content: [...todo.content, { type: 'horizontalRule' }] }) !== null, true);
+	assert.equal(validateTodoPageChange(todo, rich) !== null, true);
 });
 
 test('rejects unsupported nodes, attributes, and invalid child structure', () => {

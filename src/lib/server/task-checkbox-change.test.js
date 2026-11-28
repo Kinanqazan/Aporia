@@ -39,3 +39,14 @@ test('ordinary task checkbox changes remain allowed without reordering', () => {
 
 	assert.equal(isTaskCheckboxOnlyChange(previous, next), true);
 });
+
+test('locked toggle changes can be saved alongside checkbox changes', () => {
+	const previous = { type: 'doc', content: [{ type: 'details', attrs: { open: false, level: 1 }, content: [documentWithTasks([task('A', false)]).content[0]] }] };
+	const next = structuredClone(previous);
+	next.content[0].attrs.open = true;
+	assert.equal(isTaskCheckboxOnlyChange(previous, next), true);
+	next.content[0].content[0].content[0].attrs.checked = true;
+	assert.equal(isTaskCheckboxOnlyChange(previous, next), true);
+	next.content[0].attrs.level = 2;
+	assert.equal(isTaskCheckboxOnlyChange(previous, next), false);
+});

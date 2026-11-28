@@ -69,6 +69,29 @@
 	$effect(() => {
 		if (!isSavingStartupPage) startupPageSelection = savedStartupPage();
 	});
+	let isSharePageMenuOpen = $state(false);
+	let isSavingSharePage = $state(false);
+	let sharePageSettingError = $state('');
+
+	async function saveDefaultSharePage(pageId: string) {
+		if (isSavingSharePage) return;
+		isSavingSharePage = true;
+		isSharePageMenuOpen = false;
+		sharePageSettingError = '';
+		try {
+			const response = await fetch('/api/settings', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ key: 'aporia-default-share-page', value: pageId })
+			});
+			if (!response.ok) throw new Error('Failed to save');
+			await invalidateAll();
+		} catch {
+			sharePageSettingError = 'Could not save the sharing page. Please try again.';
+		} finally {
+			isSavingSharePage = false;
+		}
+	}
 	let isEditorTextSizeOpen = $state(false);
 	let isCreatePageMenuOpen = $state(false);
 	let createPageMenuEl = $state<HTMLDivElement | null>(null);
@@ -285,7 +308,7 @@
 				await invalidateAll();
 				activeLinkShare = shared;
 				shareLinkTitle = shared.url ? suggestedSharedLinkTitle(shared) : '';
-				shareTargetPageId = currentPageId || '';
+				shareTargetPageId = data.defaultSharePageId || currentPageId || '';
 				shareTargetError = '';
 			}
 		} catch (error) {
@@ -1572,6 +1595,34 @@
 						</details>
 						{#if startupPageError}<span class="default-page-error" role="alert">{startupPageError}</span>{/if}
 					</form>
+				</div>
+
+
+				<div class="settings-section">
+					<span class="settings-section-title">Sharing</span>
+					<div class="default-page-setting">
+						<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+						<details class="startup-page-select" bind:open={isSharePageMenuOpen} onkeydown={(event) => {
+							if (event.key === 'Escape' && isSharePageMenuOpen) {
+								event.preventDefault();
+								isSharePageMenuOpen = false;
+								event.currentTarget.querySelector('summary')?.focus();
+							}
+						}}>
+							<summary aria-label="Default sharing page" aria-disabled={isSavingSharePage} onclick={(event) => { if (isSavingSharePage) event.preventDefault(); }}>
+								<span>{sharePageOptions.find((option) => option.page.id === data.defaultSharePageId)?.page.title ?? 'Current page'}</span>
+								<ChevronDown size={16} aria-hidden="true" />
+							</summary>
+							<div class="startup-page-options" aria-label="Default sharing page options">
+								<button type="button" aria-pressed={!data.defaultSharePageId} disabled={isSavingSharePage} onclick={() => saveDefaultSharePage('')}>Current page</button>
+								<hr />
+								{#each sharePageOptions as option (option.page.id)}
+									<button type="button" aria-pressed={data.defaultSharePageId === option.page.id} style:padding-left={`${10 + Math.min(option.depth, 5) * 12}px`} disabled={isSavingSharePage} onclick={() => saveDefaultSharePage(option.page.id)}>{option.page.title}</button>
+								{/each}
+							</div>
+						</details>
+						{#if sharePageSettingError}<span class="default-page-error" role="alert">{sharePageSettingError}</span>{/if}
+					</div>
 				</div>
 
 				{#if isNativeAndroidApp}

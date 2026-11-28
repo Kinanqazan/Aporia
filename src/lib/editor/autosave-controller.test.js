@@ -157,6 +157,51 @@ test('queueing the already saved lock snapshot does not send a duplicate request
 	controller.destroy();
 });
 
+test('rapidly reverting to the saved state cancels the pending save', async () => {
+	let requests = 0;
+	const controller = createAutosaveController({
+		debounceMs: 60_000,
+		onStatusChange: () => {},
+		save: async () => { requests += 1; return { success: false, conflict: true }; }
+	});
+	try {
+		controller.markSaved({ pageId: 'page', contentJson: 'closed' });
+		controller.queue({ pageId: 'page', contentJson: 'open' });
+		controller.queue({ pageId: 'page', contentJson: 'closed' });
+		assert.equal(await controller.flush(), true);
+		assert.equal(requests, 0);
+		assert.equal(controller.hasConflict('page'), false);
+	} finally { controller.destroy(); }
+});
+
+test('rapid reversals during a save keep the final state without duplicate requests', async () => {
+	const firstRequest = deferred();
+	/** @type {string[]} */
+	const saves = [];
+	const controller = createAutosaveController({
+		debounceMs: 60_000,
+		onStatusChange: () => {},
+		save: async (payload) => {
+			saves.push(payload.contentJson);
+			if (saves.length === 1) await firstRequest.promise;
+			return true;
+		}
+	});
+	try {
+		controller.markSaved({ pageId: 'page', contentJson: 'closed' });
+		controller.queue({ pageId: 'page', contentJson: 'open' });
+		const flushing = controller.flush();
+		controller.queue({ pageId: 'page', contentJson: 'closed' });
+		controller.queue({ pageId: 'page', contentJson: 'open' });
+		firstRequest.resolve(true);
+		assert.equal(await flushing, true);
+		assert.deepEqual(saves, ['open']);
+		controller.queue({ pageId: 'page', contentJson: 'closed' });
+		assert.equal(await controller.flush(), true);
+		assert.deepEqual(saves, ['open', 'closed']);
+	} finally { controller.destroy(); }
+});
+
 test('a queued edit uses the version returned by the preceding successful save', async () => {
 	/** @type {Array<{ expectedVersion?: string }>} */
 	const requests = [];

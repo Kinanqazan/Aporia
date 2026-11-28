@@ -28,20 +28,25 @@ function otherBlocks(doc: ProseMirrorNode) {
 	return blocks;
 }
 
+export function allowsTodoPageChange(previousDoc: ProseMirrorNode, nextDoc: ProseMirrorNode): boolean {
+	if (todoPageListCount(previousDoc) === 0) return true;
+	if (todoPageListCount(nextDoc) !== 1) return false;
+	const previous = otherBlocks(previousDoc);
+	return otherBlocks(nextDoc).every((node) => {
+		const index = previous.findIndex((old) => old.eq(node));
+		if (index < 0) return false;
+		previous.splice(index, 1);
+		return true;
+	});
+}
+
 // Existing extra blocks can be removed, but cannot be introduced or modified.
 export function createTodoPageGuard() {
 	return new Plugin({
 		key: new PluginKey('todoPageGuard'),
 		filterTransaction(transaction, state) {
 			if (!transaction.docChanged || todoPageListCount(state.doc) === 0) return true;
-			if (todoPageListCount(transaction.doc) !== 1) return false;
-			const previous = otherBlocks(state.doc);
-			return otherBlocks(transaction.doc).every((node) => {
-				const index = previous.findIndex((old) => old.eq(node));
-				if (index < 0) return false;
-				previous.splice(index, 1);
-				return true;
-			});
+			return allowsTodoPageChange(state.doc, transaction.doc);
 		}
 	});
 }

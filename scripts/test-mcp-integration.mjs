@@ -248,6 +248,19 @@ try {
 	assert.equal(listTwo.isError, undefined);
 	await verifyPageControls(client, clientTwo, sessionCookie);
 	await verifyShareTargets(client, sessionCookie);
+	const todoCreated = await client.callTool({ name: 'create_page', arguments: { operationId: 'integration-todo-page', title: 'Tasks', isTodoPage: true } });
+	assert.equal(todoCreated.isError, undefined, JSON.stringify(todoCreated));
+	const todoPage = todoCreated.structuredContent.result.page;
+	const todoRead = await client.callTool({ name: 'read_page', arguments: { id: todoPage.id } });
+	assert.equal(todoRead.structuredContent.result.document.content[0].attrs.pageControls, true);
+	const rejectedBlock = await client.callTool({ name: 'append_page_content', arguments: { id: todoPage.id, expectedVersion: todoPage.version, blocks: [{ type: 'horizontalRule' }] } });
+	assert.equal(rejectedBlock.isError, true);
+	const taskDoc = todoRead.structuredContent.result.document;
+	taskDoc.content[0].content[0].attrs.checked = true;
+	const taskUpdate = await client.callTool({ name: 'update_page', arguments: { id: todoPage.id, expectedVersion: todoPage.version, content: taskDoc } });
+	assert.equal(taskUpdate.isError, undefined, JSON.stringify(taskUpdate));
+	const richPage = await client.callTool({ name: 'create_page', arguments: { operationId: 'integration-poetry-page', title: 'Poetry', content: { type: 'doc', content: [{ type: 'poetry', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'A line' }] }] }, { type: 'horizontalRule' }] } } });
+	assert.equal(richPage.isError, undefined, JSON.stringify(richPage));
 
 	const operationId = 'integration-create-0001';
 	const initialContent = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Created through MCP' }] }] };

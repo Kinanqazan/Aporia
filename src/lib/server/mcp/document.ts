@@ -18,6 +18,7 @@ import { Column } from '../../editor/extensions/Column.ts';
 import { LinkBookmark } from '../../editor/extensions/LinkBookmark.ts';
 import { FileAttachment } from '../../editor/extensions/FileAttachment.ts';
 import { Poetry } from '../../editor/extensions/Poetry.ts';
+import { allowsTodoPageChange, todoPageListCount } from '../../editor/todo-page-guard.ts';
 
 const ToggleHeading = Details.extend({
 	addAttributes() {
@@ -69,6 +70,16 @@ const schema = getSchema([
 const MAX_DOCUMENT_BYTES = 2_000_000;
 const MAX_NODES = 20_000;
 const MAX_DEPTH = 100;
+
+export function validateTodoPageChange(previous: unknown, next: unknown): string | null {
+	const nextDoc = schema.nodeFromJSON(next);
+	if (todoPageListCount(nextDoc) > 1) return 'A to-do page must have only one page-controlled task list';
+	const previousDoc = previous ? schema.nodeFromJSON(previous) : null;
+	const emptyTodo = schema.nodeFromJSON({ type: 'doc', content: [{ type: 'taskList', attrs: { pageControls: true }, content: [{ type: 'taskItem', content: [{ type: 'paragraph' }] }] }] });
+	const baseline = previousDoc && todoPageListCount(previousDoc) ? previousDoc : emptyTodo;
+	if ((previousDoc && todoPageListCount(previousDoc) || todoPageListCount(nextDoc)) && !allowsTodoPageChange(baseline, nextDoc)) return 'To-do pages allow task changes, but cannot add or modify other blocks or remove their task list';
+	return null;
+}
 
 /** Validate without serializing through ProseMirror, which could normalize attributes. */
 export function validateEditorDocument(document: unknown): string | null {

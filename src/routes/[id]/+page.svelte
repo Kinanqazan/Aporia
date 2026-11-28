@@ -41,7 +41,7 @@
 		CloudLightning, Plus, GripVertical, Trash2, Copy,
 		Heading1, Heading2, Heading3, Type, Quote, Code, 
 		List, ListOrdered, Bold, Italic, Link as LinkIcon, Bookmark, Palette, Feather,
-		CheckSquare, Minus, Table as TableIcon, ChevronRight, Lock, Unlock,
+		CheckSquare, Minus, Table as TableIcon, ChevronRight,
 		ChevronDown, ChevronsDownUp, ChevronsUpDown, Database, Image as ImageIcon, Paperclip, X, ZoomIn, ZoomOut, RotateCcw, Undo2
 	} from 'lucide-svelte';
 
@@ -58,7 +58,6 @@
 	import { startUploadActivity, type UploadActivity } from '$lib/editor/upload-activity';
 	import { createLinkPasteHandlers } from '$lib/editor/link-paste';
 	import {
-		restorePersistedDetailsOpenState,
 		synchronizeDetailsElement,
 		synchronizeDetailsNodeView
 	} from '$lib/editor/details-open-state.js';
@@ -124,7 +123,7 @@
 				triggerAutosave(JSON.stringify(contentBeforeLock ?? editor.getJSON()));
 			}
 			// Locking waits for normal edits; unlocking waits for any task-checkbox
-			// save that was allowed while the page was read-only.
+			// or toggle save that was allowed while the page was read-only.
 			const saved = await flushPendingSave();
 			if (!saved) return;
 
@@ -140,7 +139,6 @@
 			isLocked = result.isLocked;
 			autosaveController.markSaved({ pageId: data.pageRecord.id, contentJson: editor ? JSON.stringify(editor.getJSON()) : data.pageRecord.contentJson }, result.version);
 			await invalidateAll();
-			if (!isLocked && editor) restorePersistedDetailsOpenState(editor);
 		} catch (err) {
 			console.error('Lock update failed:', err);
 		} finally {
@@ -189,6 +187,11 @@
 	// Tiptap states
 	let editorElement = $state<HTMLDivElement>();
 	let editor = $state<Editor>();
+	let editorRevision = $state(0);
+	function isFormattingActive(mark: string) {
+		editorRevision;
+		return editor?.isActive(mark) ?? false;
+	}
 	let isFileDropActive = $state(false);
 	let fileDragDepth = 0;
 	let canUndo = $state(false);
@@ -625,7 +628,7 @@
 				};
 				const toggleOpenState = () => {
 					const isOpen = !dom.classList.contains('is-open');
-					if (editor.isEditable && typeof getPos === 'function') {
+					if (!isLockRequestInFlight && typeof getPos === 'function') {
 						const position = getPos();
 						if (typeof position !== 'number') return;
 						const current = editor.state.doc.nodeAt(position);
@@ -635,10 +638,9 @@
 							open: isOpen
 						});
 						editor.view.dispatch(transaction);
+						if (isLocked) triggerAutosave(JSON.stringify(editor.getJSON()), { allowWhenLocked: true });
 						return;
 					}
-					// Locked pages can expand for reading without changing saved content.
-					syncOpenState(isOpen);
 				};
 				const handleLockedSummaryClick = (event: MouseEvent) => {
 					if (editor.isEditable) return;
@@ -654,6 +656,7 @@
 				renderToggleButton(Boolean(node.attrs.open));
 				scheduleOpenStateSync();
 				content.addEventListener('click', handleLockedSummaryClick);
+				toggle.addEventListener('mousedown', (event) => event.preventDefault());
 				toggle.addEventListener('click', (event) => {
 					event.stopPropagation();
 					toggleOpenState();
@@ -1319,6 +1322,7 @@
 	let isGutterVisible = $state(false);
 	let gutterTop = $state(0);
 	let gutterLeft = $state(0);
+	let gutterOnRight = $state(false);
 	let isActionMenuOpen = $state(false);
 	let openUpward = $state(false);
 	let blockMenuMaxHeight = $state(380);
@@ -1518,7 +1522,9 @@
 			}
 
 			if (JSON.stringify(currentJson) !== JSON.stringify(serverJson)) {
-				editor.commands.setContent(serverJson, { emitUpdate: false });
+				// Transactions update reactive editor UI state; those reads must not
+				// become dependencies of this page synchronization effect.
+				untrack(() => editor!.commands.setContent(serverJson, { emitUpdate: false }));
 			}
 			autosaveController.markSaved({ pageId: data.pageRecord.id, contentJson: serverJsonStr }, data.pageRecord.version);
 		}
@@ -1863,6 +1869,7 @@
 			},
 			onSelectionUpdate: handleEditorSelectionUpdate,
 			onTransaction: ({ transaction }) => {
+				editorRevision += 1;
 				if (activeBlockPosition && transaction.docChanged) {
 					const mapped = transaction.mapping.mapResult(activeBlockPosition.pos, 1);
 					activeBlockPosition = mapped.deleted ? null : { ...activeBlockPosition, pos: mapped.pos };
@@ -2095,6 +2102,7 @@
 	});
 
 	onDestroy(() => {
+		stopBlockDragScroll();
 		cancelGutterHide();
 		closeAndroidFormatting();
 		void flushPendingSave({ keepalive: true }).finally(() => {
@@ -2124,6 +2132,23 @@
 			document.body.classList.remove('image-viewer-open');
 		}
 	});
+
+	function getBlockGutterAnchor(block: Element) {
+		const anchor = block.matches('[data-type="details"]')
+			? block.querySelector<HTMLElement>('summary')
+			: block.matches('.task-list-wrapper')
+				? block.querySelector<HTMLElement>('.task-list-header')
+				: null;
+		const directionBlock = anchor ?? (block.matches('p, h1, h2, h3, h4, h5, h6')
+			? block
+			: block.querySelector('p, h1, h2, h3, h4, h5, h6, summary'));
+		const onRight = directionBlock?.classList.contains('arabic-text-block') ?? false;
+		const rect = (anchor ?? block).getBoundingClientRect();
+		const horizontalRect = block.matches('[data-type="poetry"]') && block.parentElement
+			? block.parentElement.getBoundingClientRect()
+			: rect;
+		return { rect, onRight, left: onRight ? horizontalRect.right + 8 : horizontalRect.left - 28 };
+	}
 
 	function handleMouseMove(e: MouseEvent) {
 		if (!editorElement || !editor || isActionMenuOpen) return;
@@ -2255,17 +2280,10 @@
 		// gutter anchor there so moving onto the six dots keeps the nested target.
 		const blockAtGutter = blocksAtY
 			.map(node => {
-				const anchor = node.matches('[data-type="details"]')
-					? node.querySelector<HTMLElement>('summary')
-					: node.matches('.task-list-wrapper')
-					? node.querySelector<HTMLElement>('.task-list-header')
-					: node;
-				const left = node.matches('[data-type="poetry"]') && node.parentElement
-					? node.parentElement.getBoundingClientRect().left
-					: (anchor ?? node).getBoundingClientRect().left;
+				const { left } = getBlockGutterAnchor(node);
 				return {
 					node,
-					distance: Math.abs(e.clientX - (left - 28))
+					distance: Math.abs(e.clientX - left)
 				};
 			})
 			.filter(({ distance }) => distance <= GUTTER_HIT_SLOP)
@@ -2279,19 +2297,10 @@
 				activeBlockPosition = found ? { pos: found.pos, type: found.node.type.name } : null;
 			}
 			activeBlockNode = block;
-			const headerAnchor = block.matches('[data-type="details"]')
-				? block.querySelector<HTMLElement>('summary')
-				: block.matches('.task-list-wrapper')
-				? block.querySelector<HTMLElement>('.task-list-header')
-				: null;
-			const handleAnchorRect = (headerAnchor ?? block).getBoundingClientRect();
-			
-			// Position drag handle beside toggle summary or task list panel header
-			gutterTop = handleAnchorRect.top - editorRect.top + (handleAnchorRect.height / 2) - 12;
-			const handleLeft = block.matches('[data-type="poetry"]') && block.parentElement
-				? block.parentElement.getBoundingClientRect().left
-				: handleAnchorRect.left;
-			gutterLeft = handleLeft - editorRect.left - 28;
+			const { rect, onRight, left } = getBlockGutterAnchor(block);
+			gutterTop = rect.top - editorRect.top + (rect.height / 2) - 12;
+			gutterLeft = left - editorRect.left;
+			gutterOnRight = onRight;
 			isGutterVisible = true;
 		} else {
 			scheduleGutterHide();
@@ -2360,7 +2369,7 @@
 
 	function triggerAutosave(contentJson: string, options: { allowWhenLocked?: boolean } = {}) {
 		// Prevent normal editor transactions from queueing content updates while
-		// locked. The task checkbox handler opts in explicitly above.
+		// locked. Task checkbox and toggle handlers opt in explicitly above.
 		if (isLocked && !options.allowWhenLocked) {
 			return;
 		}
@@ -2455,7 +2464,7 @@
 		return layout?.container[layout.index]?.type === 'columnLayout' ? layoutPath : null;
 	}
 
-	function getDragTargetBlock(e: DragEvent): HTMLElement | null {
+	function getDragTargetBlock(e: DragEvent): { block: HTMLElement; placement: 'before' | 'after' | 'auto' } | null {
 		if (!editorElement) return null;
 		const candidates = Array.from(editorElement.querySelectorAll(
 			'.ProseMirror > *, .ProseMirror [data-type="detailsContent"] > *, .ProseMirror [data-type="column"] > *'
@@ -2463,12 +2472,26 @@
 			if (!(node instanceof HTMLElement)) return false;
 			return !node.matches('[data-type="columnLayout"], [data-type="column"], [data-type="detailsContent"], [data-type="detailsSummary"]');
 		});
+		// Give block boundaries a usable drop area, including the margins between
+		// blocks. Check these before an enclosing toggle's interior.
+		const boundary = candidates.flatMap(block => {
+			const rect = block.getBoundingClientRect();
+			if (e.clientX < rect.left || e.clientX > rect.right) return [];
+			return [
+				{ block, placement: 'before' as const, distance: Math.abs(e.clientY - rect.top), outside: e.clientY < rect.top },
+				{ block, placement: 'after' as const, distance: Math.abs(e.clientY - rect.bottom), outside: e.clientY > rect.bottom }
+			];
+		}).filter(edge => edge.distance <= (edge.outside ? 20 : 8))
+			.sort((a, b) => a.distance - b.distance)[0];
+		if (boundary) return { block: boundary.block, placement: boundary.placement };
+
 		const atPointer = candidates.filter(node => {
 			const rect = node.getBoundingClientRect();
 			return e.clientY >= rect.top && e.clientY <= rect.bottom &&
 				e.clientX >= rect.left && e.clientX <= rect.right;
 		});
-		return atPointer.find(node => node.parentElement?.matches('[data-type="detailsContent"]')) ?? atPointer[0] ?? null;
+		const block = atPointer.find(node => node.parentElement?.matches('[data-type="detailsContent"]')) ?? atPointer[0];
+		return block ? { block, placement: 'auto' } : null;
 	}
 
 	function deleteActiveBlock() {
@@ -2711,6 +2734,7 @@
 	}
 
 	function handleDragEnd() {
+		stopBlockDragScroll();
 		draggedBlockIndex = null;
 		draggedBlockPath = null;
 		fileDragDepth = 0;
@@ -2765,15 +2789,63 @@
 	/** Edge detection threshold in px — how close to left/right edge triggers column mode */
 	const COLUMN_EDGE_THRESHOLD = 80;
 	const MAX_COLUMNS = 5;
+	const DRAG_SCROLL_EDGE = 80;
+	const DRAG_SCROLL_MAX_SPEED = 18;
+	let dragScrollFrame: number | null = null;
+	let dragScrollY = 0;
+
+	function stopBlockDragScroll() {
+		if (dragScrollFrame !== null) cancelAnimationFrame(dragScrollFrame);
+		dragScrollFrame = null;
+	}
+
+	function updateBlockDragScroll(clientY: number) {
+		dragScrollY = clientY;
+		if (dragScrollFrame !== null) return;
+		const container = editorElement?.closest<HTMLElement>('.canvas-wrapper');
+		if (!container) return;
+
+		const scroll = () => {
+			const rect = container.getBoundingClientRect();
+			const top = Math.max(0, rect.top);
+			const bottom = Math.min(window.innerHeight, rect.bottom);
+			const edge = Math.min(DRAG_SCROLL_EDGE, (bottom - top) / 2);
+			let speed = 0;
+			if (edge > 0 && dragScrollY < top + edge) {
+				speed = -DRAG_SCROLL_MAX_SPEED * Math.min(1, (top + edge - dragScrollY) / edge);
+			} else if (edge > 0 && dragScrollY > bottom - edge) {
+				speed = DRAG_SCROLL_MAX_SPEED * Math.min(1, (dragScrollY - bottom + edge) / edge);
+			}
+			if (speed === 0) {
+				dragScrollFrame = null;
+				return;
+			}
+			container.scrollTop += speed;
+			dragScrollFrame = requestAnimationFrame(scroll);
+		};
+		dragScrollFrame = requestAnimationFrame(scroll);
+	}
+
+	function blockDropLineY(block: HTMLElement, placement: 'before' | 'after') {
+		const rect = block.getBoundingClientRect();
+		const neighbor = placement === 'before' ? block.previousElementSibling : block.nextElementSibling;
+		const edge = placement === 'before' ? rect.top : rect.bottom;
+		if (!neighbor) return edge;
+		const neighborRect = neighbor.getBoundingClientRect();
+		const neighborEdge = placement === 'before' ? neighborRect.bottom : neighborRect.top;
+		return (edge + neighborEdge) / 2;
+	}
 
 	function handleDragOver(e: DragEvent) {
 		if (draggedBlockIndex === null || !editorElement) return;
 		e.preventDefault();
 		e.stopPropagation();
+		updateBlockDragScroll(e.clientY);
 
 		const editorRect = editorElement.getBoundingClientRect();
 
-		const targetBlock = getDragTargetBlock(e);
+		const target = getDragTargetBlock(e);
+		const targetBlock = target?.block;
 		
 		if (!targetBlock) { 
 			clearToggleDropTarget();
@@ -2785,7 +2857,7 @@
 		}
 
 		// Expand details toggle on hover
-		if (targetBlock.matches('[data-type="details"]')) {
+		if (targetBlock.matches('[data-type="details"]') && target.placement === 'auto') {
 			if (lastDragTargetDetails !== targetBlock) {
 				clearTimeout(dragExpandTimeout);
 				lastDragTargetDetails = targetBlock;
@@ -2812,7 +2884,7 @@
 
 		// Dropping directly on a toggle heading means "put this block inside".
 		// The normal above/below line here makes it too easy to create a sibling.
-		if (targetBlock.matches('[data-type="details"]')) {
+		if (targetBlock.matches('[data-type="details"]') && target.placement === 'auto') {
 			clearToggleDropTarget();
 			dropTargetToggle = targetBlock;
 			dropTargetToggle.classList.add('drag-drop-inside');
@@ -2823,6 +2895,12 @@
 		}
 		clearToggleDropTarget();
 		const rect = targetBlock.getBoundingClientRect();
+		if (target.placement !== 'auto') {
+			dropMode = 'vertical';
+			dropLineVertical = null;
+			dropLineTop = blockDropLineY(targetBlock, target.placement) - editorRect.top;
+			return;
+		}
 		const relativeX = e.clientX - rect.left;
 		const relativeY = e.clientY - rect.top;
 
@@ -2860,9 +2938,9 @@
 		dropMode = 'vertical';
 		dropLineVertical = null;
 		if (relativeY < rect.height / 2) {
-			dropLineTop = rect.top - editorRect.top;
+			dropLineTop = blockDropLineY(targetBlock, 'before') - editorRect.top;
 		} else {
-			dropLineTop = rect.bottom - editorRect.top;
+			dropLineTop = blockDropLineY(targetBlock, 'after') - editorRect.top;
 		}
 	}
 
@@ -2904,7 +2982,8 @@
 		e.preventDefault();
 		e.stopPropagation();
 
-		const targetBlock = getDragTargetBlock(e);
+		const target = getDragTargetBlock(e);
+		const targetBlock = target?.block;
 
 		if (!targetBlock) { handleDragEnd(); return; }
 		const targetPath = getBlockPathForElement(targetBlock);
@@ -2964,7 +3043,7 @@
 			if (!targetLocation) { handleDragEnd(); return; }
 			const targetNode = targetLocation.container[targetLocation.index];
 
-			if (targetNode?.type === 'details') {
+			if (targetNode?.type === 'details' && target.placement === 'auto') {
 				const detailsContent = targetNode.content?.find((node: any) => node.type === 'detailsContent');
 				if (!detailsContent) { handleDragEnd(); return; }
 				detailsContent.content ??= [];
@@ -2973,7 +3052,7 @@
 			} else {
 				const rect = targetBlock.getBoundingClientRect();
 				const relativeY = e.clientY - rect.top;
-				const isInsertBefore = relativeY < rect.height / 2;
+				const isInsertBefore = target.placement === 'before' || (target.placement === 'auto' && relativeY < rect.height / 2);
 				const insertIndex = targetLocation.index + (isInsertBefore ? 0 : 1);
 				targetLocation.container.splice(insertIndex, 0, draggedBlock);
 			}
@@ -3041,13 +3120,19 @@
 			<button
 				type="button"
 				class="page-lock-btn"
+				class:locked={isLocked}
 				disabled={isLockRequestInFlight}
 				onclick={togglePageLock}
 				title={`${isLocked ? 'Unlock page' : 'Lock page'} (Shift+L)`}
 				aria-label={isLocked ? 'Unlock page' : 'Lock page'}
+				aria-pressed={isLocked}
 				aria-keyshortcuts="Shift+L"
 			>
-				{#if isLocked}<Lock size={isMobile ? 26 : 22} />{:else}<Unlock size={isMobile ? 26 : 22} />{/if}
+				<svg width={isMobile ? 26 : 22} height={isMobile ? 26 : 22} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+					<path d={isLocked ? 'M7 10V7a5 5 0 0 1 10 0v3' : 'M7 10V6a5 5 0 0 1 10 0'} stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+					<rect x="4" y="10" width="16" height="12" rx="2" fill={isLocked ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="2" />
+					<path d="M12 14v3" stroke={isLocked ? 'var(--bg-sidebar)' : 'currentColor'} stroke-width="2" stroke-linecap="round" />
+				</svg>
 			</button>
 		</div>
 	</div>
@@ -3235,7 +3320,7 @@
 
 				<!-- Floating Block Action Options Dropdown -->
 				{#if isActionMenuOpen}
-					<div class="block-action-menu" class:open-upward={openUpward} style={`--block-menu-max-height: ${blockMenuMaxHeight}px`}>
+					<div class="block-action-menu" class:open-upward={openUpward} class:on-right={gutterOnRight} style={`--block-menu-max-height: ${blockMenuMaxHeight}px`}>
 						<input
 							bind:this={blockTypeSearchInput}
 							class="menu-search-input"
@@ -3455,7 +3540,7 @@
 				<button
 					type="button"
 					class="bubble-btn"
-					class:active={editor!.isActive('bold')}
+					class:active={isFormattingActive('bold')}
 					onmousedown={(e) => e.preventDefault()}
 					onclick={() => editor!.chain().focus().toggleBold().run()}
 					title="Bold"
@@ -3465,7 +3550,7 @@
 				<button
 					type="button"
 					class="bubble-btn"
-					class:active={editor!.isActive('italic')}
+					class:active={isFormattingActive('italic')}
 					onmousedown={(e) => e.preventDefault()}
 					onclick={() => editor!.chain().focus().toggleItalic().run()}
 					title="Italic"
@@ -3475,7 +3560,7 @@
 				<button
 					type="button"
 					class="bubble-btn"
-					class:active={editor!.isActive('strike')}
+					class:active={isFormattingActive('strike')}
 					onmousedown={(e) => e.preventDefault()}
 					onclick={() => editor!.chain().focus().toggleStrike().run()}
 					title="Strikethrough"
@@ -3543,7 +3628,7 @@
 				<button
 					type="button"
 					class="bubble-btn"
-					class:active={editor!.isActive('code')}
+					class:active={isFormattingActive('code')}
 					onmousedown={(e) => e.preventDefault()}
 					onclick={() => editor!.chain().focus().toggleCode().run()}
 					title="Inline Code"
@@ -3553,7 +3638,7 @@
 				<button
 					type="button"
 					class="bubble-btn"
-					class:active={editor.isActive('link')}
+					class:active={isFormattingActive('link')}
 					onmousedown={(e) => e.preventDefault()}
 					onclick={setLink}
 					title="Link"
@@ -3871,6 +3956,11 @@
 		display: none;
 	}
 
+	.block-action-menu.on-right {
+		left: auto;
+		right: 20px;
+	}
+
 	.block-action-menu.open-upward {
 		top: auto;
 		bottom: 24px;
@@ -4048,8 +4138,9 @@
 	}
 
 	.autosave-indicator.status-saving {
-		color: var(--accent-color);
-		border-color: var(--accent-color);
+		color: color-mix(in srgb, #829bb0 75%, var(--text-muted));
+		border-color: transparent;
+		background: transparent;
 	}
 
 	.autosave-indicator.status-error {
@@ -4137,6 +4228,10 @@
 	:global(.mobile) .page-lock-btn:hover:not(:disabled),
 	:global(.mobile) .page-undo-btn:hover:not(:disabled) {
 		background-color: var(--hover-icon);
+	}
+
+	:global(.app-container) .page-lock-btn.locked {
+		color: color-mix(in srgb, var(--text-main) 72%, var(--bg-sidebar));
 	}
 
 	.page-header-row {
